@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nodera Phase 4 demo — first functional editor</title>
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+      #toolbar {
+        padding: 8px;
+        border-bottom: 1px solid #ddd;
+        font-family: system-ui, sans-serif;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      #canvas {
+        width: 100%;
+        height: calc(100% - 49px);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
