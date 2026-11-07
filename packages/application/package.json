@@ -17,6 +17,8 @@
     "@nodera/domain": "workspace:*",
     "@nodera/graph-model": "workspace:*",
     "@nodera/history": "workspace:*",
+    "@nodera/node-registry": "workspace:*",
+    "@nodera/edge-registry": "workspace:*",
     "@nodera/serialization-json": "workspace:*",
     "@nodera/serialization-yaml": "workspace:*",
     "@nodera/validation": "workspace:*"
