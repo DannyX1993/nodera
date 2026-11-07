@@ -22,11 +22,11 @@ export interface ValidationIssue {
   /** Human-readable explanation. Not for programmatic decisions. */
   readonly message: string;
   /** Identifier of the element the issue refers to, when applicable. */
-  readonly elementId?: ElementId;
+  readonly elementId?: ElementId | undefined;
   /** Path of the property the issue refers to, when applicable. */
-  readonly propertyPath?: PropertyPath;
+  readonly propertyPath?: PropertyPath | undefined;
   /** Additional structured context for the issue. */
-  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly metadata?: Readonly<Record<string, unknown>> | undefined;
 }
 
 /** Builds a {@link ValidationIssue}, omitting absent optional context. */
