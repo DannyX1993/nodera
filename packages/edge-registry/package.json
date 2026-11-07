@@ -2,5 +2,21 @@
   "name": "@nodera/edge-registry",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/edge-registry"
+  "type": "module",
+  "description": "Edge definitions (visual presentation separated from relation semantics) and the EdgeRegistry.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/contracts": "workspace:*",
+    "@nodera/graph-model": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }
