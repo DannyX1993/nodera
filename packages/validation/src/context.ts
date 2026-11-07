@@ -5,7 +5,7 @@ import type { NodeRegistry, NodeDefinition } from "@nodera/node-registry";
 import type { ValidatorRegistry } from "./validator-registry.js";
 
 /** Validation levels defined by the architecture. */
-export type ValidationLevel = "structural" | "domain" | "extension";
+export type ValidationLevel = "structural" | "domain" | "document" | "extension";
 
 /** Everything a validator may inspect. Read-only by contract. */
 export interface ValidationContext {
