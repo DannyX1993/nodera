@@ -8,8 +8,9 @@
  */
 
 import { Graph } from "@nodera/graph-model";
-import { createGraphId, type GraphId } from "@nodera/contracts";
+import { createEdgeId, createGraphId, createNodeId, type GraphId } from "@nodera/contracts";
 import { NoderaDomain } from "@nodera/domain";
+import type { Edge, Node } from "@nodera/graph-model";
 import { HistoryEngine, type ReversibleCommand } from "@nodera/history";
 import { EventBus } from "./events.js";
 
@@ -66,6 +67,25 @@ export class EditorEngine {
   /** Low-level selection storage primitive; selection use cases build on it. */
   selectNode(nodeId: string): void {
     this.state.selectedNodes.add(nodeId);
+  }
+
+  /** Node instance by id, if present. */
+  getNode(id: string): Node | undefined {
+    return this.state.graph.getNode(createNodeId(id));
+  }
+
+  /** Edge instance by id, if present. */
+  getEdge(id: string): Edge | undefined {
+    return this.state.graph.getEdge(createEdgeId(id));
+  }
+
+  /** Replaces the current graph and clears selection (internal; graph use cases). */
+  replaceGraph(graph: Graph): void {
+    (
+      this.state as { graph: Graph }
+    ).graph = graph;
+    this.state.selectedNodes.clear();
+    this.state.selectedEdges.clear();
   }
 
   /** The portable graph being edited. */
