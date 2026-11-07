@@ -2,7 +2,6 @@ import "@xyflow/react/dist/style.css";
 
 import { EditorEngine, addNode } from "@nodera/application";
 import type { NodeDefinition } from "@nodera/node-registry";
-import { NodeRendererRegistry, EdgeRendererRegistry } from "@nodera/canvas-react-flow";
 import { DemoApp } from "./demo.js";
 
 const httpNode: NodeDefinition = {
@@ -23,6 +22,8 @@ const transformNode: NodeDefinition = {
   name: "Transform",
   version: "1.0.0",
   category: "data",
+  // Custom renderer resolved through the NodeRendererRegistry.
+  renderer: "transform-card",
   ports: [
     { id: "in", name: "In", direction: "input" },
     { id: "out", name: "Out", direction: "output" },
@@ -38,9 +39,6 @@ editor.domain.nodes.register(transformNode);
 // Seed the graph through the application core, never through visual state.
 addNode(editor, { definitionId: "http.request", nodeId: "http-1", properties: [], position: { x: 120, y: 120 } });
 addNode(editor, { definitionId: "script.transform", nodeId: "transform-1", properties: [], position: { x: 480, y: 260 } });
-
-const nodeRenderers = new NodeRendererRegistry();
-const edgeRenderers = new EdgeRendererRegistry();
 
 const root = document.getElementById("root");
 if (!root) {
@@ -68,8 +66,6 @@ const { createElement } = await import("react");
 createRoot(root).render(
   createElement(DemoApp, {
     editor,
-    nodeRenderers,
-    edgeRenderers,
     onAddHttp: () => onAddClick("http.request"),
     onAddTransform: () => onAddClick("script.transform"),
   }),

@@ -1,64 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
-import { ReactFlowProvider } from "@xyflow/react";
-
+import { render, cleanup } from "@testing-library/react";
+import type { FC } from "react";
+import { createElement } from "react";
 import { EditorEngine } from "@nodera/application";
-import type { NodeDefinition } from "@nodera/node-registry";
 
-import { NoderaCanvasProvider } from "./nodera-canvas-provider.js";
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
-function buildEngine(): EditorEngine {
-  const engine = new EditorEngine();
-  const def: NodeDefinition = {
-    id: "test.app-node",
-    name: "Test Node",
-    category: "test",
-    version: "1.0.0",
-    ports: [],
-    properties: [],
-  };
-  engine.domain.nodes.register(def);
-  return engine;
-}
-
-/* ------------------------------------------------------------------ */
-/*  NoderaCanvasProvider tests                                         */
-/* ------------------------------------------------------------------ */
+import { NoderaCanvasProvider, useNoderaCanvas } from "./nodera-canvas-provider.js";
 
 describe("NoderaCanvasProvider", () => {
-  it("renders children inside ReactFlowProvider", () => {
-    const engine = buildEngine();
-    const { container } = render(
-      <NoderaCanvasProvider editor={engine}>
-        <div data-testid="child">Hello</div>
-      </NoderaCanvasProvider>
+  it("provides the editor engine to consumers", () => {
+    const engine = new EditorEngine({ graphId: "g" });
+    let seen: EditorEngine | undefined;
+    const Probe: FC = () => {
+      const ctx = useNoderaCanvas();
+      seen = ctx.editor;
+      return null;
+    };
+    render(
+      createElement(NoderaCanvasProvider, {
+        editor: engine,
+        children: createElement(Probe),
+      }),
     );
-
-    expect(container.querySelector('[data-testid="child"]')).toBeTruthy();
+    expect(seen).toBe(engine);
+    cleanup();
   });
 
-  it("provides the editor in context", () => {
-    const engine = buildEngine();
-    let receivedEditor: EditorEngine | undefined;
-
-    function ChildComponent() {
-      receivedEditor = (window as any).__noderaEditor;
-      return <div />;
-    }
-
-    // We can't directly access context, but we can verify the provider
-    // wraps children correctly by checking the React tree.
-    render(
-      <NoderaCanvasProvider editor={engine}>
-        <ChildComponent />
-      </NoderaCanvasProvider>
-    );
-
-    // Provider renders without error — context is available.
-    expect(true).toBe(true);
+  it("throws when useNoderaCanvas is used outside the provider", () => {
+    const Probe: FC = () => {
+      useNoderaCanvas();
+      return null;
+    };
+    // React logs error-boundary noise to console; the render call itself throws.
+    expect(() => render(createElement(Probe))).toThrow(/NoderaCanvasProvider/);
+    cleanup();
   });
 });

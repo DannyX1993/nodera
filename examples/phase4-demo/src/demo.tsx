@@ -1,29 +1,49 @@
 import { useState } from "react";
 import type { FC } from "react";
+import { createElement } from "react";
 import type { EditorEngine } from "@nodera/application";
-import type { NodeRendererRegistry, EdgeRendererRegistry } from "@nodera/canvas-react-flow";
-import { GraphCanvas } from "@nodera/canvas-react-flow";
+import {
+  NodeRendererRegistry,
+  GraphCanvas,
+  type NoderaNodeRendererProps,
+} from "@nodera/canvas-react-flow";
 
 export interface DemoAppProps {
   readonly editor: EditorEngine;
-  readonly nodeRenderers: NodeRendererRegistry;
-  readonly edgeRenderers: EdgeRendererRegistry;
   readonly onAddHttp: () => void;
   readonly onAddTransform: () => void;
 }
+
+/**
+ * A custom node renderer for the transform definition. The canvas wrapper
+ * still renders the port handles; the custom body just draws a richer card.
+ */
+function TransformCard({ data, selected }: NoderaNodeRendererProps) {
+  return createElement(
+    "div",
+    {
+      className: `nodera-node ${selected ? "nodera-node-selected" : ""}`,
+      style: {
+        background: data.visual?.color,
+        color: "white",
+        borderRadius: 6,
+        padding: "8px 12px",
+        fontWeight: 600,
+      },
+    },
+    `${data.visual?.icon ?? ""} ${data.label} (custom)`,
+  );
+}
+
+// Register the custom renderer under the definition's renderer id.
+nodeRenderers.register("transform-card", TransformCard);
 
 /**
  * The host composes the canvas; the editor engine stays the single source
  * of truth. Nodes added by the toolbar appear on the canvas purely through
  * the engine's event bus.
  */
-export const DemoApp: FC<DemoAppProps> = ({
-  editor,
-  nodeRenderers,
-  edgeRenderers,
-  onAddHttp,
-  onAddTransform,
-}) => {
+export const DemoApp: FC<DemoAppProps> = ({ editor, onAddHttp, onAddTransform }) => {
   const [colorMode, setColorMode] = useState<"light" | "dark">("light");
 
   return (

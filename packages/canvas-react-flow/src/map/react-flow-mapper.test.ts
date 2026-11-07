@@ -597,3 +597,39 @@ describe("removedIdsFromReactFlowChanges", () => {
     expect(removedIdsFromReactFlowChanges([])).toHaveLength(0);
   });
 });
+describe("T8 audit fixes", () => {
+  it("carries the definition renderer id in node data (rendererId)", () => {
+    const node = buildNode("node-1", "node-def", []);
+    const graph = buildGraph([node], []);
+    const result = toReactFlowNodes(graph, () => mockNodeDefinition({ renderer: "my-custom-node" }));
+    const data = result[0]!.data as Record<string, unknown>;
+    expect(data["rendererId"]).toBe("my-custom-node");
+  });
+
+  it("omits rendererId when the definition has none", () => {
+    const node = buildNode("node-1", "node-def", []);
+    const graph = buildGraph([node], []);
+    const result = toReactFlowNodes(graph, () => mockNodeDefinition({}));
+    expect((result[0]!.data as Record<string, unknown>)["rendererId"]).toBeUndefined();
+  });
+
+  it("maps edge lineStyle dashed to strokeDasharray", () => {
+    const node1 = buildNode("n1", "d", [buildPortInstance("p1", "output")]);
+    const node2 = buildNode("n2", "d", [buildPortInstance("p2", "input")]);
+    const edge = makeEdge("e1", "n1", "p1", "n2", "p2", "edge-def");
+    const graph = buildGraph([node1, node2], [edge]);
+    const def = mockEdgeDefinition({ visual: { lineStyle: "dashed" } });
+    const result = toReactFlowEdges(graph, () => def);
+    expect((result[0]!.style as Record<string, unknown>)["strokeDasharray"]).toBe("6 6");
+  });
+
+  it("maps edge lineStyle dotted to strokeDasharray", () => {
+    const node1 = buildNode("n1", "d", [buildPortInstance("p1", "output")]);
+    const node2 = buildNode("n2", "d", [buildPortInstance("p2", "input")]);
+    const edge = makeEdge("e1", "n1", "p1", "n2", "p2", "edge-def");
+    const graph = buildGraph([node1, node2], [edge]);
+    const def = mockEdgeDefinition({ visual: { lineStyle: "dotted" } });
+    const result = toReactFlowEdges(graph, () => def);
+    expect((result[0]!.style as Record<string, unknown>)["strokeDasharray"]).toBe("2 4");
+  });
+});

@@ -23,9 +23,9 @@ export interface NoderaCanvasContextValue {
   readonly editor: EditorEngine;
 }
 
-export const NoderaCanvasContext = createContext<NoderaCanvasContextValue>({
-  editor: undefined as any,
-});
+export const NoderaCanvasContext = createContext<NoderaCanvasContextValue | undefined>(
+  undefined,
+);
 
 /* ------------------------------------------------------------------ */
 /*  NoderaCanvasProvider                                               */
@@ -68,7 +68,7 @@ export function useNoderaCanvas(): NoderaCanvasContextValue {
   const value = useContext(NoderaCanvasContext);
   if (value === undefined) {
     throw new Error(
-      "useNoderaCanvas must be used within a NoderaCanvasProvider",
+      "useNoderaCanvas must be used inside a <NoderaCanvasProvider>",
     );
   }
   return value;

@@ -34,6 +34,7 @@ import {
   removeEdge,
   selectNode,
   selectEdge,
+  selectMultiple,
   validateConnection as validateConnectionUseCase,
 } from "@nodera/application";
 
@@ -71,6 +72,21 @@ export function commitDraggedNodes(
     );
     moveNode(editor, { nodeId, position });
   }
+}
+
+/**
+ * Sync a React Flow selection change into the engine through
+ * `selectMultiple` (which also selects/deselects edges). Needed because
+ * RF box/multi selection does not flow through node/edge click handlers.
+ */
+export function commitSelectionFromReactFlow(
+  editor: EditorEngine,
+  selection: { readonly nodes: ReadonlyArray<{ readonly id: string }>; readonly edges: ReadonlyArray<{ readonly id: string }> },
+): void {
+  selectMultiple(editor, {
+    nodeIds: selection.nodes.map((n) => n.id),
+    edgeIds: selection.edges.map((e) => e.id),
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -285,6 +301,17 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, refresh]);
 
+  // Box/multi selection (selectionKeyCode drag, meta-click) → engine.
+  // Replaces the whole engine selection with RF's current one.
+  const handleSelectionChange = useCallback(
+    ({ nodes: selected, edges: selectedEdges }: { nodes: RfNode[]; edges: RfEdge[] }) => {
+      commitSelectionFromReactFlow(editor, { nodes: selected, edges: selectedEdges });
+      refresh();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editor, refresh],
+  );
+
   // Minimap node color follows the definition visual hint when present.
   const minimapNodeColor = useCallback((node: RfNode): string => {
     const visual = (node.data as unknown as NoderaNodeData | undefined)?.visual;
@@ -311,6 +338,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         onNodeClick={handleNodeClick}
         onEdgeClick={handleEdgeClick}
         onPaneClick={handlePaneClick}
+        onSelectionChange={handleSelectionChange}
         colorMode={colorMode}
         fitView
         nodesDraggable

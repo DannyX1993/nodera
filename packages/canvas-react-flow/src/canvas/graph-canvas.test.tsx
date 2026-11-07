@@ -11,9 +11,10 @@ import {
   removeNode,
 } from "@nodera/application";
 import type { NodeDefinition } from "@nodera/node-registry";
+import { NodeRendererRegistry } from "../registries/renderer-registries.js";
 import { createNodeId } from "@nodera/contracts";
 
-import { GraphCanvas, commitDraggedNodes } from "./graph-canvas.js";
+import { GraphCanvas, commitDraggedNodes, commitSelectionFromReactFlow } from "./graph-canvas.js";
 import type { GraphCanvasProps } from "./graph-canvas.js";
 
 /* ------------------------------------------------------------------ */
@@ -161,5 +162,60 @@ describe("GraphCanvas", () => {
     // 2 nodes x 2 ports each.
     expect(handles.length).toBe(4);
     cleanup();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  T8 audit fixes                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("GraphCanvas audit fixes", () => {
+  it("renders a registered custom node renderer through the canvas", () => {
+    const engine = makeEngine();
+    // Definition declares renderer id "custom-x" (the mapper carries it in data).
+    const customDef = {
+      ...def,
+      id: "test.app-node",
+      renderer: "custom-x",
+    } as unknown as NodeDefinition;
+    engine.domain.nodes.unregister("test.app-node");
+    engine.domain.nodes.register(customDef);
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+
+    const nodeRenderers = new NodeRendererRegistry();
+    nodeRenderers.register("custom-x", (({ data }: { data: { label: string } }) =>
+      createElement("div", { "data-testid": "custom-marker" }, data.label)) as never);
+
+    renderCanvas(engine, { nodeRenderers });
+    expect(screen.getByTestId("custom-marker")).toBeDefined();
+    cleanup();
+  });
+
+  it("commitSelectionFromReactFlow syncs RF selection into the engine", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1" });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n2" });
+    const created = createEdge(engine, { source: { nodeId: "n1", portId: "out-1" }, target: { nodeId: "n2", portId: "in-1" } });
+    if (!created.ok) throw new Error("edge failed");
+    const edgeId = String(created.value.id);
+
+    commitSelectionFromReactFlow(engine, {
+      nodes: [{ id: "n1" }, { id: "n2" }],
+      edges: [{ id: edgeId }],
+    });
+
+    expect(engine.getSelectedNodes()).toEqual(["n1", "n2"]);
+    expect(engine.getSelectedEdges()).toEqual([edgeId]);
+  });
+
+  it("commitSelectionFromReactFlow clears the engine selection when RF selects nothing", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1" });
+    selectNode(engine, { nodeId: "n1" });
+    expect(engine.getSelectedNodes()).toEqual(["n1"]);
+
+    commitSelectionFromReactFlow(engine, { nodes: [], edges: [] });
+
+    expect(engine.getSelectedNodes()).toEqual([]);
   });
 });

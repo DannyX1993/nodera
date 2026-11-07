@@ -133,6 +133,9 @@ const toReactFlowNode = (
     ports: mergedPorts,
     properties: node.getProperties(),
   };
+  if (nodeDefinition?.renderer !== undefined) {
+    data["rendererId"] = nodeDefinition.renderer;
+  }
   if (nodeDefinition?.visual !== undefined) {
     (data as Record<string, NodeDataValue>).visual = nodeDefinition.visual;
   }
@@ -193,9 +196,15 @@ export const toReactFlowEdges = (
         rfEdge.animated = true;
       }
 
+      // LineStyle → strokeDasharray (solid leaves it unset).
+      if (visual.lineStyle === "dashed" || visual.lineStyle === "dotted") {
+        const dash = visual.lineStyle === "dashed" ? "6 6" : "2 4";
+        rfEdge.style = { ...rfEdge.style, strokeDasharray: dash };
+      }
+
       // Color → stroke style.
       if (visual.color) {
-        rfEdge.style = { stroke: visual.color };
+        rfEdge.style = { ...rfEdge.style, stroke: visual.color };
       }
 
       // Arrows → markers.
