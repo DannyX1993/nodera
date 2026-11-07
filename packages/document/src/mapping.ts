@@ -26,6 +26,33 @@ export const DEFAULT_FORMAT_VERSION = "1.0.0";
 export interface GraphToDocumentOptions {
   /** Document format version to stamp; defaults to {@link DEFAULT_FORMAT_VERSION}. */
   readonly formatVersion?: string;
+  /**
+   * Document-level data the domain cannot represent, captured from the
+   * source document with {@link extractCarriedDocumentData} and re-emitted
+   * so the graph boundary stays lossless.
+   */
+  readonly carried?: CarriedDocumentData;
+}
+
+/**
+ * Document-level data the {@link Graph} domain cannot represent: extension
+ * references, groups and the original format version. The host captures it
+ * before import and hands it back on export to round-trip documents without
+ * losing what the domain does not model.
+ */
+export interface CarriedDocumentData {
+  readonly formatVersion: string;
+  readonly extensions: GraphDocument["extensions"];
+  readonly groups: NonNullable<GraphDocument["graph"]["groups"]>;
+}
+
+/** Captures the carried (unmodeled) parts of a normalized document. */
+export function extractCarriedDocumentData(document: GraphDocument): CarriedDocumentData {
+  return {
+    formatVersion: document.version,
+    extensions: [...document.extensions],
+    groups: [...(document.graph.groups ?? [])],
+  };
 }
 
 /** Issues found while mapping between graphs and documents. */
@@ -62,13 +89,13 @@ export function graphToDocument(graph: Graph, options: GraphToDocumentOptions = 
   const metadata = graphToDocumentMetadata(graph);
   return {
     format: GGD_FORMAT,
-    version: options.formatVersion ?? DEFAULT_FORMAT_VERSION,
+    version: options.formatVersion ?? options.carried?.formatVersion ?? DEFAULT_FORMAT_VERSION,
     metadata,
-    extensions: [],
+    extensions: options.carried ? [...options.carried.extensions] : [],
     graph: {
       nodes: graph.getNodes().map(nodeToDocumentNode),
       edges: graph.getEdges().map(edgeToDocumentEdge),
-      groups: [],
+      groups: options.carried ? [...options.carried.groups] : [],
       settings: { ...graph.settings },
     },
   };
