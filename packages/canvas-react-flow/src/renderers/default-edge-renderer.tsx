@@ -2,8 +2,8 @@ import type { BaseEdge as BaseEdgeType } from "@xyflow/react";
 import { BaseEdge, EdgeLabelRenderer } from "@xyflow/react";
 import type { FC } from "react";
 
-import { defaultEdgeOptionsFromVisual } from "./edge-options";
-import type { EdgeOptions } from "./edge-options";
+import { defaultEdgeOptionsFromVisual } from "./edge-options.js";
+import type { EdgeOptions } from "./edge-options.js";
 
 /* ------------------------------------------------------------------ */
 /*  DefaultEdgeRenderer                                                */
@@ -57,4 +57,4 @@ export const DefaultEdgeRenderer: FC<DefaultEdgeRendererProps> = ({
 /*  Re-export for consumers                                            */
 /* ------------------------------------------------------------------ */
 
-export { defaultEdgeOptionsFromVisual, type EdgeOptions } from "./edge-options";
+export { defaultEdgeOptionsFromVisual, type EdgeOptions } from "./edge-options.js";

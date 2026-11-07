@@ -4,7 +4,7 @@ import { cleanup, render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { FC } from "react";
 
-import { PortHandle } from "./port-renderer";
+import { PortHandle } from "./port-renderer.js";
 
 /* ------------------------------------------------------------------ */
 /*  Test harness: minimal provider chain for Handle                    */

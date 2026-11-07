@@ -1,6 +1,6 @@
 import { Handle, Position } from "@xyflow/react";
 
-import type { NoderaNodeData } from "./node-renderer-props";
+import type { NoderaNodeData } from "./node-renderer-props.js";
 
 /* ------------------------------------------------------------------ */
 /*  PortHandle                                                         */

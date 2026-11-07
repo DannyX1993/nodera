@@ -1,7 +1,7 @@
 import type { FC } from "react";
 
-import { PortHandle } from "./port-renderer";
-import type { NoderaNodeData, NoderaNodeRendererProps } from "./node-renderer-props";
+import { PortHandle } from "./port-renderer.js";
+import type { NoderaNodeData, NoderaNodeRendererProps } from "./node-renderer-props.js";
 
 /* ------------------------------------------------------------------ */
 /*  DefaultNodeRenderer                                                */

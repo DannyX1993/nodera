@@ -4,8 +4,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { FC } from "react";
 
-import { DefaultNodeRenderer } from "./default-node-renderer";
-import type { NoderaNodeData } from "./node-renderer-props";
+import { DefaultNodeRenderer } from "./default-node-renderer.js";
+import type { NoderaNodeData } from "./node-renderer-props.js";
 
 /* ------------------------------------------------------------------ */
 /*  Test harness                                                       */

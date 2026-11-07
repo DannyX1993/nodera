@@ -1,8 +1,8 @@
 import type { ComponentType } from "react";
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_EDGE_RENDERER_ID, DEFAULT_NODE_RENDERER_ID, resolveNodeRenderer } from "./renderer-registries";
-import { EdgeRendererRegistry, NodeRendererRegistry } from "./renderer-registries";
+import { DEFAULT_EDGE_RENDERER_ID, DEFAULT_NODE_RENDERER_ID, resolveNodeRenderer } from "./renderer-registries.js";
+import { EdgeRendererRegistry, NodeRendererRegistry } from "./renderer-registries.js";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */

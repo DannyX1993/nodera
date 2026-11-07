@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultEdgeOptionsFromVisual } from "./default-edge-renderer";
+import { defaultEdgeOptionsFromVisual } from "./default-edge-renderer.js";
 import type { EdgeVisual } from "@nodera/edge-registry";
 
 /* ------------------------------------------------------------------ */
