@@ -83,18 +83,23 @@ export function removeEdge(
   editor: EditorEngine,
   input: RemoveEdgeInput,
 ): Result<Edge, UseCaseError> {
-  const removed = editor.graph.removeEdge(createEdgeId(input.edgeId));
-  if (!removed.ok) {
-    return err(toUseCaseError(removed.error));
+  // Capture first, mutate inside apply: push executes apply immediately, so a
+  // pre-removed edge would be silently re-added by its own command.
+  const edge = editor.graph.getEdge(createEdgeId(input.edgeId));
+  if (edge === undefined) {
+    return err({
+      kind: "edge-not-found",
+      message: `Graph has no edge with id "${input.edgeId}"`,
+      elementId: input.edgeId,
+    });
   }
-  const edge = removed.value;
   editor.history.push(editor.editorState, {
     label: "remove-edge",
     apply: () => {
-      editor.graph.addEdge(edge);
+      editor.graph.removeEdge(edge.id);
     },
     reverse: () => {
-      editor.graph.removeEdge(edge.id);
+      editor.graph.addEdge(edge);
     },
   });
   editor.events.emit({ name: "edge.deleted", payload: { edgeId: edge.id } });

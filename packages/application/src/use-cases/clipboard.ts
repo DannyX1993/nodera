@@ -152,6 +152,10 @@ export function pasteSelection(
     });
     if (!created.ok) {
       transaction.abort();
+      // Atomic failure: remove every node this paste already created.
+      for (const createdNode of createdNodes) {
+        editor.graph.removeNode(createdNode.id);
+      }
       const error: UseCaseError = created.error.elementId === undefined
         ? { kind: created.error.kind as UseCaseError["kind"], message: `Pasting failed: ${created.error.message}` }
         : {

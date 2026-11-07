@@ -8,3 +8,4 @@ export * from "./use-cases/selection.js";
 export * from "./use-cases/clipboard.js";
 export * from "./use-cases/validate.js";
 export * from "./use-cases/documents.js";
+export * from "./use-cases/history.js";
