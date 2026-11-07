@@ -219,9 +219,13 @@ describe("toReactFlowNodes", () => {
     );
 
     const rfNode = result[0];
-    const targetHandle = rfNode!.handles?.find((h) => h.type === "target");
-    expect(targetHandle).toBeDefined();
-    expect(targetHandle?.id).toBe("in");
+    // Handles are rendered by PortHandle in the node-type wrapper; the
+    // mapper's contract is the merged port data the wrapper reads.
+    const port = (rfNode!.data as { ports: Array<{ id: string; direction: string }> }).ports.find(
+      (p) => p.id === "in",
+    );
+    expect(port).toBeDefined();
+    expect(port?.direction).toBe("input");
   });
 
   it("maps output port to source handle", () => {
@@ -240,9 +244,11 @@ describe("toReactFlowNodes", () => {
     );
 
     const rfNode = result[0];
-    const sourceHandle = rfNode!.handles?.find((h) => h.type === "source");
-    expect(sourceHandle).toBeDefined();
-    expect(sourceHandle?.id).toBe("out");
+    const port = (rfNode!.data as { ports: Array<{ id: string; direction: string }> }).ports.find(
+      (p) => p.id === "out",
+    );
+    expect(port).toBeDefined();
+    expect(port?.direction).toBe("output");
   });
 
   it("maps bidirectional port to source handle", () => {
@@ -261,12 +267,12 @@ describe("toReactFlowNodes", () => {
     );
 
     const rfNode = result[0];
-    const sourceHandle = rfNode!.handles?.find((h) => h.type === "source");
-    expect(sourceHandle).toBeDefined();
-    expect(sourceHandle?.id).toBe("both");
-    // bidirectional should NOT create a target handle
-    const targetHandle = rfNode!.handles?.find((h) => h.type === "target");
-    expect(targetHandle).toBeUndefined();
+    const port = (rfNode!.data as { ports: Array<{ id: string; direction: string }> }).ports.find(
+      (p) => p.id === "both",
+    );
+    expect(port).toBeDefined();
+    // bidirectional maps to a source handle in the wrapper (ConnectionMode loose).
+    expect(port?.direction).toBe("bidirectional");
   });
 
   it("includes port name, direction and dataType in data.ports", () => {

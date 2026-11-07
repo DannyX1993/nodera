@@ -3,7 +3,6 @@ import type {
   Node as ReactFlowNode,
   NodeChange,
   EdgeChange,
-  Handle,
   XYPosition,
 } from "@xyflow/react";
 
@@ -92,7 +91,7 @@ const toReactFlowNode = (
   const definitionPorts: readonly PortDeclaration[] =
     nodeDefinition?.ports ?? [];
 
-  // Build port data entries by merging instance ports with declaration data.
+  // Build data entries by merging instance ports with declaration data.
   // Priority: declaration data > instance data (definition is source of truth).
   const mergedPorts: PortDataEntry[] = definitionPorts.map((decl) => {
     const entry: PortDataEntry = {
@@ -119,13 +118,6 @@ const toReactFlowNode = (
     }
   }
 
-  // Build handles from the merged port declarations.
-  const handles: Handle[] = mergedPorts
-    .map((p) => {
-      const type = handleTypeForDirection(p.direction);
-      return { id: p.id, type } as Handle;
-    });
-
   // Determine label: prefer node metadata name, fall back to definition name.
   const nodeMetadataName = node.metadata?.name;
   const label =
@@ -145,12 +137,14 @@ const toReactFlowNode = (
     (data as Record<string, NodeDataValue>).visual = nodeDefinition.visual;
   }
 
+  // Port handles are rendered by the node-type wrapper (createNodeType →
+  // PortHandle). No `handles` array is attached here: React Flow does
+  // not read one from the node object.
   return {
     id: node.id,
     type: nodeDefinition?.renderer ?? "nodera-default-node",
     position: node.position ?? { x: 0, y: 0 },
     data,
-    ...(handles.length > 0 ? { handles } : {}),
   };
 };
 

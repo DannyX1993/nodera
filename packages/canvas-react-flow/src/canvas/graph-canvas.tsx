@@ -13,18 +13,23 @@ import {
   Controls,
   MiniMap,
   ConnectionMode,
-  useReactFlow,
   type NodeChange,
   type EdgeChange,
   type Connection,
   type IsValidConnection,
   type Edge as RfEdge,
+  type Node as RfNode,
+  type XYPosition,
+  type NodeTypes,
+  type EdgeTypes,
+  type OnNodeDrag,
 } from "@xyflow/react";
 
 import type { EditorEngine } from "@nodera/application";
 import {
   moveNode,
   createEdge,
+  clearSelection,
   removeNode,
   removeEdge,
   selectNode,
@@ -33,15 +38,40 @@ import {
 } from "@nodera/application";
 
 import { useEditorGraph } from "./use-editor-graph.js";
+import { useNodeTypes } from "./custom-node.js";
 import {
   nodePositionFromReactFlow,
   connectionFromReactFlow,
   removedIdsFromReactFlowChanges,
 } from "../map/react-flow-mapper.js";
 import type { NodeRendererRegistry, EdgeRendererRegistry } from "../registries/renderer-registries.js";
-import { DEFAULT_NODE_RENDERER_ID, DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
-import { DefaultNodeRenderer } from "../renderers/default-node-renderer.js";
+import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
 import { DefaultEdgeRenderer } from "../renderers/default-edge-renderer.js";
+import type { NoderaNodeData } from "../renderers/node-renderer-props.js";
+
+/* ------------------------------------------------------------------ */
+/*  Drag commit                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Commit the final positions of a node drag to the engine.
+ *
+ * Each node is committed through `moveNode`, so it becomes its own undo
+ * unit. Grouping a whole multi-node drag into ONE history unit requires
+ * application-core support (use cases refuse `history.push` inside an
+ * open transaction) and is a documented phase-4 limitation.
+ */
+export function commitDraggedNodes(
+  editor: EditorEngine,
+  draggedNodes: ReadonlyArray<{ readonly id: string; readonly position: XYPosition }>,
+): void {
+  for (const node of draggedNodes) {
+    const { nodeId, position } = nodePositionFromReactFlow(
+      node as unknown as Parameters<typeof nodePositionFromReactFlow>[0],
+    );
+    moveNode(editor, { nodeId, position });
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /*  GraphCanvas                                                        */
@@ -61,6 +91,8 @@ export interface GraphCanvasProps {
   readonly showMinimap?: boolean;
   /** Show the zoom/pan controls. */
   readonly showControls?: boolean;
+  /** Color mode of the canvas chrome ("system" follows the OS). */
+  readonly colorMode?: "light" | "dark" | "system";
   /** Optional callback for node changes (position, remove, etc). */
   readonly onNodesChange?: (changes: NodeChange[]) => void;
   /** Optional callback for edge changes. */
@@ -68,7 +100,7 @@ export interface GraphCanvasProps {
   /** Optional callback for connections. */
   readonly onConnect?: (params: Connection) => void;
   /** Optional callback for node selection (RF v12 passes node object). */
-  readonly onNodeClick?: (event: MouseEvent, node: import("@xyflow/react").Node) => void;
+  readonly onNodeClick?: (event: MouseEvent, node: RfNode) => void;
   /** Optional callback for edge selection. */
   readonly onEdgeClick?: (event: MouseEvent, edge: RfEdge) => void;
   /** Optional callback after a connection is validated (non-persisting probe). */
@@ -78,6 +110,15 @@ export interface GraphCanvasProps {
 /**
  * Main canvas component: translates domain graph ↔ React Flow,
  * subscribes to editor events, and forwards interactions to use cases.
+ *
+ * Controlled-flow rules:
+ *   - The engine is the single source of truth; nodes/edges are derived
+ *     from it (with engine selection merged in) on every relevant event.
+ *   - Drag positions are committed to the engine on drag stop
+ *     (`onNodeDragStop`) as one undoable transaction; during the drag
+ *     React Flow's internal store moves the node visually.
+ *   - Position changes arriving through `onNodesChange` are never
+ *     committed (they carry no final state in this design).
  */
 export const GraphCanvas: FC<GraphCanvasProps> = ({
   editor,
@@ -86,6 +127,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   className,
   showMinimap = true,
   showControls = true,
+  colorMode = "light",
   onNodesChange: externalOnNodesChange,
   onEdgesChange: externalOnEdgesChange,
   onConnect: externalOnConnect,
@@ -94,32 +136,21 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   onLinkValidate: externalOnLinkValidate,
 }) => {
   // Derive RF nodes/edges/selection from engine via event-driven hook.
-  const { nodes, edges, selectedNodeIds, selectedEdgeIds } = useEditorGraph(editor);
+  const { nodes, edges, refresh } = useEditorGraph(editor);
 
-  // Build nodeTypes map: registry renderers + default sentinel.
-  const nodeTypes = useMemo((): Record<string, ComponentType<any>> => {
-    const types: Record<string, ComponentType<any>> = {};
-    if (nodeRenderers) {
-      for (const id of nodeRenderers.listIds()) {
-        try {
-          types[id] = nodeRenderers.get(id);
-        } catch {
-          // Skip unresolvable registrations.
-        }
-      }
-    }
-    // Default sentinel always available.
-    types[DEFAULT_NODE_RENDERER_ID] = DefaultNodeRenderer;
-    return types;
-  }, [nodeRenderers]);
+  // nodeTypes: wrapper components that resolve the definition renderer
+  // and ALWAYS render the port handles (via useNodeTypes/createNodeType).
+  const nodeTypes = useNodeTypes(nodeRenderers);
 
-  // Build edgeTypes map: registry renderers + default sentinel.
-  const edgeTypes = useMemo((): Record<string, ComponentType<any>> => {
-    const types: Record<string, ComponentType<any>> = {};
+  // Build edgeTypes map: registry renderers + default sentinel. Casts are
+  // confined to the adapter boundary: React Flow's NodeTypes/EdgeTypes are
+  // ComponentType<any> maps and our renderer props are stricter.
+  const edgeTypes = useMemo((): EdgeTypes => {
+    const types: EdgeTypes = {};
     if (edgeRenderers) {
       for (const id of edgeRenderers.listIds()) {
         try {
-          types[id] = edgeRenderers.get(id);
+          types[id] = edgeRenderers.get(id) as unknown as EdgeTypes[string];
         } catch {
           // Skip unresolvable registrations.
         }
@@ -132,7 +163,6 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   // Invalidate connection validation: probe without persisting.
   const isValidConnection = useCallback<IsValidConnection>(
     (connection): boolean => {
-      // connection can be Edge or Connection; extract port info safely.
       const sourceHandle = (connection as Connection).sourceHandle ?? (connection as RfEdge).sourceHandle;
       const targetHandle = (connection as Connection).targetHandle ?? (connection as RfEdge).targetHandle;
 
@@ -152,41 +182,33 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
           externalOnLinkValidate(false, []);
         }
       }
-      if (result.ok && result.value.valid) {
-        return true;
-      }
-      return false;
+      return result.ok && result.value.valid;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editor],
   );
 
-  // Drag-stop handler: position changes → moveNode in a single transaction.
+  // Node change handler: removals only; positions commit on drag stop.
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      // Forward external handlers.
       externalOnNodesChange?.(changes);
 
-      // Extract position changes and group into a history transaction.
-      const positionChanges = changes.filter(
-        (c): c is NodeChange & { type: "position"; changed?: boolean } =>
-          c.type === "position",
-      );
-
-      if (positionChanges.length > 0) {
-        // Start a transaction, apply moves, then commit.
-        const txn = editor.history.beginTransaction({ label: "drag" });
-        for (const change of positionChanges) {
-          if (change.changed) {
-            const node = nodes.find((n) => n.id === change.id);
-            if (node && node.position) {
-              const { nodeId, position } = nodePositionFromReactFlow(node);
-              moveNode(editor, { nodeId, position });
-            }
-          }
-        }
-        txn.commit(editor.editorState);
+      const removedIds = removedIdsFromReactFlowChanges(changes);
+      for (const nodeId of removedIds) {
+        removeNode(editor, { nodeId });
       }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editor],
+  );
+
+  // Drag stop: commit final positions of every dragged node as one unit.
+  const handleNodeDragStop = useCallback<OnNodeDrag>(
+    (_event, _node, draggedNodes) => {
+      commitDraggedNodes(
+        editor,
+        draggedNodes.map((node) => ({ id: node.id, position: node.position })),
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editor],
@@ -231,49 +253,70 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
 
   // Node click handler: selection → selectNode.
   const handleNodeClick = useCallback(
-    (_event: MouseEvent, node: import("@xyflow/react").Node) => {
+    (event: MouseEvent, node: RfNode) => {
       if (externalOnNodeClick) {
-        externalOnNodeClick(_event, node);
+        externalOnNodeClick(event, node);
       }
-      selectNode(editor, { nodeId: node.id });
+      selectNode(editor, { nodeId: node.id, additive: event.shiftKey });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editor],
   );
 
-  // Edge click handler: selection → selectEdge.
+  // Edge click handler: selection → selectEdge. `selectEdge` emits no
+  // event (phase-3 gap), so the canvas forces re-derivation itself.
   const handleEdgeClick = useCallback(
-    (_event: MouseEvent, edge: RfEdge) => {
+    (event: MouseEvent, edge: RfEdge) => {
       if (externalOnEdgeClick) {
-        externalOnEdgeClick(_event, edge);
+        externalOnEdgeClick(event, edge);
       }
       selectEdge(editor, { edgeId: edge.id });
+      refresh();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor],
+    [editor, refresh],
   );
 
+  // Clicking the pane clears the selection. `clearSelection` emits no
+  // dedicated event, so force re-derivation.
+  const handlePaneClick = useCallback(() => {
+    clearSelection(editor);
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, refresh]);
+
+  // Minimap node color follows the definition visual hint when present.
+  const minimapNodeColor = useCallback((node: RfNode): string => {
+    const visual = (node.data as unknown as NoderaNodeData | undefined)?.visual;
+    return visual?.color ?? (typeof visual?.backgroundColor === "string" ? visual.backgroundColor : "#a3a3a3");
+  }, []);
+
   return (
-    <div className={className} style={{ width: "100%", height: "100%" }}>
+    <div
+      className={className}
+      style={{ width: "100%", height: "100%" }}
+      data-color-mode={colorMode}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        nodeTypes={nodeTypes}
+        nodeTypes={nodeTypes as unknown as NodeTypes}
         edgeTypes={edgeTypes}
         connectionMode={ConnectionMode.Loose}
         isValidConnection={isValidConnection}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
+        onNodeDragStop={handleNodeDragStop}
         onConnect={handleConnect}
         onNodeClick={handleNodeClick}
         onEdgeClick={handleEdgeClick}
+        onPaneClick={handlePaneClick}
+        colorMode={colorMode}
         fitView
         nodesDraggable
-        nodesFocusable={false}
-        edgesFocusable={false}
       >
         <Background />
-        {showMinimap && <MiniMap />}
+        {showMinimap && <MiniMap nodeColor={minimapNodeColor} pannable zoomable />}
         {showControls && <Controls />}
       </ReactFlow>
     </div>

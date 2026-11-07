@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 
 import type { EditorEngine } from "@nodera/application";
 import type { EditorEventName } from "@nodera/application";
@@ -21,6 +21,11 @@ export interface UseEditorGraphResult {
   readonly selectedNodeIds: ReadonlySet<string>;
   /** Set of selected edge ids (read from engine state). */
   readonly selectedEdgeIds: ReadonlySet<string>;
+  /**
+   * Force re-derivation. Needed for engine changes that emit no event —
+   * known phase-3 gap: `selectEdge` emits no `edge.selected`.
+   */
+  readonly refresh: () => void;
 }
 
 /**
@@ -38,6 +43,7 @@ export function useEditorGraph(
 ): UseEditorGraphResult {
   // Trigger re-render on every relevant event.
   const [tick, setTick] = useState(0);
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
 
   // Subscribe to events that require re-derivation.
   useEffect(() => {
@@ -67,19 +73,23 @@ export function useEditorGraph(
 
   // Derive the current state from the engine.
   const result = useMemo((): UseEditorGraphResult => {
+    const selectedNodeIds = new Set(editor.getSelectedNodes());
+    const selectedEdgeIds = new Set(editor.getSelectedEdges());
+
     const nodes = toReactFlowNodes(editor.graph, (id) =>
       (editor.domain.nodes as any).get(id),
+    ).map((node) =>
+      selectedNodeIds.has(node.id) ? { ...node, selected: true } : node,
     );
 
     const edges = toReactFlowEdges(editor.graph, (id) =>
       (editor.domain.edges as any).get(id),
+    ).map((edge) =>
+      selectedEdgeIds.has(edge.id) ? { ...edge, selected: true } : edge,
     );
 
-    const selectedNodeIds = new Set(editor.getSelectedNodes());
-    const selectedEdgeIds = new Set(editor.getSelectedEdges());
-
-    return { nodes, edges, selectedNodeIds, selectedEdgeIds };
-  }, [editor, tick]);
+    return { nodes, edges, selectedNodeIds, selectedEdgeIds, refresh };
+  }, [editor, tick, refresh]);
 
   return result;
 }

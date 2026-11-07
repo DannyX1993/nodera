@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { render } from "@testing-library/react";
+import { Position } from "@xyflow/react";
 
-import { defaultEdgeOptionsFromVisual } from "./default-edge-renderer.js";
+import { DefaultEdgeRenderer, defaultEdgeOptionsFromVisual } from "./default-edge-renderer.js";
 import type { EdgeVisual } from "@nodera/edge-registry";
 
 /* ------------------------------------------------------------------ */
@@ -83,5 +85,55 @@ describe("defaultEdgeOptionsFromVisual", () => {
       markerStart: expect.anything(),
       markerEnd: expect.anything(),
     });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  DefaultEdgeRenderer as a React Flow custom edge                    */
+/* ------------------------------------------------------------------ */
+
+describe("DefaultEdgeRenderer (React Flow EdgeProps)", () => {
+  it("renders a computed path from edge coordinates", () => {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        source="n1"
+        target="n2"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={{}}
+      />,
+    );
+    const path = container.querySelector("path");
+    expect(path).not.toBeNull();
+    expect(path?.getAttribute("d")).toBeTruthy();
+  });
+
+  // Note: the EdgeLabelRenderer label branch is not unit-testable in jsdom
+  // (React Flow needs real viewport dimensions to mount the label portal).
+  // It follows the standard React Flow custom-edge pattern and is verified
+  // visually in examples/phase4-demo.
+
+  it("marks the path as selected for non-color-only selection", () => {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        source="n1"
+        target="n2"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={{}}
+        selected
+      />,
+    );
+    expect(container.querySelector(".nodera-edge-selected")).not.toBeNull();
   });
 });

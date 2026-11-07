@@ -1,8 +1,6 @@
-import { ReactFlowProvider, useEdgesState, useNodesState } from "@xyflow/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { ReactFlowProvider } from "@xyflow/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
-import type { FC } from "react";
 
 import { DefaultNodeRenderer } from "./default-node-renderer.js";
 import type { NoderaNodeData } from "./node-renderer-props.js";
@@ -11,16 +9,13 @@ import type { NoderaNodeData } from "./node-renderer-props.js";
 /*  Test harness                                                       */
 /* ------------------------------------------------------------------ */
 
-const TestWrapper: FC<{ children: ReactNode }> = ({ children }) => {
-  const [nodes] = useNodesState([]);
-  const [edges] = useEdgesState([]);
-
-  return (
+function renderNode(data: NoderaNodeData, selected = false) {
+  return render(
     <ReactFlowProvider>
-      {children}
-    </ReactFlowProvider>
+      <DefaultNodeRenderer data={data} selected={selected} />
+    </ReactFlowProvider>,
   );
-};
+}
 
 function makeData(overrides?: Partial<NoderaNodeData>): NoderaNodeData {
   return {
@@ -43,43 +38,35 @@ describe("DefaultNodeRenderer", () => {
   afterEach(cleanup);
 
   it("renders the label text", () => {
-    const data = makeData();
-    render(<DefaultNodeRenderer data={data} selected={false} />, { wrapper: TestWrapper });
-    expect(screen.getByText("Test Node")).not.toBeNull();
+    renderNode(makeData());
+    expect(screen.getByText("Test Node")).toBeDefined();
   });
 
-  it("applies selected class when selected", () => {
-    const { container } = render(<DefaultNodeRenderer data={makeData()} selected={true} />, { wrapper: TestWrapper });
-    const wrapper = container.querySelector("[data-nodera-node]");
-    expect(wrapper).not.toBeNull();
-    expect(wrapper?.className).toContain("nodera-node-selected");
+  it("renders the icon glyph when visual.icon is present", () => {
+    renderNode(makeData({ visual: { icon: "🌐" } }));
+    expect(screen.getByText("🌐")).toBeDefined();
   });
 
-  it("does not apply selected class when not selected", () => {
-    const { container } = render(<DefaultNodeRenderer data={makeData()} selected={false} />, { wrapper: TestWrapper });
-    const wrapper = container.querySelector("[data-nodera-node]");
-    expect(wrapper?.className).not.toContain("nodera-node-selected");
+  it("applies visual.color as the node background", () => {
+    const { container } = renderNode(makeData({ visual: { color: "#2563eb" } }));
+    const node = container.querySelector("[data-nodera-node]") as HTMLElement;
+    expect(node.style.backgroundColor).toBe("rgb(37, 99, 235)");
   });
 
-  it("renders PortHandle for each port", () => {
-    const data = makeData();
-    const { container } = render(<DefaultNodeRenderer data={data} selected={false} />, { wrapper: TestWrapper });
-    // Each port renders a PortHandle div with data-nodera-port-id
-    const handles = container.querySelectorAll("[data-nodera-port-id]");
-    expect(handles.length).toBe(2);
+  it("shows the selected indicator class when selected", () => {
+    const { container } = renderNode(makeData(), true);
+    const node = container.querySelector("[data-nodera-node]") as HTMLElement;
+    expect(node.className).toContain("nodera-node-selected");
+    expect(container.querySelector(".nodera-node-selected-indicator")).not.toBeNull();
   });
 
-  it("renders a PortHandle per port entry (one-to-one)", () => {
-    const data = makeData({ ports: [{ id: "a", direction: "input" }, { id: "b", direction: "output" }, { id: "c", direction: "bidirectional" }] });
-    const { container } = render(<DefaultNodeRenderer data={data} selected={false} />, { wrapper: TestWrapper });
-    expect(container.querySelectorAll("[data-nodera-port-id]")).toHaveLength(3);
+  it("does not show the selected indicator when not selected", () => {
+    const { container } = renderNode(makeData(), false);
+    expect(container.querySelector(".nodera-node-selected-indicator")).toBeNull();
   });
 
-  it("renders icon glyph when visual has icon metadata", () => {
-    const { container } = render(
-      <DefaultNodeRenderer data={makeData({ visual: { icon: "🚀" } })} selected={false} />,
-      { wrapper: TestWrapper }
-    );
-    expect(container.textContent).toContain("🚀");
+  it("renders no port handles itself (the node-type wrapper owns ports)", () => {
+    const { container } = renderNode(makeData());
+    expect(container.querySelectorAll("[data-nodera-port-id]")).toHaveLength(0);
   });
 });

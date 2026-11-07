@@ -1,6 +1,5 @@
 import type { FC } from "react";
 
-import { PortHandle } from "./port-renderer.js";
 import type { NoderaNodeData, NoderaNodeRendererProps } from "./node-renderer-props.js";
 
 /* ------------------------------------------------------------------ */
@@ -9,23 +8,29 @@ import type { NoderaNodeData, NoderaNodeRendererProps } from "./node-renderer-pr
 
 /**
  * A presentation-only node renderer that reads the shared data
- * contract.  It renders:
+ * contract. It renders:
  *   - an icon glyph when `data.visual.icon` is provided,
  *   - the label (always visible),
- *   - one {@link PortHandle} per port entry,
- *   - visual hints (`backgroundColor`, `borderColor`) as inline styles,
+ *   - visual hints (`color`, `metadata.backgroundColor`) as inline styles,
  *   - an outline ring when `selected` (accessibility: not colour-only).
+ *
+ * It intentionally renders NO port handles: the node-type wrapper
+ * (`createNodeType`) owns port rendering for every renderer, so custom
+ * renderers get ports for free and ports are never duplicated.
  */
 export const DefaultNodeRenderer: FC<NoderaNodeRendererProps> = ({
   data,
   selected,
 }) => {
-  const { label, ports, visual, definitionId } = data;
+  const { label, visual, definitionId } = data;
 
   const style: React.CSSProperties = {};
 
-  if (visual?.backgroundColor) {
-    style.backgroundColor = visual.backgroundColor;
+  const backgroundColor =
+    visual?.backgroundColor ??
+    (typeof visual?.color === "string" ? visual.color : undefined);
+  if (backgroundColor !== undefined) {
+    style.backgroundColor = backgroundColor;
   }
 
   if (visual?.borderColor) {
@@ -52,15 +57,6 @@ export const DefaultNodeRenderer: FC<NoderaNodeRendererProps> = ({
       )}
 
       <span className="nodera-node-label">{label}</span>
-
-      {ports.map((port) => (
-        <PortHandle
-          key={port.id}
-          portId={port.id}
-          direction={port.direction}
-          {...(port.name !== undefined && { name: port.name })}
-        />
-      ))}
     </div>
   );
 };

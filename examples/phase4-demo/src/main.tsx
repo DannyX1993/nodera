@@ -1,7 +1,8 @@
 import "@xyflow/react/dist/style.css";
+
 import { EditorEngine, addNode } from "@nodera/application";
 import type { NodeDefinition } from "@nodera/node-registry";
-import { NodeRendererRegistry, EdgeRendererRegistry, GraphCanvas } from "@nodera/canvas-react-flow";
+import { NodeRendererRegistry, EdgeRendererRegistry } from "@nodera/canvas-react-flow";
 import { DemoApp } from "./demo.js";
 
 const httpNode: NodeDefinition = {
@@ -46,19 +47,6 @@ if (!root) {
   throw new Error("missing #root mount point");
 }
 
-root.innerHTML = `
-  <div id="toolbar">
-    <span><strong>Nodera</strong> — Phase 4: first functional editor</span>
-    <button id="add-http">+ HTTP Request</button>
-    <button id="add-transform">+ Transform</button>
-  </div>
-  <div id="canvas"></div>
-`;
-
-const canvasHost = document.getElementById("canvas") as HTMLElement;
-const addHttp = document.getElementById("add-http") as HTMLButtonElement;
-const addTransform = document.getElementById("add-transform") as HTMLButtonElement;
-
 let counter = 0;
 function onAddClick(definitionId: string): void {
   counter += 1;
@@ -74,15 +62,15 @@ function onAddClick(definitionId: string): void {
   }
 }
 
-addHttp.addEventListener("click", () => onAddClick("http.request"));
-addTransform.addEventListener("click", () => onAddClick("script.transform"));
-
 const { createRoot } = await import("react-dom/client");
 const { createElement } = await import("react");
-createRoot(canvasHost).render(
-  createElement(
-    DemoApp,
-    { editor, nodeRenderers, edgeRenderers },
-    null,
-  ),
+
+createRoot(root).render(
+  createElement(DemoApp, {
+    editor,
+    nodeRenderers,
+    edgeRenderers,
+    onAddHttp: () => onAddClick("http.request"),
+    onAddTransform: () => onAddClick("script.transform"),
+  }),
 );

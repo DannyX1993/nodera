@@ -27,7 +27,7 @@ export type { NoderaNodeData, NoderaNodeRendererProps } from "./renderers/node-r
 
 // Canvas
 export { NoderaCanvasProvider, useNoderaCanvas } from "./canvas/nodera-canvas-provider.js";
-export { GraphCanvas } from "./canvas/graph-canvas.js";
+export { GraphCanvas, commitDraggedNodes } from "./canvas/graph-canvas.js";
 export { useEditorGraph } from "./canvas/use-editor-graph.js";
 export { NoderaNodeRenderer, createNodeType, useNodeTypes } from "./canvas/custom-node.js";
 export type { NoderaNodeDataWithRenderer } from "./canvas/custom-node.js";
