@@ -46,6 +46,7 @@ import {
   connectionFromReactFlow,
   removedIdsFromReactFlowChanges,
   applyMeasuredDimensions,
+  hasNewDimensions,
 } from "../map/react-flow-mapper.js";
 import type { NodeRendererRegistry, EdgeRendererRegistry } from "../registries/renderer-registries.js";
 import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
@@ -132,9 +133,11 @@ export interface GraphCanvasProps {
  * Controlled-flow rules:
  *   - The engine is the single source of truth; nodes/edges are derived
  *     from it (with engine selection merged in) on every relevant event.
+ *   - Measured node dimensions are applied back onto the derived nodes
+ *     (guarded by `hasNewDimensions` so identical re-measurements never
+ *     trigger a re-render — otherwise the controlled flow loops forever).
  *   - Drag positions are committed to the engine on drag stop
- *     (`onNodeDragStop`) as one undoable transaction; during the drag
- *     React Flow's internal store moves the node visually.
+ *     (`onNodeDragStop`) as per-node undo units.
  *   - Position changes arriving through `onNodesChange` are never
  *     committed (they carry no final state in this design).
  */
@@ -215,23 +218,28 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [editor],
   );
 
-  // Node change handler: record measured dimensions and removals;
-  // positions commit on drag stop.
+  // Node change handler: record NEW measured dimensions only (identical
+  // re-measurements must not re-render — that is the feedback loop),
+  // and removals → removeNode. Positions commit on drag stop.
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       externalOnNodesChange?.(changes);
 
-      for (const change of changes) {
-        if (change.type === "dimensions" && change.dimensions) {
-          measuredDims.current.set(change.id, change.dimensions);
+      const dimsChanged = hasNewDimensions(changes, measuredDims.current);
+      if (dimsChanged) {
+        for (const change of changes) {
+          if (change.type === "dimensions" && change.dimensions) {
+            measuredDims.current.set(change.id, change.dimensions);
+          }
         }
       }
+
       const removedIds = removedIdsFromReactFlowChanges(changes);
       if (removedIds.length > 0) {
         for (const nodeId of removedIds) {
           removeNode(editor, { nodeId });
         }
-      } else if (changes.some((c) => c.type === "dimensions")) {
+      } else if (dimsChanged) {
         refresh();
       }
     },
@@ -239,7 +247,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [editor, refresh],
   );
 
-  // Drag stop: commit final positions of every dragged node as one unit.
+  // Drag stop: commit final positions of every dragged node.
   const handleNodeDragStop = useCallback<OnNodeDrag>(
     (_event, _node, draggedNodes) => {
       commitDraggedNodes(
@@ -297,7 +305,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       selectNode(editor, { nodeId: node.id, additive: event.shiftKey });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor],
+    [editor, refresh],
   );
 
   // Edge click handler: selection → selectEdge. `selectEdge` emits no
@@ -336,7 +344,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   // Minimap node color follows the definition visual hint when present.
   const minimapNodeColor = useCallback((node: RfNode): string => {
     const visual = (node.data as unknown as NoderaNodeData | undefined)?.visual;
-    return visual?.color ?? (typeof visual?.backgroundColor === "string" ? visual.backgroundColor : "#a3a3a3");
+    return visual?.color ?? "#a3a3a3";
   }, []);
 
   return (

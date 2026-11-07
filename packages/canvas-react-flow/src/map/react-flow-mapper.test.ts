@@ -13,6 +13,7 @@ import type { EdgeDefinition } from "@nodera/edge-registry";
 
 import {
   applyMeasuredDimensions,
+  hasNewDimensions,
   connectionFromReactFlow,
   nodePositionFromReactFlow,
   removedIdsFromReactFlowChanges,
@@ -658,5 +659,38 @@ describe("applyMeasuredDimensions (T8 minimap fix)", () => {
     applyMeasuredDimensions(nodes, dims);
     expect(dims.has("n-gone")).toBe(false);
     expect(dims.has("n1")).toBe(true);
+  });
+});
+
+describe("hasNewDimensions (loop guard)", () => {
+  it("reports new dimensions the first time a node reports", () => {
+    const measured = new Map<string, { width: number; height: number }>();
+    const changes = [
+      { id: "n1", type: "dimensions" as const, dimensions: { width: 51, height: 18 } },
+    ];
+    expect(hasNewDimensions(changes, measured)).toBe(true);
+  });
+
+  it("ignores repeated identical dimensions (prevents the refresh loop)", () => {
+    const dims = { width: 51, height: 18 };
+    const measured = new Map([["n1", dims]]);
+    const changes = [
+      { id: "n1", type: "dimensions" as const, dimensions: { width: 51, height: 18 } },
+    ];
+    expect(hasNewDimensions(changes, measured)).toBe(false);
+  });
+
+  it("reports when a node changes size", () => {
+    const measured = new Map([["n1", { width: 51, height: 18 }]]);
+    const changes = [
+      { id: "n1", type: "dimensions" as const, dimensions: { width: 80, height: 30 } },
+    ];
+    expect(hasNewDimensions(changes, measured)).toBe(true);
+  });
+
+  it("ignores non-dimension changes", () => {
+    const measured = new Map();
+    const changes = [{ id: "n1", type: "position" as const, position: { x: 1, y: 2 } }];
+    expect(hasNewDimensions(changes as never, measured)).toBe(false);
   });
 });

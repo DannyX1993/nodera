@@ -302,6 +302,34 @@ export const connectionFromReactFlow = (params: {
 type RemoveChange = { id: string; type: "remove" };
 
 /**
+ * Whether any `dimensions` change in the batch carries measurements we
+ * have not stored yet (new node or changed size). Driving the re-render
+ * from this guard is what prevents the controlled-flow feedback loop:
+ * React Flow re-emits identical dimensions after every node-object
+ * re-derivation, and refreshing on those re-emissions loops forever.
+ */
+export function hasNewDimensions(
+  changes: readonly unknown[],
+  measured: Map<string, { width: number; height: number }>,
+): boolean {
+  return changes.some((change) => {
+    if (
+      typeof change !== "object" ||
+      change === null ||
+      (change as { type?: unknown }).type !== "dimensions"
+    ) {
+      return false;
+    }
+    const dims = (change as { dimensions?: { width: number; height: number } }).dimensions;
+    if (!dims) {
+      return false;
+    }
+    const prev = measured.get((change as { id: string }).id);
+    return !prev || prev.width !== dims.width || prev.height !== dims.height;
+  });
+}
+
+/**
  * Merge React Flow's measured node dimensions (from `dimensions` node
  * changes) into the derived nodes. The minimap only paints nodes with
  * known dimensions, and a controlled flow must apply them itself.
