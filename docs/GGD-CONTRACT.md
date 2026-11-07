@@ -55,6 +55,16 @@ This document describes the portable document format **as implemented** by `@nod
 | `label` | string | Optional (string when present). |
 | `metadata` | object | Optional; values must be JSON-serializable data (validated). |
 
+## Carried document data (graph-boundary preservation)
+
+The domain `Graph` cannot represent every document-level structure. To keep the document↔domain boundary lossless, `@nodera/document` provides an explicit side channel:
+
+- `extractCarriedDocumentData(document)` captures what the domain cannot model: `extensions`, `graph.groups` and the document `version`.
+- `documentToGraph(document)` builds the domain graph.
+- `graphToDocument(graph, { carried })` re-emits the captured data verbatim (an explicit `formatVersion` option takes precedence over `carried.formatVersion`).
+
+Arbitrary unknown vendor fields (document-, node- or metadata-level) are preserved by the document layer itself and are intentionally not replicated into the domain graph: the carried channel covers contract-declared structures, not arbitrary extensions.
+
 ## Diagnostics
 
 Text and serialization level: `parse.invalid-json`, `parse.invalid-yaml`, `serialize.non-portable-value`.
