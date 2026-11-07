@@ -61,7 +61,45 @@ importers:
 
   packages/adapter-storage-local: {}
 
-  packages/application: {}
+  packages/application:
+    dependencies:
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@nodera/document':
+        specifier: workspace:*
+        version: link:../document
+      '@nodera/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@nodera/edge-registry':
+        specifier: workspace:*
+        version: link:../edge-registry
+      '@nodera/graph-model':
+        specifier: workspace:*
+        version: link:../graph-model
+      '@nodera/history':
+        specifier: workspace:*
+        version: link:../history
+      '@nodera/node-registry':
+        specifier: workspace:*
+        version: link:../node-registry
+      '@nodera/serialization-json':
+        specifier: workspace:*
+        version: link:../serialization-json
+      '@nodera/serialization-yaml':
+        specifier: workspace:*
+        version: link:../serialization-yaml
+      '@nodera/validation':
+        specifier: workspace:*
+        version: link:../validation
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(yaml@2.9.1)
 
   packages/canvas-react-flow: {}
 
@@ -152,7 +190,14 @@ importers:
         specifier: ^3.0.5
         version: 3.2.7(yaml@2.9.1)
 
-  packages/history: {}
+  packages/history:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(yaml@2.9.1)
 
   packages/layout-engine: {}
 

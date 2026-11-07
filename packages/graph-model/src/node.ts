@@ -18,14 +18,16 @@ export class Node {
   private readonly ports: readonly PortInstance[];
   private readonly portIds = new Set<string>();
   private propertyValues: Record<string, unknown>;
+  private currentPosition: NodePosition | undefined;
+  private currentMetadata: Readonly<Record<string, unknown>> | undefined;
 
   constructor(
     readonly id: NodeId,
     readonly definitionId: string,
     ports: readonly PortInstance[],
     properties: Readonly<Record<string, unknown>> = {},
-    readonly position?: NodePosition,
-    readonly metadata?: Readonly<Record<string, unknown>>,
+    position?: NodePosition,
+    metadata?: Readonly<Record<string, unknown>>,
     /** Version of the referenced definition this instance was created against, when known. */
     readonly definitionVersion?: string,
   ) {
@@ -39,6 +41,18 @@ export class Node {
     }
     this.ports = [...ports];
     this.propertyValues = { ...properties };
+    this.currentPosition = position;
+    this.currentMetadata = metadata;
+  }
+
+  /** Presentation position, when any. */
+  get position(): NodePosition | undefined {
+    return this.currentPosition;
+  }
+
+  /** Instance metadata record, when any. */
+  get metadata(): Readonly<Record<string, unknown>> | undefined {
+    return this.currentMetadata;
   }
 
   /** Ports this instance exposes. */
@@ -70,5 +84,15 @@ export class Node {
     delete next[name];
     this.propertyValues = next;
     return true;
+  }
+
+  /** Replaces the presentation position (undefined clears it). */
+  setPosition(position?: NodePosition): void {
+    this.currentPosition = position;
+  }
+
+  /** Replaces the metadata record (undefined clears it). */
+  setMetadata(metadata?: Readonly<Record<string, unknown>>): void {
+    this.currentMetadata = metadata;
   }
 }

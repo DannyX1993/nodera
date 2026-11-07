@@ -2,5 +2,29 @@
   "name": "@nodera/application",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/application"
+  "type": "module",
+  "description": "Application core: use cases, commands, events, history, selection and clipboard for graph editing. Framework-agnostic.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/contracts": "workspace:*",
+    "@nodera/document": "workspace:*",
+    "@nodera/domain": "workspace:*",
+    "@nodera/graph-model": "workspace:*",
+    "@nodera/history": "workspace:*",
+    "@nodera/node-registry": "workspace:*",
+    "@nodera/edge-registry": "workspace:*",
+    "@nodera/serialization-json": "workspace:*",
+    "@nodera/serialization-yaml": "workspace:*",
+    "@nodera/validation": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }

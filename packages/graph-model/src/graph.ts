@@ -27,12 +27,20 @@ import { Node } from "./node.js";
 export class Graph {
   private readonly nodesById = new Map<NodeId, Node>();
   private readonly edgesById = new Map<EdgeId, Edge>();
+  private currentMetadata: GraphMetadata;
 
   constructor(
     readonly id: GraphId,
-    readonly metadata: GraphMetadata = {},
+    metadata: GraphMetadata = {},
     readonly settings: GraphSettings = DEFAULT_GRAPH_SETTINGS,
-  ) {}
+  ) {
+    this.currentMetadata = metadata;
+  }
+
+  /** Current graph metadata. */
+  get metadata(): GraphMetadata {
+    return this.currentMetadata;
+  }
 
   /** Adds a node. Fails on a duplicate node id. */
   addNode(node: Node): Result<Node, GraphError> {
@@ -138,6 +146,23 @@ export class Graph {
     }
     this.edgesById.set(edge.id, edge);
     return ok(edge);
+  }
+
+  /**
+   * Removes every node and edge and returns them, so the operation can be
+   * reversed later by re-adding them.
+   */
+  clear(): { nodes: readonly Node[]; edges: readonly Edge[] } {
+    const nodes = [...this.nodesById.values()];
+    const edges = [...this.edgesById.values()];
+    this.nodesById.clear();
+    this.edgesById.clear();
+    return { nodes, edges };
+  }
+
+  /** Replaces the graph metadata. */
+  setMetadata(metadata: GraphMetadata): void {
+    this.currentMetadata = metadata;
   }
 
   /** Removes an edge by id. */
