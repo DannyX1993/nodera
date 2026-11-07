@@ -18,6 +18,7 @@ Quotes are verbatim from the user's request and the referenced docs.
 - S9: Versioning distinguishes document-format version from node-definition versions present in instances (AGENTS.md §6); migrations between format versions are explicit and registered; unknown/future format versions fail with a clear diagnostic and preserve the data.
 - S10: Import/Export are public, framework-agnostic functions: serialize/parse produce either a document or structured diagnostics (Result convention), never throw for data problems.
 - S11: No serializable document field may hold functions, class instances, DOM or React references (validated by tests mirroring AGENTS.md §14 checks).
+- S13: "Esquemas públicos" (FASE2-DEFINITION portability list): publish a machine-readable JSON Schema artifact for GGD 1.0.0, validated in tests with ajv (Draft 2020-12, the AGENTS §3 reference standard); schema is data that must tolerate unknown fields (additionalProperties stays open).
 - S12: New packages must match the existing workspace conventions (type module, tsc --noEmit build/typecheck, vitest run --passWithNoTests, colocated src/*.test.ts) per explorer evidence of packages/graph-model/package.json.
 
 ## Non-goals
@@ -38,6 +39,8 @@ Quotes are verbatim from the user's request and the referenced docs.
 | T6 | S9,S8,S3 | writer versioning + explicit migration registry/pipeline | f2-c |
 | T7 | S7,S6,S3,S4 | inline end-to-end unknown preservation round-trip tests | f2-d |
 | T8 | S6,S10 | inline examples/phase2-demo + docs + affected typecheck/lint/test/build | f2-d |
+| T9 | S7 | inline carried-data side channel across the graph boundary (user decision 1) | f2-e |
+| T10 | S5,S13 | worker: public GGD 1.0.0 JSON Schema (Draft 2020-12) + ajv validation tests (user decision 2) | f2-e |
 
 ## Log
 
@@ -50,6 +53,7 @@ Quotes are verbatim from the user's request and the referenced docs.
 - L6: Post-implementation review found and fixed two defects (commit 0830c09): edge metadata was silently dropped on export; edge endpoint directions were not validated against input/output/bidirectional. All affected suites re-run GREEN afterward.
 - L7: Deferred by scope decision (not fase-2 gaps): ImporterRegistry/ExporterRegistry (defined in the Fase 1 registry module list, never implemented; they belong to the extension/plugin era, Fases 6-7), and a machine-readable public JSON Schema artifact for GGD (FASE2 lists "Esquemas públicos"; semantics are documented in docs/GGD-CONTRACT.md — needs the user's go-ahead because validation-in-tests would add an ajv devDependency).
 - L8: Deep audit (explorer mw5tvr08-1-i5ba, self-verified) confirmed 3 high defects, fixed in commit 4a1bdf3: non-portable detector missed arrays/class instances/symbol keys; `new Node` duplicate-port throw escaped `documentToGraph`; migrator returned un-normalized documents and accepted conflicting tables. Also fixed: edge type/label/metadata validation, metadata field type-checks, full diagnostics documentation, plus pinning tests for duplicate ids, settings defaults and metadata.extra import.
+- L10: User decisions after the deep audit: (1) preservation side-channel belongs to fase 2 - implemented as carried data (T9); (2) JSON Schema asked for recommendation - adopted (T10, ajv as devDependency, justification: without a real validator the public schema is decorative and AGENTS §3 names Draft 2020-12 as the reference standard); (3) Importer/ExporterRegistry stays deferred (Fases 6-7). Unknown vendor node-level fields remain document-layer-only by decision: the carried channel covers contract-declared structures, not arbitrary unknown extensions (documented in GGD-CONTRACT.md).
 - L9: Open items after the audit — (a) decision needed: groups/extension references/format version survive only at the document layer; carrying them across the document↔domain boundary needs an explicit preservation side-channel; (b) error categories 4-5 of AGENTS §13 (config, extension compatibility) belong to validation/plugin phases; (c) minor: YAML↔JSON model equivalence asserted per package only; serializers duplicate a ~20-line guard block (leans later-phase, no defect).
 
 ## Verification
