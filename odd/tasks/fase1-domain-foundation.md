@@ -38,6 +38,7 @@ Core del dominio de Nodera: modelos de grafo, definiciones, registros y validaci
 
 - L1: "Vamo a hacer ahora solo la Fase 1 especificada en @docs/ROADMAP.md . La definición de modulos de esta fase está en @docs/FASE1-DEFINITION.md y debes respetar la arquitectura global presente en @docs/GLOBAL-ARCHITECTURE.md"
 - L2: Decisiones de topología (7 paquetes), Vitest y no-emit confirmadas por el usuario vía cuestionario.
+- L3: El usuario pidió probar el core manualmente en terminal sin tests automáticos; se creó el ejemplo ejecutable examples/phase1-demo (imports workspace reales, verificado con `pnpm dlx tsx index.ts`).
 
 ## Commits
 
@@ -49,6 +50,8 @@ Core del dominio de Nodera: modelos de grafo, definiciones, registros y validaci
 - T6 → 54a14de feat(edge-registry): edge definitions and EdgeRegistry
 - T7 → cd93f1f feat(validation): structural and domain graph validation
 - T8 → 7485da2 feat(domain): facade composing the phase-1 core
+- Extra → bb3526f docs(examples): runnable phase-1 domain demo (verificación manual en terminal)
+- Extra → 5d6ca76 docs(odd): record fase-1 domain foundation coverage and verification
 
 ## Coverage
 
