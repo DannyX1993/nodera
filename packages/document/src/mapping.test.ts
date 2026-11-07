@@ -168,6 +168,22 @@ describe("documentToGraph", () => {
     expect(codes).toContain("document.edge-references-unknown-node");
   });
 
+  it("exports edge metadata instead of dropping it silently", () => {
+    const graph = sampleGraph();
+    const edge = graph.getEdge("edge-001" as EdgeId);
+    if (!edge) throw new Error("fixture edge missing");
+    const enriched = new Edge(edge.id, edge.connection, edge.definitionId, edge.label, { weight: 3 });
+    graph.removeEdge(edge.id);
+    graph.addEdge(enriched);
+    const document = graphToDocument(graph);
+    expect(document.graph.edges?.[0]?.metadata).toEqual({ weight: 3 });
+    const normalized = normalizeGraphDocument(document);
+    if (!normalized.ok) throw new Error("fixture must normalize");
+    const result = documentToGraph(normalized.value);
+    if (!result.ok) throw new Error("expected a graph");
+    expect(result.value.getEdge("edge-001" as EdgeId)?.metadata).toEqual({ weight: 3 });
+  });
+
   it("does not mutate or lose the source document, including unknown fields", () => {
     const document = graphToDocument(sampleGraph());
     const withVendor = {

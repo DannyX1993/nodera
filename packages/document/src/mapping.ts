@@ -130,6 +130,7 @@ function edgeToDocumentEdge(edge: Edge): DocumentEdgeInstance {
     target: DocumentEdgeEndpoint;
     type?: string;
     label?: string;
+    metadata?: Record<string, unknown>;
   } = {
     id: edge.id,
     source: endpointToDocumentEndpoint(edge.connection.source),
@@ -140,6 +141,9 @@ function edgeToDocumentEdge(edge: Edge): DocumentEdgeInstance {
   }
   if (edge.label !== undefined) {
     payload["label"] = edge.label;
+  }
+  if (edge.metadata !== undefined) {
+    payload["metadata"] = { ...edge.metadata };
   }
   return payload;
 }

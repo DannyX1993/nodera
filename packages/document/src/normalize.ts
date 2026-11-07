@@ -163,6 +163,18 @@ function validateEdge(edge: Record<string, unknown>, issues: ValidationIssue[]):
           id,
         ),
       );
+    } else if (
+      endpoint["direction"] !== undefined &&
+      !PORT_DIRECTIONS.includes(endpoint["direction"] as PortDirection)
+    ) {
+      issues.push(
+        issue(
+          "document.invalid-endpoint-direction",
+          `Edge "${id}" ${key} direction must be input, output or bidirectional`,
+          ["graph", "edges"],
+          id,
+        ),
+      );
     }
   }
 }

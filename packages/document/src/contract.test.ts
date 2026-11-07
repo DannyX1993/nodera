@@ -193,6 +193,26 @@ describe("normalizeGraphDocument", () => {
     expect(result.error.some((issue) => issue.code === "document.invalid-settings")).toBe(true);
   });
 
+  it("rejects edge endpoints with an unknown port direction", () => {
+    const result = normalizeGraphDocument(
+      rawDocument({
+        graph: {
+          nodes: [{ id: "a", type: "t" }, { id: "b", type: "t" }],
+          edges: [
+            {
+              id: "e1",
+              source: { nodeId: "a", portId: "out", direction: "north" },
+              target: { nodeId: "b", portId: "in" },
+            },
+          ],
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.error.some((issue) => issue.code === "document.invalid-endpoint-direction")).toBe(true);
+  });
+
   it("rejects non-portable values such as functions inside properties", () => {
     const result = normalizeGraphDocument(
       rawDocument({
