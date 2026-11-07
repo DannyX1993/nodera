@@ -1,3 +1,4 @@
+import "@xyflow/react/dist/style.css";
 import { EditorEngine, addNode } from "@nodera/application";
 import type { NodeDefinition } from "@nodera/node-registry";
 import { NodeRendererRegistry, EdgeRendererRegistry, GraphCanvas } from "@nodera/canvas-react-flow";
