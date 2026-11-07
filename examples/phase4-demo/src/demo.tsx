@@ -4,6 +4,7 @@ import { createElement } from "react";
 import type { EditorEngine } from "@nodera/application";
 import {
   NodeRendererRegistry,
+  EdgeRendererRegistry,
   GraphCanvas,
   type NoderaNodeRendererProps,
 } from "@nodera/canvas-react-flow";
@@ -36,6 +37,8 @@ function TransformCard({ data, selected }: NoderaNodeRendererProps) {
 }
 
 // Register the custom renderer under the definition's renderer id.
+const nodeRenderers = new NodeRendererRegistry();
+const edgeRenderers = new EdgeRendererRegistry();
 nodeRenderers.register("transform-card", TransformCard);
 
 /**

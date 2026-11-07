@@ -12,6 +12,7 @@ import type { PortDeclaration, PortDirection, PortInstance } from "@nodera/graph
 import type { EdgeDefinition } from "@nodera/edge-registry";
 
 import {
+  applyMeasuredDimensions,
   connectionFromReactFlow,
   nodePositionFromReactFlow,
   removedIdsFromReactFlowChanges,
@@ -631,5 +632,31 @@ describe("T8 audit fixes", () => {
     const def = mockEdgeDefinition({ visual: { lineStyle: "dotted" } });
     const result = toReactFlowEdges(graph, () => def);
     expect((result[0]!.style as Record<string, unknown>)["strokeDasharray"]).toBe("2 4");
+  });
+});
+
+describe("applyMeasuredDimensions (T8 minimap fix)", () => {
+  it("merges measured dimensions into the matching nodes", () => {
+    const nodes = [
+      { id: "n1", position: { x: 0, y: 0 }, data: {} },
+      { id: "n2", position: { x: 10, y: 0 }, data: {} },
+    ];
+    const dims = new Map([["n1", { width: 160, height: 48 }]]);
+    const merged = applyMeasuredDimensions(nodes, dims);
+    expect(merged[0]).toMatchObject({ width: 160, height: 48 });
+    expect(merged[1]).not.toHaveProperty("width");
+    // Original array untouched.
+    expect(nodes[0]).not.toHaveProperty("width");
+  });
+
+  it("drops stored dimensions for nodes that no longer exist", () => {
+    const nodes = [{ id: "n1", position: { x: 0, y: 0 }, data: {} }];
+    const dims = new Map<string, { width: number; height: number }>([
+      ["n1", { width: 10, height: 10 }],
+      ["n-gone", { width: 5, height: 5 }],
+    ]);
+    applyMeasuredDimensions(nodes, dims);
+    expect(dims.has("n-gone")).toBe(false);
+    expect(dims.has("n1")).toBe(true);
   });
 });

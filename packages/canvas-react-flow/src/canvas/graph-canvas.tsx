@@ -2,6 +2,7 @@ import {
   useMemo,
   useCallback,
   useEffect,
+  useRef,
   type FC,
   type ComponentType,
   type MouseEvent,
@@ -44,6 +45,7 @@ import {
   nodePositionFromReactFlow,
   connectionFromReactFlow,
   removedIdsFromReactFlowChanges,
+  applyMeasuredDimensions,
 } from "../map/react-flow-mapper.js";
 import type { NodeRendererRegistry, EdgeRendererRegistry } from "../registries/renderer-registries.js";
 import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
@@ -154,6 +156,15 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   // Derive RF nodes/edges/selection from engine via event-driven hook.
   const { nodes, edges, refresh } = useEditorGraph(editor);
 
+  // Measured node dimensions are canvas state (never domain state): RF
+  // reports them through `dimensions` node changes and both the minimap
+  // and edge handle math need them on the node objects.
+  const measuredDims = useRef(new Map<string, { width: number; height: number }>());
+  const nodesWithDims = useMemo(
+    () => applyMeasuredDimensions(nodes, measuredDims.current),
+    [nodes],
+  );
+
   // nodeTypes: wrapper components that resolve the definition renderer
   // and ALWAYS render the port handles (via useNodeTypes/createNodeType).
   const nodeTypes = useNodeTypes(nodeRenderers);
@@ -204,18 +215,28 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [editor],
   );
 
-  // Node change handler: removals only; positions commit on drag stop.
+  // Node change handler: record measured dimensions and removals;
+  // positions commit on drag stop.
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       externalOnNodesChange?.(changes);
 
+      for (const change of changes) {
+        if (change.type === "dimensions" && change.dimensions) {
+          measuredDims.current.set(change.id, change.dimensions);
+        }
+      }
       const removedIds = removedIdsFromReactFlowChanges(changes);
-      for (const nodeId of removedIds) {
-        removeNode(editor, { nodeId });
+      if (removedIds.length > 0) {
+        for (const nodeId of removedIds) {
+          removeNode(editor, { nodeId });
+        }
+      } else if (changes.some((c) => c.type === "dimensions")) {
+        refresh();
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor],
+    [editor, refresh],
   );
 
   // Drag stop: commit final positions of every dragged node as one unit.
@@ -325,7 +346,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       data-color-mode={colorMode}
     >
       <ReactFlow
-        nodes={nodes}
+        nodes={nodesWithDims}
         edges={edges}
         nodeTypes={nodeTypes as unknown as NodeTypes}
         edgeTypes={edgeTypes}

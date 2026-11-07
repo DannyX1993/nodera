@@ -302,6 +302,31 @@ export const connectionFromReactFlow = (params: {
 type RemoveChange = { id: string; type: "remove" };
 
 /**
+ * Merge React Flow's measured node dimensions (from `dimensions` node
+ * changes) into the derived nodes. The minimap only paints nodes with
+ * known dimensions, and a controlled flow must apply them itself.
+ *
+ * Also prunes stored dimensions for nodes that no longer exist.
+ */
+export function applyMeasuredDimensions<T extends { id: string }>(
+  nodes: readonly T[],
+  measured: Map<string, { width: number; height: number }>,
+): T[] {
+  const live = new Set(nodes.map((n) => n.id));
+  for (const id of [...measured.keys()]) {
+    if (!live.has(id)) {
+      measured.delete(id);
+    }
+  }
+  return nodes.map((node) => {
+    const dims = measured.get(node.id);
+    return dims
+      ? { ...node, width: dims.width, height: dims.height }
+      : node;
+  });
+}
+
+/**
  * Extract removed node/edge ids from React Flow changes arrays.
  *
  * Filters for remove-change entries and returns their ids.
