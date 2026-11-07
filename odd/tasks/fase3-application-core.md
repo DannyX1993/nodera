@@ -56,13 +56,36 @@ Quotes are verbatim from the user's request and the referenced docs.
 
 ## Verification
 
-- Per-task: vitest RED→GREEN in-package.
-- Final: `pnpm turbo run typecheck test build` for affected packages; end-to-end undo/redo and event tests as acceptance.
+- Per-task: vitest RED→GREEN in-package (observed RED before each implementation).
+- Final: `pnpm turbo run typecheck test build` → 36/36 tasks successful for the whole monorepo; no regressions in phases 1-2 suites (document 58, validation 16, domain 12, serializers 17, graph-model 24+2).
+- End-to-end acceptance in `integration.test.ts`: delete-node undo restores connections, document round-trip, single logical operation = single events, history reset on target change.
 
 ## Coverage
 
-(filled at close)
+- S1: all eight phase-3 modules implemented across `packages/history` and `packages/application` (plus minimal graph-model primitives per S11).
+- S2: Graph (create/load/clear/delete/updateMetadata), Nodes (add/remove/duplicate/move/updateProperties/updateMetadata), Edges (create/remove/update/reconnect), Selection (node/edge/multiple/clear), Clipboard (copy/cut/paste), History (undo/redo), Validation (graph/node/connection), Documents (import/export/migrate). GroupNodes/UngroupNodes deferred per S12.
+- S3: Command Pattern with reversible operations in `@nodera/history`: undo/redo stack, transactions (one undo unit), grouping, history-limit, dispose; history independent of persistence and execution (zero domain imports, typecheck-enforced). Node removal restores its connections on undo (integration test).
+- S4: 16 event names with typed payloads + EventBus; `plugin.registered`/`plugin.error` declared but never fired (S15).
+- S5: application/history import no framework; use cases are plain functions over `EditorEngine`; `graph.changed` emitted once per logical operation (S10).
+- S6: every task observed RED first.
+- S7: reuse of Result/ids/ValidationIssue, Graph/Node/Edge, NoderaDomain (createNode/validate), document mapping/versioning, both serializers.
+- S8: selection/clipboard live in editor state, never in history; clipboard stores portable plain-data payloads; selection never creates history units (test).
+- S9: two new packages match workspace conventions; `@nodera/history` has zero `@nodera/*` dependencies.
+- S10: failed operations return structured Result errors, mutate nothing, push nothing, emit nothing (tests per use case).
+- S11: graph-model gained setPosition/setMetadata (Node, Edge, Graph), Graph.clear/setMetadata — minimal, TDD, contract signatures untouched (verified via `Node`/`Edge` constructor order preservation and consumers' suites).
+- S12: GroupNodes/UngroupNodes deferred with rationale (no domain grouping model; fase-2 kept groups document-layer-only).
+- S13: validation use cases run through `NoderaDomain.validate`; validateConnection is non-persisting probe; `validation.completed` emitted once.
+- S14: Import = parse→normalize→migrate→documentToGraph→load (history reset, graph.loaded); Export = graphToDocument→serialize (graph.exported); Migrate = documentVersionMigrator; unsupported formats/versions → structured issues.
+- S15: plugin.* event types declared with typed payloads; nothing fires them.
+- S16: conventions matched (type module, tsc --noEmit, vitest colocated, strict + exactOptionalPropertyTypes clean).
 
 ## Commits
 
-(filled at close)
+- f3-a: 6abdc6a feat(history): framework-agnostic reversible command engine with undo/redo, transactions and listeners (T1)
+- f3-b: e4f7156 feat(application): typed framework-agnostic editor events and event bus (T2)
+- f3-b: 78a94f9 feat(application): editor engine composing domain, history, events, selection and clipboard state (T3)
+- f3-c: b9f3ba9 feat(graph-model): minimal mutation primitives for editing (T4)
+- f3-d: a06c2e8 feat(application): node and edge use cases with reversible commands and events (T5, T6)
+- f3-e: 5c249fe feat(application): graph use cases (create, load, clear, delete, metadata) (T6)
+- f3-f: c2f522b feat(application): selection, clipboard, validation and document use cases (T7, T8, T9, T10)
+- f3-g: 729710f feat(application): undo/redo use cases and end-to-end integration tests (T11)
