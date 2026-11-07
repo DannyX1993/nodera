@@ -47,11 +47,37 @@ export class Connection {
  * animations) belongs to edge definitions and renderers, never here.
  */
 export class Edge {
+  private currentLabel: string | undefined;
+  private currentMetadata: Readonly<Record<string, unknown>> | undefined;
+
   constructor(
     readonly id: EdgeId,
     readonly connection: Connection,
     readonly definitionId?: string,
-    readonly label?: string,
-    readonly metadata?: Readonly<Record<string, unknown>>,
-  ) {}
+    label?: string,
+    metadata?: Readonly<Record<string, unknown>>,
+  ) {
+    this.currentLabel = label;
+    this.currentMetadata = metadata;
+  }
+
+  /** Current edge label, when any. */
+  get label(): string | undefined {
+    return this.currentLabel;
+  }
+
+  /** Current edge metadata record, when any. */
+  get metadata(): Readonly<Record<string, unknown>> | undefined {
+    return this.currentMetadata;
+  }
+
+  /** Replaces the edge label (undefined clears it). */
+  setLabel(label?: string): void {
+    this.currentLabel = label;
+  }
+
+  /** Replaces the edge metadata record (undefined clears it). */
+  setMetadata(metadata?: Readonly<Record<string, unknown>>): void {
+    this.currentMetadata = metadata;
+  }
 }
