@@ -11,7 +11,8 @@ React Flow canvas adapter for Nodera (Phase 4). Translates the Nodera domain mod
 - `DefaultNodeRenderer`, `DefaultEdgeRenderer`, `PortHandle` — default renderers reading `visual` hints; `PortHandle` maps port direction to Handle type/position (input → target/Left; output/bidirectional → source/Right under `ConnectionMode: "loose"`; Handle id is exactly the port id). The node-type wrapper renders ports for every renderer, custom ones included.
 - `defaultEdgeOptionsFromVisual` — `EdgeVisual` → React Flow edge options (lineStyle, color, animation, arrows).
 - Mappers: `toReactFlowNodes`, `toReactFlowEdges`, `nodePositionFromReactFlow`, `connectionFromReactFlow`, `removedIdsFromReactFlowChanges`.
-- Selection: click selects, Shift-click adds, click on the pane clears, RF box/multi selection syncs into the engine through `selectMultiple`; drag positions commit through `commitDraggedNodes` (one undo unit per moved node).
+- Selection: click selects, Shift-click adds, click on the pane clears, RF box/multi selection syncs into the engine through `selectMultiple`; drag positions commit through `commitDraggedNodes` (one undo unit per moved node) and RF selection changes through `commitSelectionFromReactFlow`.
+- Keyboard: `Delete` and `Backspace` remove the selected elements (they flow through the `removeNode` / `removeEdge` use cases). Other shortcuts (copy/paste, undo/redo) belong to the host application layer.
 
 ## Usage
 

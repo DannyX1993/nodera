@@ -41,6 +41,7 @@ import {
 
 import { useEditorGraph } from "./use-editor-graph.js";
 import { useNodeTypes } from "./custom-node.js";
+import { DEFAULT_NODE_RENDERER_ID } from "../registries/renderer-registries.js";
 import {
   nodePositionFromReactFlow,
   connectionFromReactFlow,
@@ -159,6 +160,10 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   // Derive RF nodes/edges/selection from engine via event-driven hook.
   const { nodes, edges, refresh } = useEditorGraph(editor);
 
+  // nodeTypes: wrapper components that resolve the definition renderer
+  // and ALWAYS render the port handles (via useNodeTypes/createNodeType).
+  const nodeTypes = useNodeTypes(nodeRenderers);
+
   // Measured node dimensions are canvas state (never domain state): RF
   // reports them through `dimensions` node changes and both the minimap
   // and edge handle math need them on the node objects.
@@ -168,9 +173,16 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [nodes],
   );
 
-  // nodeTypes: wrapper components that resolve the definition renderer
-  // and ALWAYS render the port handles (via useNodeTypes/createNodeType).
-  const nodeTypes = useNodeTypes(nodeRenderers);
+  // Route node types: a definition renderer id with no registry entry
+  // would make React Flow fall back to its bare built-in node (error 003,
+  // no port handles). Re-route those to the default Nodera wrapper.
+  const nodesWithTypes = useMemo(
+    () =>
+      nodesWithDims.map((node) =>
+        node.type !== undefined && nodeTypes[node.type] ? node : { ...node, type: DEFAULT_NODE_RENDERER_ID },
+      ),
+    [nodesWithDims, nodeTypes],
+  );
 
   // Build edgeTypes map: registry renderers + default sentinel. Casts are
   // confined to the adapter boundary: React Flow's NodeTypes/EdgeTypes are
@@ -331,11 +343,12 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   }, [editor, refresh]);
 
   // Box/multi selection (selectionKeyCode drag, meta-click) → engine.
-  // Replaces the whole engine selection with RF's current one.
+  // Replaces the whole engine selection with RF's current one. No refresh:
+  // RF already reflects this selection visually, and re-deriving here
+  // makes RF re-emit selection changes — an infinite ping-pong loop.
   const handleSelectionChange = useCallback(
     ({ nodes: selected, edges: selectedEdges }: { nodes: RfNode[]; edges: RfEdge[] }) => {
       commitSelectionFromReactFlow(editor, { nodes: selected, edges: selectedEdges });
-      refresh();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editor, refresh],
@@ -354,10 +367,11 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       data-color-mode={colorMode}
     >
       <ReactFlow
-        nodes={nodesWithDims}
+        nodes={nodesWithTypes}
         edges={edges}
         nodeTypes={nodeTypes as unknown as NodeTypes}
         edgeTypes={edgeTypes}
+        deleteKeyCode={["Delete", "Backspace"]}
         connectionMode={ConnectionMode.Loose}
         isValidConnection={isValidConnection}
         onNodesChange={handleNodesChange}

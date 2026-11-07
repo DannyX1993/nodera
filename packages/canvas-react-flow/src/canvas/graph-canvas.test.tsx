@@ -219,3 +219,39 @@ describe("GraphCanvas audit fixes", () => {
     expect(engine.getSelectedNodes()).toEqual([]);
   });
 });
+
+describe("T9 audit round 2 fixes", () => {
+  it("falls back to the default node-type wrapper when a definition renderer id is not registered", () => {
+    const engine = makeEngine();
+    const unregisteredDef = {
+      ...def,
+      id: "test.app-node",
+      renderer: "no-such-renderer",
+    } as unknown as NodeDefinition;
+    engine.domain.nodes.unregister("test.app-node");
+    engine.domain.nodes.register(unregisteredDef);
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+
+    // Empty registry: the renderer id is unregistered. The node must still
+    // render through the default wrapper WITH its port handles.
+    const { container } = renderCanvas(engine, { nodeRenderers: new NodeRendererRegistry() });
+    const handles = container.querySelectorAll("[data-nodera-port-id]");
+    expect(handles.length).toBe(2);
+    cleanup();
+  });
+
+  it("removes a selected node when Delete is pressed", async () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 50, y: 0 } });
+    selectNode(engine, { nodeId: "n1" });
+
+    const { container } = renderCanvas(engine);
+    fireEvent.keyDown(container, { key: "Delete", code: "Delete" });
+    await waitFor(() => {
+      expect(engine.graph.nodeCount).toBe(1);
+ expect(engine.graph.getNode(createNodeId("n1"))).toBeUndefined();
+    });
+    cleanup();
+  });
+});
