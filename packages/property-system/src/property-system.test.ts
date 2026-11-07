@@ -5,7 +5,7 @@ import {
   PROPERTY_TYPES,
 } from "./property-type.js";
 import type { PropertyDefinition } from "./property-definition.js";
-import { isDefinitionVisible, isPropertyVisible } from "./visibility.js";
+import { isDefinitionEnabled, isDefinitionVisible, isPropertyVisible, effectiveOptions } from "./visibility.js";
 import { validatePropertyValue, validatePropertyValues } from "./validate.js";
 
 describe("property types", () => {
@@ -62,6 +62,56 @@ describe("visibility", () => {
     expect(isPropertyVisible(allOf, values)).toBe(true);
     expect(isPropertyVisible(anyOf, values)).toBe(true);
   });
+
+describe("dynamic editability and options", () => {
+  const values = { mode: "basic", level: "pro" };
+
+  it("gates editability with the static flag and the dynamic condition", () => {
+    expect(isDefinitionEnabled({ id: "a", type: "string" }, values)).toBe(true);
+    expect(isDefinitionEnabled({ id: "a", type: "string", editable: false }, values)).toBe(false);
+    expect(
+      isDefinitionEnabled(
+        { id: "a", type: "string", enabledWhen: { kind: "propertyEquals", propertyId: "level", value: "pro" } },
+        values,
+      ),
+    ).toBe(true);
+    expect(
+      isDefinitionEnabled(
+        { id: "a", type: "string", enabledWhen: { kind: "propertyEquals", propertyId: "level", value: "free" } },
+        values,
+      ),
+    ).toBe(false);
+  });
+
+  it("replaces options with the first matching dynamic option set", () => {
+    const method: PropertyDefinition = {
+      id: "method",
+      type: "select",
+      options: [{ value: "GET", label: "GET" }],
+      optionSets: [
+        {
+          when: { kind: "propertyEquals", propertyId: "mode", value: "basic" },
+          options: [{ value: "GET", label: "GET" }],
+        },
+        {
+          when: { kind: "propertyEquals", propertyId: "mode", value: "advanced" },
+          options: [
+            { value: "GET", label: "GET" },
+            { value: "POST", label: "POST" },
+          ],
+        },
+      ],
+    };
+    expect(effectiveOptions(method, { mode: "advanced" })).toEqual([
+      { value: "GET", label: "GET" },
+      { value: "POST", label: "POST" },
+    ]);
+    expect(effectiveOptions(method, { mode: "basic" })).toEqual([{ value: "GET", label: "GET" }]);
+    // No matching set falls back to the static options.
+    expect(effectiveOptions(method, { mode: "other" })).toEqual([{ value: "GET", label: "GET" }]);
+    expect(effectiveOptions({ id: "n", type: "string" }, values)).toBeUndefined();
+  });
+});
 
   it("combines the static flag with the dynamic condition", () => {
     const hidden: PropertyDefinition = { id: "a", type: "string", visible: false };

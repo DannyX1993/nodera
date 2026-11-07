@@ -17,6 +17,8 @@ import {
   type ValidationLevel,
   type ValidationReport,
 } from "@nodera/validation";
+import { ExporterRegistry } from "./exporter-registry.js";
+import { ImporterRegistry } from "./importer-registry.js";
 
 /** Kinds of errors the domain facade reports. */
 export type DomainErrorKind =
@@ -50,15 +52,21 @@ export class NoderaDomain {
   readonly nodes: NodeRegistry;
   readonly edges: EdgeRegistry;
   readonly validators: ValidatorRegistry;
+  readonly importers: ImporterRegistry;
+  readonly exporters: ExporterRegistry;
 
   constructor(
     nodes: NodeRegistry = new NodeRegistry(),
     edges: EdgeRegistry = new EdgeRegistry(),
     validators: ValidatorRegistry = new ValidatorRegistry(),
+    importers: ImporterRegistry = new ImporterRegistry(),
+    exporters: ExporterRegistry = new ExporterRegistry(),
   ) {
     this.nodes = nodes;
     this.edges = edges;
     this.validators = validators;
+    this.importers = importers;
+    this.exporters = exporters;
   }
 
   /**
