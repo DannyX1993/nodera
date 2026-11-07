@@ -1,0 +1,6 @@
+{
+  "name": "@nodera/adapter-storage-local",
+  "version": "0.0.0",
+  "private": true,
+  "description": "packages/adapter-storage-local"
+}

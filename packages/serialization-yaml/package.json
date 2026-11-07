@@ -1,0 +1,6 @@
+{
+  "name": "@nodera/serialization-yaml",
+  "version": "0.0.0",
+  "private": true,
+  "description": "packages/serialization-yaml"
+}

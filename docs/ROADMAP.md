@@ -1,0 +1,128 @@
+# Roadmap de implementación
+
+No recomiendo construir todos los módulos simultáneamente.
+
+El desarrollo debe avanzar por capas, manteniendo un producto funcional en cada etapa.
+
+## Fase 1. Domain Foundation
+
+Implementar:
+
+- Graph Model.
+- Node Model.
+- Edge Model.
+- Port Model.
+- Node Definitions.
+- Edge Definitions.
+- Property Definitions.
+- Registries.
+- Graph Validation.
+
+**Resultado:** core capaz de crear y gestionar grafos sin interfaz gráfica.
+
+## Fase 2. Document Foundation
+
+Implementar:
+
+- Graph Document.
+- JSON Serializer.
+- YAML Serializer.
+- Document Validation.
+- Document Versioning.
+- Import/Export.
+- Unknown Node Preservation.
+
+**Resultado:** el core puede generar documentos portables y reconstruir grafos a partir de ellos.
+
+## Fase 3. Application Core
+
+Implementar:
+
+- Use Cases.
+- Commands.
+- Events.
+- History.
+- Undo/Redo.
+- Selection Model.
+- Clipboard.
+- Validation Pipeline.
+
+**Resultado:** motor de edición independiente del framework visual.
+
+## Fase 4. React Canvas Adapter
+
+Implementar:
+
+- React Provider.
+- GraphCanvas.
+- Node Renderer Registry.
+- Edge Renderer Registry.
+- Port Renderer.
+- Drag and Drop.
+- Connections.
+- Zoom/Pan.
+- Selection.
+- Custom Nodes.
+
+**Resultado:** primer editor funcional.
+
+## Fase 5. UI Composition
+
+Implementar:
+
+- Node Palette.
+- Properties Panel.
+- Toolbar.
+- Context Menu.
+- Validation Panel.
+- Layout Engine.
+- Theme Engine.
+- Component Replacement.
+
+**Resultado:** interfaz configurable y completamente personalizable.
+
+## Fase 6. SDK
+
+Implementar:
+
+- Public API.
+- Builder Factory.
+- Node API.
+- Edge API.
+- Property API.
+- Plugin API.
+- Theme API.
+- Layout API.
+- Event API.
+
+**Resultado:** terceros pueden integrar el builder sin acceder a sus módulos internos.
+
+## Fase 7. Plugin Ecosystem
+
+Implementar:
+
+- Plugin Manifest.
+- Plugin Registry.
+- Dependency Resolution.
+- Lifecycle.
+- Conflict Detection.
+- Example Plugins.
+- Plugin Documentation.
+
+**Resultado:** ecosistema extensible y distribuible.
+
+## Fase 8. Production Readiness
+
+Implementar:
+
+- Performance.
+- Accessibility.
+- Internationalization.
+- Testing.
+- Documentation.
+- Compatibility.
+- Release Automation.
+- npm Publishing.
+
+**Resultado:** producto listo para ser consumido por aplicaciones externas.
+
