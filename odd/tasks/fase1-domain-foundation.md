@@ -39,6 +39,8 @@ Core del dominio de Nodera: modelos de grafo, definiciones, registros y validaci
 - L1: "Vamo a hacer ahora solo la Fase 1 especificada en @docs/ROADMAP.md . La definición de modulos de esta fase está en @docs/FASE1-DEFINITION.md y debes respetar la arquitectura global presente en @docs/GLOBAL-ARCHITECTURE.md"
 - L2: Decisiones de topología (7 paquetes), Vitest y no-emit confirmadas por el usuario vía cuestionario.
 - L3: El usuario pidió probar el core manualmente en terminal sin tests automáticos; se creó el ejemplo ejecutable examples/phase1-demo (imports workspace reales, verificado con `pnpm dlx tsx index.ts`).
+- L4: Auditoría post-auditoría del usuario: faltaban ImporterRegistry/ExporterRegistry (Registry Module). Implementados en @nodera/domain con consulta por formato y payload `unknown` hasta el contrato de documento de Fase 2.
+- L5: Segunda auditoría: tres brechas y decisiones del usuario — (a) condiciones de conexión personalizadas: ConditionRegistry con evaluadores registrables por id; el validador de dominio evalúa `customConditionId` de puertos y `conditionId` de edge definitions y reporta ids desconocidos (brecha cerrada). (b) Propiedades dinámicas: agregados `enabledWhen` y `optionSets` declarativos con resolución via el mismo motor de condiciones (brecha "modificar campos" cerrada). (c) Los 7 registros de UI/plugins (renderers, panel, tool, theme, layout, plugin) se deferan a Fases 4/5/7 junto a las extensiones que registran; resolución de versiones queda como un id = una versión activa hasta el sistema de plugins (decisión documentada, no brecha).
 
 ## Commits
 

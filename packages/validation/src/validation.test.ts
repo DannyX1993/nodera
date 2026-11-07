@@ -322,6 +322,96 @@ describe("domain validation", () => {
   });
 });
 
+describe("custom conditions and property rules", () => {
+  const condDef: NodeDefinition = {
+    ...simpleNodeDef,
+    id: "test.cond",
+    ports: [
+      port("out", "output", { customConditionId: "test.cond.max-one" }),
+      port("in", "input"),
+    ],
+    properties: [
+      {
+        id: "url",
+        type: "string",
+        validations: [{ kind: "custom", validatorId: "test.rule.url" }],
+        visibleWhen: { kind: "custom", conditionId: "test.cond.show" },
+      },
+    ],
+  };
+
+  function condFixture(): Fixture {
+    return buildFixture({
+      nodeDefinition: condDef,
+      build: (graph) => {
+        addNode(graph, "n1", "test.cond", [instance("out", "output"), instance("in", "input")], {});
+        addNode(graph, "n2", "test.cond", [instance("out", "output"), instance("in", "input")], {});
+        connect(graph, "e1", ["n1", "out"], ["n2", "in"]);
+      },
+    });
+  }
+
+  it("reports unknown connection and property condition ids", () => {
+    const { context } = condFixture();
+    const codes = validateGraph(context).issues.map((i) => i.code);
+    expect(codes).toContain("domain.unknown-condition");
+    expect(codes).toContain("domain.unknown-property-rule");
+    expect(codes).toContain("domain.unknown-property-condition");
+  });
+
+  it("evaluates registered connection conditions and reports failures", () => {
+    const fixture = condFixture();
+    fixture.validators.registerConnectionCondition({
+      id: "test.cond.max-one",
+      evaluate: ({ edgeId }) => edgeId !== "e1", // fails on purpose
+    });
+    fixture.validators.registerPropertyRule({
+      id: "test.rule.url",
+      severity: "warning",
+      validate: ({ value }) =>
+        typeof value === "string" && value.startsWith("https://")
+          ? []
+          : [{ code: "test.rule.insecure-url", message: "url must be https" }],
+    });
+    fixture.validators.registerPropertyCondition({
+      id: "test.cond.show",
+      evaluate: (values) => values["__show"] === true,
+    });
+    const report = validateGraph(fixture.context);
+    const codes = report.issues.map((i) => i.code);
+    expect(codes).toContain("domain.custom-condition-failed");
+    expect(codes).toContain("test.rule.insecure-url");
+    expect(codes).not.toContain("domain.unknown-condition");
+    expect(codes).not.toContain("domain.unknown-property-rule");
+    expect(codes).not.toContain("domain.unknown-property-condition");
+    const failed = report.issues.find((i) => i.code === "domain.custom-condition-failed");
+    expect(failed?.metadata).toMatchObject({ conditionId: "test.cond.max-one", role: "source" });
+    const ruleIssue = report.issues.find((i) => i.code === "test.rule.insecure-url");
+    expect(ruleIssue?.severity).toBe("warning");
+    expect(ruleIssue?.elementId).toBe("n1");
+  });
+
+  it("evaluates edge-definition conditions", () => {
+    const fixture = buildFixture({
+      nodeDefinition: simpleNodeDef,
+      edgeDefinition: { id: "test.gated", name: "Gated", version: "1.0.0", conditionId: "test.gate" },
+      build: (graph) => {
+        addNode(graph, "n1", "test.source", [instance("out", "output")], { name: "a" });
+        addNode(graph, "n2", "test.source", [instance("in", "input")], { name: "b" });
+        connect(graph, "e1", ["n1", "out"], ["n2", "in"], "test.gated");
+      },
+    });
+    const unknown = validateGraph(fixture.context).issues.map((i) => i.code);
+    expect(unknown).toContain("domain.unknown-condition");
+
+    fixture.validators.registerConnectionCondition({ id: "test.gate", evaluate: () => false });
+    const failed = validateGraph(fixture.context).issues.find(
+      (i) => i.code === "domain.custom-condition-failed",
+    );
+    expect(failed?.metadata).toMatchObject({ conditionId: "test.gate", role: "definition" });
+  });
+});
+
 describe("level filtering", () => {
   it("restricts validation to requested levels", () => {
     const fixture = buildFixture({

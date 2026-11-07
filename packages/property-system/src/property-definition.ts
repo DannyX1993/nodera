@@ -36,6 +36,15 @@ export type PropertyVisibilityCondition =
   | { readonly kind: "custom"; readonly conditionId: string };
 
 /**
+ * An alternative option set applied dynamically. Conditions use the same
+ * serializable, representation-independent evaluation as visibility.
+ */
+export interface PropertyOptionSet {
+  readonly when: PropertyVisibilityCondition;
+  readonly options: readonly PropertyOption[];
+}
+
+/**
  * A declarative property definition.
  *
  * The data contract (type plus optional JSON Schema constraints) stays
@@ -71,8 +80,19 @@ export interface PropertyDefinition {
   readonly validations?: readonly PropertyValidation[];
   /** Dynamic visibility condition evaluated against other property values. */
   readonly visibleWhen?: PropertyVisibilityCondition;
+  /**
+   * Dynamic editability: the property is only editable when the condition
+   * holds. Stored values stay valid; this gates modification, not validity.
+   */
+  readonly enabledWhen?: PropertyVisibilityCondition;
   /** Ids of other properties this one depends on (renderer reactivity). */
   readonly dependsOn?: readonly string[];
+  /**
+   * Alternative option sets for `select` / `multi-select`: the first set
+   * whose condition holds replaces the static `options`. Lets one field
+   * modify another dynamically while staying fully serializable.
+   */
+  readonly optionSets?: readonly PropertyOptionSet[];
   /** Registered custom component id; required for `custom` type. */
   readonly component?: string;
   /** Additional definition metadata. */

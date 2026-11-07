@@ -47,12 +47,16 @@ export const domainValidator: GraphValidator = {
           });
         }
       }
+      issues.push(...validatePropertyRules(node.id, definition, node.getProperties(), validators));
+      issues.push(...validatePropertyConditions(node.id, definition, node.getProperties(), validators));
     }
 
     for (const edge of graph.getEdges()) {
       issues.push(...validateEdgeEndpoints(context, edge));
       issues.push(...validateEdgeDefinitionRestrictions(context, edge));
+      issues.push(...validateConnectionConditions(context, edge));
     }
+    issues.push(...unknownConnectionConditionIds(context));
     return issues;
   },
 };
@@ -64,6 +68,178 @@ function issue(
   metadata: Record<string, unknown>,
 ): ValidationIssue {
   return { code, severity: "error", message, elementId, metadata };
+}
+
+/**
+ * Reports port declarations and edge definitions whose custom connection
+ * condition id has no registered evaluator, even without connections.
+ */
+function unknownConnectionConditionIds(context: ValidationContext): readonly ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const { graph, nodes, edges, validators } = context;
+  const reported = new Set<string>();
+  const report = (conditionId: string, elementId: string, kind: string): void => {
+    if (reported.has(`${kind}:${conditionId}`)) {
+      return;
+    }
+    reported.add(`${kind}:${conditionId}`);
+    issues.push(
+      issue(
+        "domain.unknown-condition",
+        `Custom condition "${conditionId}" referenced by ${kind} "${elementId}" has no registered evaluator`,
+        elementId,
+        { conditionId, conditionKind: kind },
+      ),
+    );
+  };
+  for (const node of graph.getNodes()) {
+    const definition = nodes.get(node.definitionId);
+    for (const port of definition?.ports ?? []) {
+      if (port.customConditionId !== undefined && validators.getConnectionCondition(port.customConditionId) === undefined) {
+        report(port.customConditionId, node.id, `port "${port.id}" of node`);
+      }
+    }
+  }
+  for (const edge of graph.getEdges()) {
+    if (edge.definitionId === undefined) {
+      continue;
+    }
+    const definition = edges.get(edge.definitionId);
+    if (definition?.conditionId !== undefined && validators.getConnectionCondition(definition.conditionId) === undefined) {
+      report(definition.conditionId, edge.id, `edge definition "${definition.id}" on edge`);
+    }
+  }
+  return issues;
+}
+
+/**
+ * Evaluates registered custom conditions for one edge: those declared on its
+ * endpoint ports and on its edge definition. Each condition runs once per
+ * edge; a failing condition is a domain error.
+ */
+function validateConnectionConditions(context: ValidationContext, edge: Edge): readonly ValidationIssue[] {
+  const { graph, nodes, edges, validators } = context;
+  const issues: ValidationIssue[] = [];
+  const { source, target } = edge.connection;
+  const sourceNode = graph.getNode(source.nodeId);
+  const targetNode = graph.getNode(target.nodeId);
+  const edgeDefinition = edge.definitionId === undefined ? undefined : edges.get(edge.definitionId);
+  const checks: readonly { readonly conditionId: string | undefined; readonly role: "source" | "target" | "definition" }[] = [
+    {
+      conditionId: sourceNode === undefined
+        ? undefined
+        : nodes.get(sourceNode.definitionId)?.ports.find((p) => p.id === source.portId)?.customConditionId,
+      role: "source",
+    },
+    {
+      conditionId: targetNode === undefined
+        ? undefined
+        : nodes.get(targetNode.definitionId)?.ports.find((p) => p.id === target.portId)?.customConditionId,
+      role: "target",
+    },
+    { conditionId: edgeDefinition?.conditionId, role: "definition" },
+  ];
+  const evaluated = new Set<string>();
+  const input = {
+    edgeId: edge.id,
+    sourceNodeId: source.nodeId,
+    sourcePortId: source.portId,
+    targetNodeId: target.nodeId,
+    targetPortId: target.portId,
+  };
+  for (const check of checks) {
+    const conditionId = check.conditionId;
+    if (conditionId === undefined || evaluated.has(conditionId)) {
+      continue;
+    }
+    evaluated.add(conditionId);
+    const condition = validators.getConnectionCondition(conditionId);
+    if (condition !== undefined && !condition.evaluate(input)) {
+      issues.push(
+        issue(
+          "domain.custom-condition-failed",
+          `Connection "${edge.id}" does not satisfy custom condition "${conditionId}"`,
+          edge.id,
+          { conditionId, role: check.role },
+        ),
+      );
+    }
+  }
+  return issues;
+}
+
+/**
+ * Runs custom property validation rules referenced by definitions and
+ * reports unknown rule ids: a declared reference must resolve or be reported.
+ */
+function validatePropertyRules(
+  nodeId: string,
+  definition: NodeDefinition,
+  values: Readonly<Record<string, unknown>>,
+  validators: ValidationContext["validators"],
+): readonly ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const property of definition.properties) {
+    for (const validation of property.validations ?? []) {
+      if (validation.kind !== "custom") {
+        continue;
+      }
+      const rule = validators.getPropertyRule(validation.validatorId);
+      if (rule === undefined) {
+        issues.push(
+          issue(
+            "domain.unknown-property-rule",
+            `Property "${property.id}" of node "${nodeId}" references unknown validation rule "${validation.validatorId}"`,
+            nodeId,
+            { propertyId: property.id, ruleId: validation.validatorId },
+          ),
+        );
+        continue;
+      }
+      for (const partial of rule.validate({ definition: property, value: values[property.id] })) {
+        issues.push({
+          ...partial,
+          severity: rule.severity,
+          elementId: nodeId,
+          metadata: { propertyId: property.id, ruleId: validation.validatorId },
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * Reports custom visibility/editability condition ids without a registered
+ * evaluator. Registered conditions are presentation concerns and are not
+ * asserted here.
+ */
+function validatePropertyConditions(
+  nodeId: string,
+  definition: NodeDefinition,
+  values: Readonly<Record<string, unknown>>,
+  validators: ValidationContext["validators"],
+): readonly ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const property of definition.properties) {
+    const conditions = [property.visibleWhen, property.enabledWhen];
+    for (const condition of conditions) {
+      if (condition?.kind !== "custom") {
+        continue;
+      }
+      if (validators.getPropertyCondition(condition.conditionId) === undefined) {
+        issues.push(
+          issue(
+            "domain.unknown-property-condition",
+            `Property "${property.id}" of node "${nodeId}" references unknown condition "${condition.conditionId}"`,
+            nodeId,
+            { propertyId: property.id, conditionId: condition.conditionId },
+          ),
+        );
+      }
+    }
+  }
+  return issues;
 }
 
 function validateRequiredProperties(
