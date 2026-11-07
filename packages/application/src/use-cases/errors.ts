@@ -14,7 +14,9 @@ export type UseCaseErrorKind =
   | "self-loop-forbidden"
   | "multi-edge-forbidden"
   | "cycle-forbidden"
-  | "invalid-input";
+  | "invalid-input"
+  | "empty-selection"
+  | "empty-clipboard";
 
 export interface UseCaseError {
   readonly kind: UseCaseErrorKind;

@@ -7,7 +7,7 @@
  * (AGENTS.md §5.3). It knows nothing about React, React Flow or the DOM.
  */
 
-import { Graph } from "@nodera/graph-model";
+import { Graph, type GraphSettings } from "@nodera/graph-model";
 import { createEdgeId, createGraphId, createNodeId, type GraphId } from "@nodera/contracts";
 import { NoderaDomain } from "@nodera/domain";
 import type { Edge, Node } from "@nodera/graph-model";
@@ -26,6 +26,8 @@ export interface ClipboardEntry {
 export interface EditorEngineOptions {
   /** Identifier for the initial graph. Defaults to a generated graph id. */
   readonly graphId?: string;
+  /** Structural settings of the initial graph (self-loop/multi-edge/cycle policies). */
+  readonly graphSettings?: GraphSettings;
 }
 
 /** Command factory type used by use cases to describe reversible changes. */
@@ -58,7 +60,11 @@ export class EditorEngine {
     this.events = new EventBus();
     this.history = new HistoryEngine<EditorState>();
     this.state = {
-      graph: new Graph(createInitialGraphId(options.graphId)),
+      graph: new Graph(
+        createInitialGraphId(options.graphId),
+        {},
+        options.graphSettings,
+      ),
       selectedNodes: new Set(),
       selectedEdges: new Set(),
     };
