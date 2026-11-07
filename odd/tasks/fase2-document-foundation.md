@@ -47,6 +47,8 @@ Quotes are verbatim from the user's request and the referenced docs.
 - L3: Runtime writer gate refused subagent launch for T3/T4 (inline required); both serializers written inline, TDD RED→GREEN observed for each.
 - L4: Preservation contract decision: the document layer is lossless (text→document→text round-trips everything, test-enforced); the graph boundary (`documentToGraph`) is intentionally lossy for fields the domain cannot represent (vendor unknowns, groups) and preserves everything domain-representable, including unknown node types. Document edges gain `settings` and `metadata.extra` so structural rules and domain extra metadata survive round-trips.
 - L5: Versioning stamps `version` after each migration hop (migrations declare `from`/`to`; the migrator owns the stamp). Unsupported versions are refused with `document.unsupported-version`, never rewritten.
+- L6: Post-implementation review found and fixed two defects (commit 0830c09): edge metadata was silently dropped on export; edge endpoint directions were not validated against input/output/bidirectional. All affected suites re-run GREEN afterward.
+- L7: Deferred by scope decision (not fase-2 gaps): ImporterRegistry/ExporterRegistry (defined in the Fase 1 registry module list, never implemented; they belong to the extension/plugin era, Fases 6-7), and a machine-readable public JSON Schema artifact for GGD (FASE2 lists "Esquemas públicos"; semantics are documented in docs/GGD-CONTRACT.md — needs the user's go-ahead because validation-in-tests would add an ajv devDependency).
 
 ## Verification
 
