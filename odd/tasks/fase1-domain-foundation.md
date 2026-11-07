@@ -38,3 +38,36 @@ Core del dominio de Nodera: modelos de grafo, definiciones, registros y validaci
 
 - L1: "Vamo a hacer ahora solo la Fase 1 especificada en @docs/ROADMAP.md . La definición de modulos de esta fase está en @docs/FASE1-DEFINITION.md y debes respetar la arquitectura global presente en @docs/GLOBAL-ARCHITECTURE.md"
 - L2: Decisiones de topología (7 paquetes), Vitest y no-emit confirmadas por el usuario vía cuestionario.
+
+## Commits
+
+- T1 → 568bb8c chore(domain): scaffold phase-1 package infrastructure
+- T2 → 5aea3e9 feat(contracts): shared identifiers, results, diagnostics and registry port
+- T3 → e739685 feat(graph-model): graph, node, edge, port and connection entities
+- T4 → 8be6902 feat(property-system): declarative property definitions
+- T5 → 62ffa36 feat(node-registry): node definitions and NodeRegistry
+- T6 → 54a14de feat(edge-registry): edge definitions and EdgeRegistry
+- T7 → cd93f1f feat(validation): structural and domain graph validation
+- T8 → 7485da2 feat(domain): facade composing the phase-1 core
+
+## Coverage
+
+- S1–S2: solo Fase 1; resultado verificable sin UI (domain-facade.test.ts integra todo el core).
+- S3–S4: graph-model (entidades + puertos polimórficos, sin asumir forma del grafo).
+- S5–S7: node-registry (contrato declarativo completo, definición ≠ instancia, CRUD del registro).
+- S8: edge-registry (presentación separada de la semántica almacenada).
+- S9: graph-model/port.ts (declaraciones con dirección, tipo, multiplicidad, cardinalidad, reglas, visual, metadata).
+- S10–S11: property-system (16 tipos, metamodelo UI propio, JSON Schema 2020-12 como referencia, condiciones dinámicas serializables).
+- S12: contracts/registry.ts + NodeRegistry (categoría) + EdgeRegistry (connection type); resolución de rangos de versión queda como limitación documentada.
+- S13–S15: validation (structural + domain; document/extension levels quedan para Fase 2/Fase 7; reporte separa validez estructural de configuración).
+- S16: verificado por grep — sin imports de React/React Flow/DOM en los 7 paquetes.
+- S17: aplicado (Vitest, noEmit, 7 paquetes).
+
+## Verification
+
+- `pnpm exec turbo run build typecheck test`: 21/21 tareas OK (7 paquetes × 3), 67 tests en verde.
+- Grep de dependencias prohibidas: vacío.
+- git diff master revisado: solo paquetes de Fase 1, turbo.json, lockfile y este documento.
+- Engram no disponible (binario ausente): mirror de memoria no persistido.
+
+Risk: none
