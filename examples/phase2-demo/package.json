@@ -1,0 +1,16 @@
+{
+  "name": "@nodera/example-phase2-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runnable Phase 2 demo: export a graph to portable GGD documents in JSON and YAML, parse them back and rebuild the graph.",
+  "dependencies": {
+    "@nodera/contracts": "workspace:*",
+    "@nodera/document": "workspace:*",
+    "@nodera/edge-registry": "workspace:*",
+    "@nodera/graph-model": "workspace:*",
+    "@nodera/node-registry": "workspace:*",
+    "@nodera/serialization-json": "workspace:*",
+    "@nodera/serialization-yaml": "workspace:*"
+  }
+}
