@@ -52,7 +52,21 @@ importers:
 
   packages/core: {}
 
-  packages/document: {}
+  packages/document:
+    dependencies:
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@nodera/graph-model':
+        specifier: workspace:*
+        version: link:../graph-model
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7
 
   packages/domain:
     dependencies:

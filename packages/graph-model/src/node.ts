@@ -26,6 +26,8 @@ export class Node {
     properties: Readonly<Record<string, unknown>> = {},
     readonly position?: NodePosition,
     readonly metadata?: Readonly<Record<string, unknown>>,
+    /** Version of the referenced definition this instance was created against, when known. */
+    readonly definitionVersion?: string,
   ) {
     for (const port of ports) {
       if (this.portIds.has(port.id)) {
