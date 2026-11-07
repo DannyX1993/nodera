@@ -2,5 +2,22 @@
   "name": "@nodera/serialization-yaml",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/serialization-yaml"
+  "type": "module",
+  "description": "YAML serialization for the Generic Graph Document (GGD).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/document": "workspace:*",
+    "yaml": "^2.4.0",
+    "@nodera/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }
