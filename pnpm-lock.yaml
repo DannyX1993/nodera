@@ -33,6 +33,30 @@ importers:
         specifier: workspace:*
         version: link:../../packages/graph-model
 
+  examples/phase2-demo:
+    dependencies:
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@nodera/document':
+        specifier: workspace:*
+        version: link:../../packages/document
+      '@nodera/edge-registry':
+        specifier: workspace:*
+        version: link:../../packages/edge-registry
+      '@nodera/graph-model':
+        specifier: workspace:*
+        version: link:../../packages/graph-model
+      '@nodera/node-registry':
+        specifier: workspace:*
+        version: link:../../packages/node-registry
+      '@nodera/serialization-json':
+        specifier: workspace:*
+        version: link:../../packages/serialization-json
+      '@nodera/serialization-yaml':
+        specifier: workspace:*
+        version: link:../../packages/serialization-yaml
+
   packages/adapter-storage-http: {}
 
   packages/adapter-storage-local: {}

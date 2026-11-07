@@ -44,6 +44,9 @@ Quotes are verbatim from the user's request and the referenced docs.
 - L1 (verbatim): "Vamos a hacer ahora solo la Fase 2 especificada en @docs/ROADMAP.md . La definición de modulos de esta fase está en @docs/FASE2-DEFINITION.md y debes respetar la arquitectura global presente en @docs/GLOBAL-ARCHITECTURE.md. Además debes tener en cuenta lo que se ha hecho en la fase 1 definida en el documento @docs/FASE1-DEFINITION.md . Recuerda que debes usar TDD estricto."
 - L1b (verbatim): "Recuerda tambien que debes reutilizar todo lo que sea necesario con tal de no hacer reimplementaciones (DRY)"
 - L2: Explorer evidence mw5q143b-2-etcd — frictions adopted: `type` in document ↔ `Node.definitionId`; `metadata.id` ↔ `Graph.id`; PortInstance docs keep `{id, direction, declarationId?}`; groups preserved verbatim (no domain model yet); `ValidationLevel` gains `document`; `yaml` dependency added to serialization-yaml only.
+- L3: Runtime writer gate refused subagent launch for T3/T4 (inline required); both serializers written inline, TDD RED→GREEN observed for each.
+- L4: Preservation contract decision: the document layer is lossless (text→document→text round-trips everything, test-enforced); the graph boundary (`documentToGraph`) is intentionally lossy for fields the domain cannot represent (vendor unknowns, groups) and preserves everything domain-representable, including unknown node types. Document edges gain `settings` and `metadata.extra` so structural rules and domain extra metadata survive round-trips.
+- L5: Versioning stamps `version` after each migration hop (migrations declare `from`/`to`; the migrator owns the stamp). Unsupported versions are refused with `document.unsupported-version`, never rewritten.
 
 ## Verification
 
@@ -52,8 +55,24 @@ Quotes are verbatim from the user's request and the referenced docs.
 
 ## Coverage
 
-(to fill per S# at close)
+- S1: all modules implemented — document (`packages/document`), JSON (`packages/serialization-json`), YAML (`packages/serialization-yaml`); responsibilities covered: serialización/deserialización (serializers), validación (S5/S8), versionado y migraciones (versioning), importación/exportación (mapping), normalización (normalize), extensiones desconocidas (preservation).
+- S2: serializers are pure text⇄document adapters; no React/DOM/framework types anywhere in the new packages (typecheck-enforced).
+- S3: every task observed RED before its implementation; integration tests (preservation.test.ts) pinned already-built cross-package behavior after the fact (nothing new to make pass).
+- S4: DRY — serializers delegate to `findDocumentIssues`/`normalizeGraphDocument`; YAML parser is the `yaml` npm package; semver lives once in `contracts/src/version.ts`; Maven-level `Result`/`ValidationIssue` reused everywhere.
+- S5: GGD contract per example, with reconciled mapping; formalized in `docs/GGD-CONTRACT.md`.
+- S6: round-trip proven by `mapping.test.ts` (graph→doc→graph equivalence incl. settings/positions/ports/properties/metadata/labels/versions) and the phase-2 demo (JSON and YAML rebuild equal graphs).
+- S7: preservation — `preservation.test.ts` (text→document→text lossless incl. unknown types/extensions/fields/groups) and graph-boundary rule per L4.
+- S8: `document` level added to `ValidationLevel`; structural `document.*` codes; validation never mutates/repairs documents (test).
+- S9: format version vs definition versions distinguished (`GraphDocument.version` vs node `version`); explicit registered migrations; unsupported versions refused without rewriting (versioning tests).
+- S10: all fallible operations return `Result`; text failures are `parse.*` diagnostics, never thrown for data problems.
+- S11: serializer guard rejects functions/symbols with `document.non-portable-value` (test in each serializer + normalize tests).
+- S12: new packages match workspace conventions (module/main/types/scripts/tsconfig/vitest.config).
+- Verification run: `turbo typecheck test build` → 21/21 tasks successful for the 7 affected packages; demo executed manually via `node --experimental-strip-types examples/phase2-demo/index.ts`.
 
 ## Commits
 
-(to fill)
+- f2-a: 4b88e14 feat(document): portable GGD contract, normalization and graph mapping (T1, T2)
+- f2-a docs: 00e4f42 docs(odd): track fase 2 document foundation specs and tasks
+- f2-b: 990b5ab feat(serialization): JSON and YAML serializers for GGD documents (T3, T4)
+- f2-c: bd0d193 feat(document): document-level validation and explicit version migrations (T5, T6)
+- f2-d: (this commit) end-to-end preservation tests, phase-2 demo, GGD contract docs (T7, T8)
