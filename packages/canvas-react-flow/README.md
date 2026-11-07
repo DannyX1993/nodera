@@ -14,6 +14,12 @@ React Flow canvas adapter for Nodera (Phase 4). Translates the Nodera domain mod
 
 ## Usage
 
+Import the React Flow stylesheet once in your host app before rendering:
+
+```ts
+import "@xyflow/react/dist/style.css";
+```
+
 See `examples/phase4-demo` (`pnpm --filter @nodera/example-phase4-demo dev`).
 
 ## Architecture rules honored
