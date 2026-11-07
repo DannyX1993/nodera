@@ -75,9 +75,13 @@ Import level (`documentToGraph`): `document.duplicate-node-id`, `document.duplic
 
 Versioning level: `document.unsupported-version`, `document.migration-failed`. Nothing is dropped silently: unknown fields are preserved, and incompatible versions are refused with diagnostics while the source data stays intact. Uniqueness of node/edge ids is enforced at import time (duplicate ids are diagnostics, never exceptions); conflicting migration tables (two migrations from one version, or a migration that does not change the version) are programming errors rejected when the migrator is built.
 
+## Public JSON Schema
+
+A machine-readable Draft 2020-12 schema for GGD 1.0.0 ships at `packages/document/schema/ggd-1.0.0.schema.json` (`$id` `https://nodera.dev/schemas/ggd-1.0.0.json`). It expresses every structural rule of this contract and keeps unknown fields valid (no `additionalProperties: false` anywhere); its semver pattern is the single source used by `isValidSemver` in `@nodera/contracts`.
+
 ## API surface (as of this phase)
 
-- `@nodera/document`: `normalizeGraphDocument`, `findDocumentIssues`, `validateGraphDocument`, `graphToDocument`, `documentToGraph`, `documentVersionMigrator`, types (`GraphDocument`, …), `GGD_FORMAT`.
+- `@nodera/document`: `normalizeGraphDocument`, `findDocumentIssues`, `validateGraphDocument`, `graphToDocument`, `documentToGraph`, `documentVersionMigrator`, `extractCarriedDocumentData`, types (`GraphDocument`, `CarriedDocumentData`, …), `GGD_FORMAT`, plus the public JSON Schema artifact.
 - `@nodera/serialization-json`: `serializeJson`, `parseJsonDocument`.
 - `@nodera/serialization-yaml`: `serializeYaml`, `parseYamlDocument`.
 

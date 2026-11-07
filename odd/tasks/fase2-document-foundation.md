@@ -19,6 +19,7 @@ Quotes are verbatim from the user's request and the referenced docs.
 - S10: Import/Export are public, framework-agnostic functions: serialize/parse produce either a document or structured diagnostics (Result convention), never throw for data problems.
 - S11: No serializable document field may hold functions, class instances, DOM or React references (validated by tests mirroring AGENTS.md §14 checks).
 - S13: "Esquemas públicos" (FASE2-DEFINITION portability list): publish a machine-readable JSON Schema artifact for GGD 1.0.0, validated in tests with ajv (Draft 2020-12, the AGENTS §3 reference standard); schema is data that must tolerate unknown fields (additionalProperties stays open).
+- S13 verification: schema.ggd-1.0.0 ships with 7 ajv-based tests (compilation, example doc, missing metadata.id, bad version/format, settings enum, unknown-field tolerance, bad port direction); semver pattern is byte-identical to contracts version.ts; parent-verified after worker delivery.
 - S12: New packages must match the existing workspace conventions (type module, tsc --noEmit build/typecheck, vitest run --passWithNoTests, colocated src/*.test.ts) per explorer evidence of packages/graph-model/package.json.
 
 ## Non-goals
@@ -40,7 +41,7 @@ Quotes are verbatim from the user's request and the referenced docs.
 | T7 | S7,S6,S3,S4 | inline end-to-end unknown preservation round-trip tests | f2-d |
 | T8 | S6,S10 | inline examples/phase2-demo + docs + affected typecheck/lint/test/build | f2-d |
 | T9 | S7 | inline carried-data side channel across the graph boundary (user decision 1) | f2-e |
-| T10 | S5,S13 | worker: public GGD 1.0.0 JSON Schema (Draft 2020-12) + ajv validation tests (user decision 2) | f2-e |
+| T10 | S5,S13 | worker mw5uhebe-2-p0c5: public GGD 1.0.0 JSON Schema (Draft 2020-12) + ajv validation tests (user decision 2) — verified by parent: pattern matches contracts, no additionalProperties:false, 58/58 GREEN | f2-e |
 
 ## Log
 

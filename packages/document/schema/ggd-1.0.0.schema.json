@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nodera.dev/schemas/ggd-1.0.0.json",
+  "title": "Generic Graph Document",
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "portDirection": {
+      "type": "string",
+      "enum": ["input", "output", "bidirectional"]
+    },
+    "policy": {
+      "type": "string",
+      "enum": ["allow", "forbid"]
+    },
+    "document": {
+      "type": "object",
+      "required": ["format", "version", "metadata", "graph"],
+      "properties": {
+        "format": {
+          "const": "ggd"
+        },
+        "version": {
+          "$ref": "#/$defs/semver"
+        },
+        "metadata": {
+          "$ref": "#/$defs/metadata"
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "version"],
+            "properties": {
+              "id": { "$ref": "#/$defs/nonEmptyString" },
+              "version": { "$ref": "#/$defs/semver" }
+            }
+          }
+        },
+        "graph": {
+          "$ref": "#/$defs/graph"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "extra": { "type": "object" }
+      }
+    },
+    "graph": {
+      "type": "object",
+      "required": ["nodes"],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/node" }
+        },
+        "edges": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/edge" }
+        },
+        "groups": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "selfLoops": { "$ref": "#/$defs/policy" },
+            "multiEdges": { "$ref": "#/$defs/policy" },
+            "cycles": { "$ref": "#/$defs/policy" }
+          }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "type": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/semver" },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          }
+        },
+        "properties": { "type": "object" },
+        "metadata": { "type": "object" },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "direction"],
+            "properties": {
+              "id": { "$ref": "#/$defs/nonEmptyString" },
+              "direction": { "$ref": "#/$defs/portDirection" },
+              "declarationId": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "required": ["nodeId", "portId"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/nonEmptyString" },
+        "portId": { "$ref": "#/$defs/nonEmptyString" },
+        "direction": { "$ref": "#/$defs/portDirection" }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["id", "source", "target"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "type": { "type": "string" },
+        "label": { "type": "string" },
+        "metadata": { "type": "object" },
+        "source": { "$ref": "#/$defs/endpoint" },
+        "target": { "$ref": "#/$defs/endpoint" }
+      }
+    }
+  },
+  "$ref": "#/$defs/document"
+}
