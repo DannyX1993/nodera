@@ -1,0 +1,11 @@
+{
+  "name": "@nodera/example-phase3-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runnable Phase 3 demo: edit a graph through use cases with undo/redo, events, selection, clipboard and validation.",
+  "dependencies": {
+    "@nodera/application": "workspace:*",
+    "@nodera/node-registry": "workspace:*"
+  }
+}
