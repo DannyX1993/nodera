@@ -250,15 +250,27 @@ function importNode(
     );
     return;
   }
-  const instance = new Node(
-    nodeId,
-    node.type,
-    ports,
-    { ...(node.properties ?? {}) },
-    position,
-    metadata,
-    node.version,
-  );
+  let instance: Node;
+  try {
+    instance = new Node(
+      nodeId,
+      node.type,
+      ports,
+      { ...(node.properties ?? {}) },
+      position,
+      metadata,
+      node.version,
+    );
+  } catch {
+    issues.push(
+      issue(
+        "document.duplicate-port-id",
+        `Node "${node.id}" declares duplicate port ids`,
+        node.id,
+      ),
+    );
+    return;
+  }
   const added = graph.addNode(instance);
   if (!added.ok) {
     const kind = added.error.kind;

@@ -16,9 +16,9 @@ This document describes the portable document format **as implemented** by `@nod
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `id` | string | Required. Identifies the graph; must be a valid graph id on import. |
-| `name`, `description` | string | Optional descriptive metadata. |
-| `tags` | string[] | Optional. |
+| `id` | string | Required, must be a valid graph id on import; uniqueness is enforced at import (duplicates are diagnostics, not exceptions). |
+| `name`, `description` | string | Optional; type-checked on import (strings). |
+| `tags` | string[] | Optional; type-checked on import (array of strings). |
 | `extra` | object | Domain metadata carried separately so vendor fields never collide with it. |
 | Unknown fields | any | Preserved verbatim. |
 
@@ -50,14 +50,20 @@ This document describes the portable document format **as implemented** by `@nod
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | string | Required, unique. |
-| `type` | string | Optional edge definition id. |
-| `source`, `target` | `{ nodeId, portId, direction? }` | Required references, resolved at import time. |
-| `label` | string | Optional. |
-| `metadata` | object | Optional. |
+| `type` | string | Optional edge definition id (string when present). |
+| `source`, `target` | `{ nodeId, portId, direction? }` | Required references, resolved at import time; `direction` may only be `input`, `output` or `bidirectional`. |
+| `label` | string | Optional (string when present). |
+| `metadata` | object | Optional; values must be JSON-serializable data (validated). |
 
 ## Diagnostics
 
-All failures are structural `document.*` codes (`document.invalid-format`, `document.invalid-version`, `document.missing-metadata-id`, `document.missing-graph-nodes`, `document.invalid-node`, `document.invalid-node-version`, `document.invalid-position`, `document.invalid-port`, `document.invalid-extension`, `document.invalid-edge`, `document.invalid-settings`, `document.non-portable-value`, `document.malformed-document`, …) plus text-level `parse.invalid-json` / `parse.invalid-yaml` and `serialize.non-portable-value`. Version moves use `document.unsupported-version` / `document.migration-failed`. Nothing is dropped silently: unknown fields are preserved, and incompatible versions are refused with diagnostics while the source data stays intact.
+Text and serialization level: `parse.invalid-json`, `parse.invalid-yaml`, `serialize.non-portable-value`.
+
+Structural document level: `document.malformed-document`, `document.invalid-format`, `document.invalid-version`, `document.missing-metadata-id`, `document.invalid-metadata`, `document.invalid-metadata-extra`, `document.invalid-extensions`, `document.invalid-extension`, `document.missing-graph-nodes`, `document.invalid-settings`, `document.invalid-node`, `document.invalid-node-version`, `document.invalid-node-id`, `document.invalid-node-properties`, `document.invalid-node-metadata`, `document.invalid-position`, `document.invalid-ports`, `document.invalid-port`, `document.non-portable-value` (also covers edge metadata), `document.invalid-edges`, `document.invalid-edge`, `document.invalid-edge-metadata`, `document.invalid-endpoint-direction`, `document.invalid-groups`, `document.invalid-group`.
+
+Import level (`documentToGraph`): `document.duplicate-node-id`, `document.duplicate-edge-id`, `document.duplicate-port-id`, `document.edge-references-unknown-node`, `document.edge-references-unknown-port`, plus the graph-policy refusals `document.self-loop-forbidden`, `document.multi-edge-forbidden`, `document.cycle-forbidden` when settings forbid them.
+
+Versioning level: `document.unsupported-version`, `document.migration-failed`. Nothing is dropped silently: unknown fields are preserved, and incompatible versions are refused with diagnostics while the source data stays intact. Uniqueness of node/edge ids is enforced at import time (duplicate ids are diagnostics, never exceptions); conflicting migration tables (two migrations from one version, or a migration that does not change the version) are programming errors rejected when the migrator is built.
 
 ## API surface (as of this phase)
 

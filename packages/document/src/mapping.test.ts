@@ -203,3 +203,77 @@ describe("documentToGraph", () => {
     expect((normalized.value.graph.nodes[0] as unknown as Record<string, unknown>)["vendorNodeField"]).toBe(7);
   });
 });
+
+describe("import diagnostics without throwing", () => {
+  it("reports duplicate node ids as document diagnostics, not exceptions", () => {
+    const result = documentToGraph({
+      format: "ggd",
+      version: "1.0.0",
+      metadata: { id: "graph-001" },
+      extensions: [],
+      graph: { nodes: [{ id: "n1", type: "t" }, { id: "n1", type: "t2" }] },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.error.some((issue) => issue.code === "document.duplicate-node-id")).toBe(true);
+  });
+
+  it("reports duplicate edge ids as document diagnostics, not exceptions", () => {
+    const result = documentToGraph({
+      format: "ggd",
+      version: "1.0.0",
+      metadata: { id: "graph-001" },
+      extensions: [],
+      graph: {
+        nodes: [{ id: "a", type: "t", ports: [{ id: "out", direction: "output" }] }, { id: "b", type: "t2", ports: [{ id: "in", direction: "input" }] }],
+        edges: [
+          { id: "e1", source: { nodeId: "a", portId: "out" }, target: { nodeId: "b", portId: "in" } },
+          { id: "e1", source: { nodeId: "a", portId: "out" }, target: { nodeId: "b", portId: "in" } },
+        ],
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.error.some((issue) => issue.code === "document.duplicate-edge-id")).toBe(true);
+  });
+
+  it("reports duplicate port ids inside one node instead of throwing", () => {
+    const result = documentToGraph({
+      format: "ggd",
+      version: "1.0.0",
+      metadata: { id: "graph-001" },
+      extensions: [],
+      graph: {
+        nodes: [{ id: "n1", type: "t", ports: [{ id: "p", direction: "input" }, { id: "p", direction: "output" }] }],
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.error.some((issue) => issue.code === "document.duplicate-port-id")).toBe(true);
+  });
+
+  it("defaults graph settings to allow-everything when the document omits them", () => {
+    const result = documentToGraph({
+      format: "ggd",
+      version: "1.0.0",
+      metadata: { id: "graph-001" },
+      extensions: [],
+      graph: { nodes: [] },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected a graph");
+    expect(result.value.settings).toEqual({ selfLoops: "allow", multiEdges: "allow", cycles: "allow" });
+  });
+
+  it("imports metadata.extra back into GraphMetadata.extra", () => {
+    const result = documentToGraph({
+      format: "ggd",
+      version: "1.0.0",
+      metadata: { id: "graph-001", extra: { vendor: { custom: 1 } } },
+      extensions: [],
+      graph: { nodes: [] },
+    });
+    if (!result.ok) throw new Error("expected a graph");
+    expect(result.value.metadata.extra).toEqual({ vendor: { custom: 1 } });
+  });
+});

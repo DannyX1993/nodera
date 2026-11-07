@@ -25,17 +25,30 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * functions, symbols or other non-serializable inhabitants.
  */
 function containsNonPortableValue(value: unknown, seen = new Set<unknown>()): boolean {
-  if (typeof value === "function" || typeof value === "symbol") {
+  if (
+    typeof value === "function" ||
+    typeof value === "symbol" ||
+    typeof value === "bigint"
+  ) {
     return true;
   }
-  if (!isPlainRecord(value)) {
+  if (value === null || typeof value !== "object") {
     return false;
   }
   if (seen.has(value)) {
     return false;
   }
   seen.add(value);
-  return Object.values(value).some((entry) => containsNonPortableValue(entry, seen));
+  const isArray = Array.isArray(value);
+  if (!isArray && Object.getPrototypeOf(value) !== Object.prototype) {
+    // Class instances (Date, Map, custom classes) are not portable data.
+    return true;
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    return true;
+  }
+  const entries = isArray ? value : Object.values(value);
+  return entries.some((entry) => containsNonPortableValue(entry, seen));
 }
 
 function issue(
@@ -177,6 +190,33 @@ function validateEdge(edge: Record<string, unknown>, issues: ValidationIssue[]):
       );
     }
   }
+  if (edge["type"] !== undefined && typeof edge["type"] !== "string") {
+    issues.push(
+      issue("document.invalid-edge", `Edge "${id}" type must be a string`, ["graph", "edges"], id),
+    );
+  }
+  if (edge["label"] !== undefined && typeof edge["label"] !== "string") {
+    issues.push(
+      issue("document.invalid-edge", `Edge "${id}" label must be a string`, ["graph", "edges"], id),
+    );
+  }
+  const metadata = edge["metadata"];
+  if (metadata !== undefined) {
+    if (!isPlainRecord(metadata)) {
+      issues.push(
+        issue("document.invalid-edge-metadata", `Edge "${id}" metadata must be an object`, ["graph", "edges"], id),
+      );
+    } else if (containsNonPortableValue(metadata)) {
+      issues.push(
+        issue(
+          "document.non-portable-value",
+          `Edge "${id}" metadata contains a non-portable value (functions and symbols are not serializable)`,
+          ["graph", "edges"],
+          id,
+        ),
+      );
+    }
+  }
 }
 
 /**
@@ -210,6 +250,20 @@ export function findDocumentIssues(raw: unknown): DocumentIssues {
     );
   }
   if (isPlainRecord(metadata)) {
+    const scalarTypesOk =
+      (metadata["name"] === undefined || typeof metadata["name"] === "string") &&
+      (metadata["description"] === undefined || typeof metadata["description"] === "string") &&
+      (metadata["tags"] === undefined ||
+        (Array.isArray(metadata["tags"]) && metadata["tags"].every((tag) => typeof tag === "string")));
+    if (!scalarTypesOk) {
+      issues.push(
+        issue(
+          "document.invalid-metadata",
+          'Document "metadata" name and description must be strings and tags a string array',
+          ["metadata"],
+        ),
+      );
+    }
     const extra = metadata["extra"];
     if (extra !== undefined && (!isPlainRecord(extra) || containsNonPortableValue(extra))) {
       issues.push(

@@ -115,3 +115,38 @@ describe("documentVersionMigrator", () => {
     expect(result.error.some((issue) => issue.code === "document.unsupported-version")).toBe(true);
   });
 });
+
+describe("migrator construction and output guarantees", () => {
+  it("rejects a self-referential migration at construction time", () => {
+    const migrations: DocumentMigration[] = [
+      { id: "loop", from: "1.0.0", to: "1.0.0", migrate: (raw) => ({ ...raw }) },
+    ];
+    expect(() => documentVersionMigrator("1.1.0", migrations)).toThrow(RangeError);
+  });
+
+  it("rejects two migrations claiming the same source version at construction time", () => {
+    const migrations: DocumentMigration[] = [
+      { id: "a", from: "1.0.0", to: "1.1.0", migrate: (raw) => ({ ...raw }) },
+      { id: "b", from: "1.0.0", to: "1.9.0", migrate: (raw) => ({ ...raw }) },
+    ];
+    expect(() => documentVersionMigrator("1.1.0", migrations)).toThrow(RangeError);
+  });
+
+  it("returns a fully normalized document: defaulted arrays are always present", () => {
+    const migrations: DocumentMigration[] = [
+      { id: "noop", from: "1.0.0", to: "1.1.0", migrate: (raw) => ({ ...raw }) },
+    ];
+    const migrator = documentVersionMigrator("1.1.0", migrations);
+    const result = migrator.migrate({
+      format: "ggd",
+      version: "1.0.0",
+      metadata: { id: "graph-001" },
+      graph: { nodes: [{ id: "n1", type: "t" }] },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected migration");
+    expect(result.value.extensions).toEqual([]);
+    expect(result.value.graph.groups).toEqual([]);
+    expect(result.value.version).toBe("1.1.0");
+  });
+});

@@ -241,3 +241,75 @@ describe("normalizeGraphDocument", () => {
     expect(result.error.some((issue) => issue.code === "document.invalid-port")).toBe(true);
   });
 });
+
+describe("non-portable value detection (deep)", () => {
+  it("rejects functions nested inside arrays in node properties", () => {
+    const result = normalizeGraphDocument(
+      rawDocument({ graph: { nodes: [{ id: "n1", type: "t", properties: { list: [() => "x"] } }] } }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.error.some((issue) => issue.code === "document.non-portable-value")).toBe(true);
+  });
+
+  it("rejects class instances such as Date values", () => {
+    const result = normalizeGraphDocument(
+      rawDocument({ graph: { nodes: [{ id: "n1", type: "t", properties: { at: new Date(0) } }] } }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.error.some((issue) => issue.code === "document.non-portable-value")).toBe(true);
+  });
+
+  it("rejects arrays or non-strings in metadata field types", () => {
+    const result = normalizeGraphDocument(
+      rawDocument({ metadata: { id: "graph-001", name: 42, tags: "demo" } }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.error.some((issue) => issue.code === "document.invalid-metadata")).toBe(true);
+  });
+
+  it("rejects a non-string edge label or type", () => {
+    const result = normalizeGraphDocument(
+      rawDocument({
+        graph: {
+          nodes: [{ id: "a", type: "t" }, { id: "b", type: "t" }],
+          edges: [
+            {
+              id: "e1",
+              type: { nested: true },
+              label: 7,
+              source: { nodeId: "a", portId: "out" },
+              target: { nodeId: "b", portId: "in" },
+            },
+          ],
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.error.some((issue) => issue.code === "document.invalid-edge")).toBe(true);
+  });
+
+  it("rejects non-portable values inside edge metadata", () => {
+    const result = normalizeGraphDocument(
+      rawDocument({
+        graph: {
+          nodes: [{ id: "a", type: "t" }, { id: "b", type: "t" }],
+          edges: [
+            {
+              id: "e1",
+              source: { nodeId: "a", portId: "out" },
+              target: { nodeId: "b", portId: "in" },
+              metadata: { at: new Date(0) },
+            },
+          ],
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.error.some((issue) => issue.code === "document.non-portable-value")).toBe(true);
+  });
+});

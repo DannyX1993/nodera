@@ -1,5 +1,10 @@
-import { err, ok, type Result, type ValidationIssue } from "@nodera/contracts";
-import { findDocumentIssues } from "./normalize.js";
+import {
+  err,
+  isValidSemver,
+  type Result,
+  type ValidationIssue,
+} from "@nodera/contracts";
+import { findDocumentIssues, normalizeGraphDocument } from "./normalize.js";
 import type { GraphDocument } from "./types.js";
 
 /** Migration payload: the raw document object between format versions. */
@@ -54,6 +59,22 @@ export function documentVersionMigrator(
   targetVersion: string,
   migrations: readonly DocumentMigration[],
 ): { readonly migrate: (document: unknown) => MigrationResult } {
+  // Conflicting migration tables are programming errors, not document data:
+  // they are rejected eagerly instead of misbehaving at runtime.
+  const sourceVersions = new Set<string>();
+  for (const migration of migrations) {
+    if (migration.from === migration.to) {
+      throw new RangeError(
+        `Migration "${migration.id}" must change the document version (from equals to "${migration.from}")`,
+      );
+    }
+    if (sourceVersions.has(migration.from)) {
+      throw new RangeError(
+        `Two migrations declare the same source version "${migration.from}"`,
+      );
+    }
+    sourceVersions.add(migration.from);
+  }
   return {
     migrate(document: unknown): MigrationResult {
       const issues = findDocumentIssues(document);
@@ -62,7 +83,7 @@ export function documentVersionMigrator(
       }
       let current: RawDocument = { ...(document as RawDocument) };
       if (current["version"] === targetVersion) {
-        return ok(current as unknown as GraphDocument);
+        return normalizeGraphDocument(current);
       }
       let guard = 0;
       while (current["version"] !== targetVersion) {
@@ -110,7 +131,7 @@ export function documentVersionMigrator(
         // destination, and the document always carries it explicitly.
         current = { ...migrated, version: migration.to };
       }
-      return ok(current as unknown as GraphDocument);
+      return normalizeGraphDocument(current);
     },
   };
 }
