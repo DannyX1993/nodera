@@ -2,5 +2,17 @@
   "name": "@nodera/contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/contracts"
+  "type": "module",
+  "description": "Shared contracts for the Nodera domain core: identifiers, validation diagnostics, and registry ports.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }

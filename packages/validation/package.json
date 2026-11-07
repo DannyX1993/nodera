@@ -2,5 +2,24 @@
   "name": "@nodera/validation",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/validation"
+  "type": "module",
+  "description": "Representation-independent graph validation: structural and domain levels, normalized issues, validator registry.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/contracts": "workspace:*",
+    "@nodera/edge-registry": "workspace:*",
+    "@nodera/graph-model": "workspace:*",
+    "@nodera/node-registry": "workspace:*",
+    "@nodera/property-system": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }

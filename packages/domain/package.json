@@ -2,5 +2,25 @@
   "name": "@nodera/domain",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/domain"
+  "type": "module",
+  "description": "Domain facade that composes the Nodera core: graph model, definitions, registries and validation.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/contracts": "workspace:*",
+    "@nodera/edge-registry": "workspace:*",
+    "@nodera/graph-model": "workspace:*",
+    "@nodera/node-registry": "workspace:*",
+    "@nodera/property-system": "workspace:*",
+    "@nodera/validation": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }

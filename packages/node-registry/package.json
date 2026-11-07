@@ -2,5 +2,22 @@
   "name": "@nodera/node-registry",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/node-registry"
+  "type": "module",
+  "description": "Declarative node definitions and the NodeRegistry: registration, lookup, versioning and conflicts.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/contracts": "workspace:*",
+    "@nodera/graph-model": "workspace:*",
+    "@nodera/property-system": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }
