@@ -31,8 +31,8 @@ import {
   type DocumentGraphSettings,
   type DocumentValidationReport,
   type GraphDocument,
-  type GraphImportResult,
 } from "@nodera/document";
+import type { Graph } from "@nodera/graph-model";
 import { loadGraph, type EditorEngine } from "@nodera/application";
 import { parseJsonDocument, serializeJson } from "@nodera/serialization-json";
 import { parseYamlDocument, serializeYaml } from "@nodera/serialization-yaml";
@@ -48,7 +48,7 @@ export type BuilderDocumentFormatName = "json" | "yaml";
  */
 export interface BuilderDocumentSerializer {
   readonly serialize: (document: GraphDocument) => Result<string, SdkIssues>;
-  readonly deserialize: (content: string) => Result<GraphImportResult, SdkIssues>;
+  readonly deserialize: (content: string) => Result<Graph, SdkIssues>;
 }
 
 /** The document surface of the builder. */
@@ -56,7 +56,7 @@ export interface BuilderDocumentApi {
   /** Builds the portable document of the live editor graph. */
   create(): GraphDocument;
   /** Normalizes, validates and loads a raw document as the editing target. */
-  import(input: unknown): Result<GraphImportResult, SdkIssues>;
+  import(input: unknown): Result<Graph, SdkIssues>;
   /** Text of the live document in the given format. */
   export(format: BuilderDocumentFormatName): Result<string, SdkIssues>;
   /** Text of the live document in the given format. */
@@ -65,7 +65,7 @@ export interface BuilderDocumentApi {
   deserialize(
     format: BuilderDocumentFormatName,
     content: string,
-  ): Result<GraphImportResult, SdkIssues>;
+  ): Result<Graph, SdkIssues>;
   /** Validates the structure of a raw document object. */
   validate(input: unknown): DocumentValidationReport;
   /** The same operations bound to one format, as a serializer object. */
@@ -201,6 +201,15 @@ function loadIssue(error: { readonly kind: string; readonly message: string }): 
 }
 
 /**
+ * Flattens the document package's `Result<Graph, MappingIssues>` into the SDK's
+ * single-level `Result<Graph, SdkIssues>`.
+ */
+function importGraph(document: GraphDocument): Result<Graph, SdkIssues> {
+  const rebuilt = documentToGraph(document);
+  return rebuilt.ok ? ok(rebuilt.value) : err(documentIssues(rebuilt.error));
+}
+
+/**
  * Builds the document facade of a builder over its editing session.
  *
  * The builder's configured format version is stamped on every document the
@@ -217,15 +226,22 @@ export function createDocumentApi(
     return carried === undefined ? live : mergeDocuments(carried, live);
   }
 
+  /**
+   * Rebuilds a graph from serialized content.
+   *
+   * The SDK boundary exposes exactly one `Result` level: the document package's
+   * nested `Result<Graph, MappingIssues>` is flattened here, with every mapping
+   * issue published as an `sdk.document-invalid` diagnostic.
+   */
   function deserialize(
     name: BuilderDocumentFormatName,
     content: string,
-  ): Result<GraphImportResult, SdkIssues> {
+  ): Result<Graph, SdkIssues> {
     const parsed = parseDocument(content, name);
     if (!parsed.ok) {
       return err(parsed.error);
     }
-    return ok(documentToGraph(parsed.value));
+    return importGraph(parsed.value);
   }
 
   /**
@@ -249,21 +265,21 @@ export function createDocumentApi(
   return {
     create,
 
-    import(input: unknown): Result<GraphImportResult, SdkIssues> {
+    import(input: unknown): Result<Graph, SdkIssues> {
       const normalized = normalizeGraphDocument(input);
       if (!normalized.ok) {
         return err(documentIssues(normalized.error));
       }
-      const rebuilt = documentToGraph(normalized.value);
+      const rebuilt = importGraph(normalized.value);
       if (!rebuilt.ok) {
-        return ok(rebuilt);
+        return rebuilt;
       }
       const loaded = loadGraph(editor, { graph: rebuilt.value });
       if (!loaded.ok) {
         return err([loadIssue(loaded.error)]);
       }
       carried = normalized.value;
-      return ok(rebuilt);
+      return ok(rebuilt.value);
     },
 
     export(name: BuilderDocumentFormatName): Result<string, SdkIssues> {

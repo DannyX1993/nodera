@@ -93,9 +93,7 @@ describe("document round-trips", () => {
 
       expect(parsed.ok).toBe(true);
       if (!parsed.ok) return;
-      expect(parsed.value.ok).toBe(true);
-      if (!parsed.value.ok) return;
-      const graph = parsed.value.value;
+      const graph = parsed.value;
       expect(graph.nodeCount).toBe(1);
       expect(graph.getNodes().map((node) => String(node.id))).toEqual([nodeId]);
       expect(graph.getNodes().map((node) => node.definitionId)).toEqual([REQUEST]);
@@ -143,9 +141,7 @@ describe("document import", () => {
 
     expect(imported.ok).toBe(true);
     if (!imported.ok) return;
-    expect(imported.value.ok).toBe(true);
-    if (!imported.value.ok) return;
-    expect(imported.value.value.getNodes().map((node) => String(node.id))).toEqual([
+    expect(imported.value.getNodes().map((node) => String(node.id))).toEqual([
       "node-a",
     ]);
 
@@ -244,11 +240,9 @@ describe("document serializer objects", () => {
     const viaMethod = builder.document.deserialize("json", text);
     expect(viaSerializer.ok).toBe(viaMethod.ok);
     if (!viaSerializer.ok || !viaMethod.ok) return;
-    expect(viaSerializer.value.ok).toBe(viaMethod.value.ok);
-    if (!viaSerializer.value.ok || !viaMethod.value.ok) return;
-    expect(
-      viaSerializer.value.value.getNodes().map((node) => String(node.id)),
-    ).toEqual(viaMethod.value.value.getNodes().map((node) => String(node.id)));
+    expect(viaSerializer.value.getNodes().map((node) => String(node.id))).toEqual(
+      viaMethod.value.getNodes().map((node) => String(node.id)),
+    );
   });
 });
 
