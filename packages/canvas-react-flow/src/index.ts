@@ -36,7 +36,16 @@ export type {
 
 // Canvas
 export { NoderaCanvasProvider, useNoderaCanvas } from "./canvas/nodera-canvas-provider.js";
-export { GraphCanvas, commitDraggedNodes, commitSelectionFromReactFlow } from "./canvas/graph-canvas.js";
+export {
+  GraphCanvas,
+  commitDraggedNodes,
+  commitSelectionFromReactFlow,
+  canvasBackgroundOptions,
+  canvasEdgeTypes,
+} from "./canvas/graph-canvas.js";
+export type { CanvasBackgroundOptions } from "./canvas/graph-canvas.js";
+export { canvasInteractionSettings } from "./canvas/interaction-mode.js";
+export type { CanvasInteractionMode, CanvasInteractionSettings } from "./canvas/interaction-mode.js";
 export { useEditorGraph } from "./canvas/use-editor-graph.js";
 export {
   NODE_DEFINITION_MIME_TYPE,

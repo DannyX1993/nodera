@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, createEvent, act, waitFor, cleanup } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import type { FC, ReactNode } from "react";
@@ -9,12 +9,22 @@ import {
   createEdge,
   selectNode,
   removeNode,
+  undo,
 } from "@nodera/application";
 import type { NodeDefinition } from "@nodera/node-registry";
-import { NodeRendererRegistry } from "../registries/renderer-registries.js";
+import type { EdgeDefinition } from "@nodera/edge-registry";
+import { EdgeRendererRegistry, NodeRendererRegistry } from "../registries/renderer-registries.js";
+import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
+import { DefaultEdgeRenderer } from "../renderers/default-edge-renderer.js";
 import { createNodeId } from "@nodera/contracts";
 
-import { GraphCanvas, commitDraggedNodes, commitSelectionFromReactFlow } from "./graph-canvas.js";
+import {
+  GraphCanvas,
+  canvasBackgroundOptions,
+  canvasEdgeTypes,
+  commitDraggedNodes,
+  commitSelectionFromReactFlow,
+} from "./graph-canvas.js";
 import type { GraphCanvasProps } from "./graph-canvas.js";
 import { NODE_DEFINITION_MIME_TYPE } from "./definition-drop.js";
 
@@ -87,10 +97,11 @@ describe("GraphCanvas", () => {
       expect(engine.history.canUndo()).toBe(true);
     });
 
-    it("commitDraggedNodes groups a multi-node drag as per-node undo units", () => {
+    it("commitDraggedNodes yields one undo unit per dragged node (documented phase-3 limitation)", () => {
       const engine = makeEngine();
       addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
       addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 10, y: 0 } });
+      const before = engine.history.size();
 
       commitDraggedNodes(engine, [
         { id: "n1", position: { x: 100, y: 0 } },
@@ -99,9 +110,16 @@ describe("GraphCanvas", () => {
 
       expect(engine.graph.getNode(createNodeId("n1"))?.position).toEqual({ x: 100, y: 0 });
       expect(engine.graph.getNode(createNodeId("n2"))?.position).toEqual({ x: 200, y: 0 });
-      // A single transaction yields a single undo step.
-      const undoCount = engine.history.canUndo();
-      expect(undoCount).toBe(true);
+
+      // The documented contract: grouping a whole multi-node drag into ONE
+      // history unit is not supported yet, so a two-node drag adds EXACTLY
+      // two undo units (never one, never more).
+      expect(engine.history.size()).toBe(before + 2);
+
+      // ...and therefore a single undo moves exactly one node back.
+      expect(undo(engine)).toBe(true);
+      expect(engine.graph.getNode(createNodeId("n2"))?.position).toEqual({ x: 10, y: 0 });
+      expect(engine.graph.getNode(createNodeId("n1"))?.position).toEqual({ x: 100, y: 0 });
     });
 
     it("does not commit anything for an empty drag", () => {
@@ -351,5 +369,149 @@ describe("GraphCanvas node definition drop", () => {
 
     expect(notPrevented).toBe(true);
     cleanup();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  F2: canvas background is token-driven (theme contract)             */
+/* ------------------------------------------------------------------ */
+
+describe("GraphCanvas canvas background", () => {
+  afterEach(cleanup);
+
+  it("paints the dot pattern with the canvas.backgroundDot token reference", () => {
+    const engine = makeEngine();
+    renderCanvas(engine);
+
+    // React Flow's `<Background color>` lands on its SVG element as the
+    // `--xy-background-pattern-color-props` custom property, so the token
+    // reference is observable in the rendered DOM.
+    const background = screen.getByTestId("rf__background");
+    expect(background.style.getPropertyValue("--xy-background-pattern-color-props")).toBe(
+      "var(--ndr-canvas-background-dot, #cbd5e1)",
+    );
+  });
+
+  it("uses the documented numeric dot gap, because a CSS variable cannot feed gap", () => {
+    const engine = makeEngine();
+    renderCanvas(engine);
+
+    // The rendered `<pattern>` is the dot grid itself: its size is the gap the
+    // canvas passes to React Flow (zoom is 1 in jsdom).
+    const pattern = screen.getByTestId("rf__background").querySelector("pattern");
+    expect(pattern).not.toBeNull();
+    expect(pattern?.getAttribute("width")).toBe("16");
+
+    // `canvas.backgroundDotSize` is a CSS *token string*, while React Flow's
+    // `gap` prop is numeric: the adapter owns the numeric default and states
+    // it once, in `canvasBackgroundOptions()`.
+    expect(canvasBackgroundOptions()).toEqual({
+      variant: "dots",
+      gap: 16,
+      color: "var(--ndr-canvas-background-dot, #cbd5e1)",
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  F3: interaction mode (S5 "Modo de interacción")                    */
+/* ------------------------------------------------------------------ */
+
+describe("GraphCanvas interaction mode", () => {
+  afterEach(cleanup);
+
+  // React Flow does not expose its resolved `panOnDrag`/`selectionOnDrag`
+  // props to jsdom, so the numeric/boolean mapping itself is asserted by
+  // `interaction-mode.test.ts` through the pure helper. These cases prove
+  // the canvas accepts every mode and keeps rendering.
+  it("renders the graph in select mode", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    renderCanvas(engine, { interactionMode: "select" });
+    expect(screen.getByText("App Node")).toBeDefined();
+  });
+
+  it("renders the graph in pan mode", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    renderCanvas(engine, { interactionMode: "pan" });
+    expect(screen.getByText("App Node")).toBeDefined();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  F4: custom EDGE renderer replacement (S3 level 2)                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * React Flow v12 renders an edge only once it can resolve the source/target
+ * handle bounds of both nodes; jsdom reports zero-sized elements, so no edge
+ * is ever attached to the DOM in this environment (verified: an edge renders
+ * no `path.react-flow__edge-path` at all). The edge replacement contract is
+ * therefore asserted where the canvas actually resolves it: `canvasEdgeTypes`
+ * — the map it hands to `<ReactFlow edgeTypes>` — plus a canvas-level case
+ * proving the registry prop is accepted and the graph keeps rendering.
+ */
+describe("GraphCanvas edge renderer replacement", () => {
+  afterEach(cleanup);
+
+  const CustomEdge = ((props: {
+    sourceX: number;
+    sourceY: number;
+    targetX: number;
+    targetY: number;
+  }) =>
+    createElement("path", {
+      "data-testid": "custom-edge-marker",
+      d: `M${props.sourceX},${props.sourceY}L${props.targetX},${props.targetY}`,
+    })) as never;
+
+  function makeEdgeEngine(): EditorEngine {
+    const engine = makeEngine();
+    const edgeDef = {
+      id: "test.app-edge",
+      name: "App Edge",
+      version: "1.0.0",
+      renderer: "custom-edge",
+    } as unknown as EdgeDefinition;
+    engine.domain.edges.register(edgeDef);
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 200, y: 0 } });
+    const created = createEdge(engine, {
+      source: { nodeId: "n1", portId: "out-1" },
+      target: { nodeId: "n2", portId: "in-1" },
+      definitionId: "test.app-edge",
+    });
+    if (!created.ok) {
+      throw new Error("edge creation failed");
+    }
+    return engine;
+  }
+
+  it("maps a registered edge renderer id to a React Flow edge type", () => {
+    const edgeRenderers = new EdgeRendererRegistry();
+    edgeRenderers.register("custom-edge", CustomEdge);
+
+    const types = canvasEdgeTypes(edgeRenderers);
+
+    expect(types["custom-edge"]).toBe(CustomEdge);
+    expect(types[DEFAULT_EDGE_RENDERER_ID]).toBe(DefaultEdgeRenderer);
+  });
+
+  it("leaves an unregistered renderer id out so React Flow falls back to its default edge", () => {
+    const types = canvasEdgeTypes(new EdgeRendererRegistry());
+
+    expect(types["custom-edge"]).toBeUndefined();
+    expect(types[DEFAULT_EDGE_RENDERER_ID]).toBe(DefaultEdgeRenderer);
+  });
+
+  it("renders a graph whose edge definition names a custom renderer id", () => {
+    const engine = makeEdgeEngine();
+    const edgeRenderers = new EdgeRendererRegistry();
+    edgeRenderers.register("custom-edge", CustomEdge);
+
+    renderCanvas(engine, { edgeRenderers });
+
+    expect(screen.getAllByText("App Node")).toHaveLength(2);
   });
 });

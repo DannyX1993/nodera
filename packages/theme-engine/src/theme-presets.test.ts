@@ -25,7 +25,7 @@ describe("built-in themes", () => {
       edge: ["strokeColor", "strokeColorSelected", "strokeWidth", "strokeWidthSelected", "labelColor", "labelFontSize"],
       handle: ["size", "background", "borderColor", "borderWidth", "radius"],
       selection: ["outlineColor", "outlineWidth", "outlineOffset", "background"],
-      canvas: ["background", "backgroundDot", "gridColor", "gridSize"],
+      canvas: ["background", "backgroundDot", "backgroundDotSize"],
     };
 
     for (const [group, keys] of Object.entries(requiredKeys)) {
@@ -34,6 +34,21 @@ describe("built-in themes", () => {
         expect(value, `missing ${group}.${key} in the default theme`).toBeTruthy();
       }
     }
+  });
+
+  it("declare the canvas dot grid with a numeric gap token and no dead grid tokens", () => {
+    // `canvas.backgroundDot` + `canvas.backgroundDotSize` are the ONLY canvas
+    // pattern tokens a consumer can honour: the canvas adapter paints React
+    // Flow's `<Background />` with the dot colour and a numeric gap. The old
+    // `gridColor`/`gridSize` tokens had no consumer (theme contract drift), so
+    // they must not come back without one.
+    for (const theme of [DEFAULT_THEME, DARK_THEME]) {
+      expect(theme.tokens.canvas.backgroundDotSize).toMatch(/^\d+$/);
+      expect(theme.tokens.canvas.gridColor).toBeUndefined();
+      expect(theme.tokens.canvas.gridSize).toBeUndefined();
+    }
+    expect(DEFAULT_THEME.tokens.canvas.backgroundDotSize).toBe("16");
+    expect(DARK_THEME.tokens.canvas.backgroundDotSize).toBe("16");
   });
 
   it("produce a light and a dark variant that actually differ in background", () => {

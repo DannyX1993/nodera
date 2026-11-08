@@ -104,8 +104,7 @@ const lightTokens: DesignTokens = {
   canvas: {
     background: "#f8fafc",
     backgroundDot: "#cbd5e1",
-    gridColor: "rgba(148, 163, 184, 0.25)",
-    gridSize: "16px",
+    backgroundDotSize: "16",
   },
 };
 
@@ -160,8 +159,7 @@ const darkTokens: DesignTokens = {
   canvas: {
     background: "#0f172a",
     backgroundDot: "#334155",
-    gridColor: "rgba(71, 85, 105, 0.35)",
-    gridSize: "16px",
+    backgroundDotSize: "16",
   },
 };
 
