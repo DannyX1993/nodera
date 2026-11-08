@@ -1,3 +1,14 @@
+/**
+ * The graph API hands a host §9 instance views, never domain instances.
+ *
+ * This file's assertions were updated when the read surface moved to the §9
+ * vocabulary: `NodeInstanceView`/`EdgeInstanceView` carry `type` instead of
+ * `definitionId`, expose `properties` directly instead of `getProperties()`, and
+ * keep edge endpoints flat. The core `Node`/`Edge` objects remain reachable
+ * through the documented escape hatch (`builder.editor`), which is why several
+ * assertions still read them from there.
+ */
+
 import { describe, expect, it } from "vitest";
 import type { EdgeDefinitionInput } from "../authoring/edges.js";
 import type { NodeDefinitionInput } from "../authoring/nodes.js";
@@ -51,7 +62,7 @@ function addNodeOrThrow(builder: Builder, type: string): string {
       `unexpected addNode failure: ${added.error.map((issue) => issue.code).join(", ")}`,
     );
   }
-  return String(added.value.id);
+  return added.value.id;
 }
 
 describe("node operations", () => {
@@ -63,7 +74,7 @@ describe("node operations", () => {
 
     expect(added.ok).toBe(true);
     if (!added.ok) return;
-    expect(added.value.definitionId).toBe(REQUEST);
+    expect(added.value.type).toBe(REQUEST);
     expect(builder.graph.nodeCount()).toBe(1);
     expect(
       builder.editor.graph.getNodes().map((node) => node.definitionId),
@@ -82,10 +93,10 @@ describe("node operations", () => {
 
     expect(added.ok).toBe(true);
     if (!added.ok) return;
-    expect(String(added.value.id)).toBe("node-request");
-    expect(added.value.getProperties()["url"]).toBe("https://example.test");
+    expect(added.value.id).toBe("node-request");
+    expect(added.value.properties["url"]).toBe("https://example.test");
     expect(added.value.position).toEqual({ x: 10, y: 20 });
-    expect(builder.editor.getNode("node-request")).toBe(added.value);
+    expect(builder.editor.getNode("node-request")).toBeDefined();
   });
 
   it("rejects an unknown definition type without touching the graph", () => {
@@ -113,7 +124,7 @@ describe("node operations", () => {
     const removed = builder.graph.removeNode(nodeId);
     expect(removed.ok).toBe(true);
     if (!removed.ok) return;
-    expect(String(removed.value.id)).toBe(nodeId);
+    expect(removed.value.id).toBe(nodeId);
     expect(builder.graph.nodeCount()).toBe(0);
 
     const missing = builder.graph.removeNode("node-missing");
@@ -143,7 +154,7 @@ describe("node operations", () => {
       url: "https://example.test",
       method: "GET",
     });
-    expect(updated.value.getProperties()["method"]).toBe("GET");
+    expect(updated.value.properties["method"]).toBe("GET");
   });
 
   it("maps a malformed identifier to an issue instead of throwing", () => {
@@ -176,15 +187,15 @@ describe("edge operations", () => {
 
     expect(connected.ok).toBe(true);
     if (!connected.ok) return;
-    const edgeId = String(connected.value.id);
-    expect(connected.value.definitionId).toBe(FLOW);
+    const edgeId = connected.value.id;
+    expect(connected.value.type).toBe(FLOW);
     expect(connected.value.label).toBe("request to response");
     expect(builder.graph.edgeCount()).toBe(1);
 
     const removed = builder.graph.disconnect(edgeId);
     expect(removed.ok).toBe(true);
     if (!removed.ok) return;
-    expect(String(removed.value.id)).toBe(edgeId);
+    expect(removed.value.id).toBe(edgeId);
     expect(builder.graph.edgeCount()).toBe(0);
     expect(builder.graph.canUndo()).toBe(true);
 
@@ -205,8 +216,10 @@ describe("edge operations", () => {
 
     expect(connected.ok).toBe(true);
     if (!connected.ok) return;
-    expect(connected.value.connection.source.portId).toBe("out");
-    expect(connected.value.connection.target.portId).toBe("in");
+    expect(connected.value.source).toBe(source);
+    expect(connected.value.sourcePort).toBe("out");
+    expect(connected.value.target).toBe(target);
+    expect(connected.value.targetPort).toBe("in");
   });
 
   it("rejects a connection the graph rules refuse without mutating the graph", () => {
@@ -251,7 +264,7 @@ describe("selection", () => {
     if (!connected.ok) {
       throw new Error("unexpected connect failure");
     }
-    const edgeId = String(connected.value.id);
+    const edgeId = connected.value.id;
 
     const selected = builder.graph.select({ nodes: [source], edges: [edgeId] });
 

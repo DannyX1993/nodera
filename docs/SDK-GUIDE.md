@@ -13,7 +13,8 @@ The package-level detail lives in `packages/sdk/README.md` and
 `@nodera/sdk` is the public entry point of the framework. It composes the
 framework-free core — domain, definitions, document, application use cases,
 history, validation, UI contracts, theme and layout engines — into one object,
-and it translates the public vocabulary into the internal contracts.
+and it translates between the public vocabulary and the internal contracts in
+both directions: a host writes `type`/`label` and reads `type`/`label` back.
 
 Three properties define it:
 
@@ -218,22 +219,34 @@ complete example is `examples/phase6-demo/src/theme.ts`.
 
 ## Vocabulary: public name, what it is, where it comes from
 
-| Public name | What it is | Where it comes from |
-| --- | --- | --- |
-| `type` (node) | globally qualified node definition identity, e.g. `acme.http.request` | `NodeDefinitionInput`; becomes `NodeDefinition.id` |
-| `id` (node instance) | identity of one node in a graph | `builder.graph.addNode` returns a `Node`; generated from the definition when omitted |
-| `label` | human-readable name of a definition | becomes `NodeDefinition.name` / `EdgeDefinition.name` |
-| `category` | grouping of definitions in palettes and registries | required on `NodeDefinitionInput` |
-| `ports.inputs` / `ports.outputs` / `ports.bidirectional` | ports grouped by the direction a person thinks in | flattened by the SDK into `PortDeclaration[]` with `direction: "input" \| "output" \| "bidirectional"` |
-| `port.id` | stable port identity inside its definition, e.g. `response` | `PortInput.id`; an unqualified identifier, not a dot-qualified type |
-| `port.required` | shorthand for `minConnections: 1` | `PortInput.required` |
-| `properties[].options` | option list of a `select` / `multi-select` | `string[]` or `PropertyOption[]`; both normalize to `PropertyOption[]` (`{ value, label }`, `label === value` for a bare string) |
-| `properties[].component` | opaque renderer of a `custom` property, or a registered component id | `PropertyInput.component` |
-| `renderer` | opaque presentation contribution of a node or edge | `NodeDefinitionInput.renderer` / `EdgeDefinitionInput.renderer` |
-| renderer id | the key a binding resolves the renderer by | derived: the definition `type` for nodes and edges, `<ownerType>.<propertyId>` for a property declared inside a node, `<propertyId>` for a standalone property |
-| `style` (edge) | declared visual keys plus renderer-only hints | `lineStyle`/`geometry`/`arrowStart`/`arrowEnd`/`color`/`animation`/`stateIndicatorIds` become the edge `visual`; every other key is stored under `visual.metadata.style` |
-| `builder.id` | globally qualified id of the composition | defaults to `nodera.builder` |
-| `adapter.id` | globally qualified id of the presentation engine | e.g. `nodera.react-flow` |
+The vocabulary is symmetric: PRODUCT-DESCRIPTION §9 names the public contracts
+`type`/`label`, and the SDK speaks those names in both directions. What you write
+and what you read back are the same fields, so a host never has to learn the
+core `id`/`name` naming. The core shapes (`Node`, `Edge`, `NodeDefinition`,
+`EdgeDefinition`) stay reachable through `builder.editor`, the documented
+escape hatch.
+
+| Public name | What it is | Where it comes from | Read back as |
+| --- | --- | --- | --- |
+| `type` (node) | globally qualified node definition identity, e.g. `acme.http.request` | `NodeDefinitionInput`; becomes `NodeDefinition.id` | `NodeDefinitionView.type` |
+| `type` (node instance) | the definition type an instance was created from | `builder.graph.addNode` request | `NodeInstanceView.type` (the domain's `definitionId`) |
+| `id` (node instance) | identity of one node in a graph | `builder.graph.addNode` returns the instance | `NodeInstanceView.id`; generated from the definition when omitted |
+| `version` (instance) | definition version the instance was created against | the document when it pins one | `NodeInstanceView.version`, absent when the domain does not know it |
+| `position` | where the host placed the node | `AddNodeRequest.position` / `graph.moveNode` | `NodeInstanceView.position`, absent until the node is placed |
+| `label` | human-readable name of a definition | becomes `NodeDefinition.name` / `EdgeDefinition.name` | `NodeDefinitionView.label` / `EdgeDefinitionView.label` |
+| `defaultLabel` (edge definition) | label an instance may inherit | `EdgeDefinition.label` | `EdgeDefinitionView.defaultLabel` |
+| `category` | grouping of definitions in palettes and registries | required on `NodeDefinitionInput` | `NodeDefinitionView.category`; `registries.nodes.byCategory()` |
+| `ports.inputs` / `ports.outputs` / `ports.bidirectional` | ports grouped by the direction a person thinks in | flattened by the SDK into `PortDeclaration[]` with `direction: "input" \| "output" \| "bidirectional"` | `NodeDefinitionView.ports` as `PortView[]` |
+| `port.id` | stable port identity inside its definition, e.g. `response` | `PortInput.id`; an unqualified identifier, not a dot-qualified type | `PortView.id` |
+| `port.required` | shorthand for `minConnections: 1` | `PortInput.required` | `PortView.required`, derived from `minConnections >= 1` |
+| `properties[].options` | option list of a `select` / `multi-select` | `string[]` or `PropertyOption[]`; both normalize to `PropertyOption[]` (`{ value, label }`, `label === value` for a bare string) | `PropertyDefinition.options` |
+| `properties[].component` | opaque renderer of a `custom` property, or a registered component id | `PropertyInput.component` | not part of a view: it is a renderer binding (`builder.renderers.properties`) |
+| `renderer` | opaque presentation contribution of a node or edge | `NodeDefinitionInput.renderer` / `EdgeDefinitionInput.renderer` | `NodeDefinitionView.renderer` / `EdgeDefinitionView.renderer` (the derived id) |
+| renderer id | the key a binding resolves the renderer by | derived: the definition `type` for nodes and edges, `<ownerType>.<propertyId>` for a property declared inside a node, `<propertyId>` for a standalone property | the same string, on the view |
+| `source` / `sourcePort` / `target` / `targetPort` (edge instance) | the two endpoints of a connection, flat | `ConnectRequest` | `EdgeInstanceView`, flat — the serialized document keeps nested `{ nodeId, portId, direction? }` |
+| `style` (edge) | declared visual keys plus renderer-only hints | `lineStyle`/`geometry`/`arrowStart`/`arrowEnd`/`color`/`animation`/`stateIndicatorIds` become the edge `visual`; every other key is stored under `visual.metadata.style` | `EdgeDefinitionView.visual` |
+| `builder.id` | globally qualified id of the composition | defaults to `nodera.builder` | `builder.id` |
+| `adapter.id` | globally qualified id of the presentation engine | e.g. `nodera.react-flow` | `builder.adapter?.id` |
 
 Three naming rules follow from the table, and each of them is a deliberate
 deviation from the illustrative contract in `docs/FASE6-DEFINITION.md`:
@@ -248,6 +261,38 @@ deviation from the illustrative contract in `docs/FASE6-DEFINITION.md`:
 3. **Renderer ids are derived, not authored.** You declare `renderer: MyNode` on
    the definition and the SDK binds it under the definition `type`. There is no
    second id to keep in sync.
+
+### Reading a graph
+
+A host that only displays state never has to touch `builder.editor`: the graph
+reads speak the same vocabulary the mutations accept.
+
+```ts
+for (const node of builder.graph.nodes()) {
+  // { id, type, version?, position?, properties, metadata? }
+  table.set(node.id, { type: node.type, at: node.position, values: node.properties });
+}
+
+for (const edge of builder.graph.edges()) {
+  // flat: source/sourcePort/target/targetPort, plus type?, label?, metadata?
+  table.link(edge.source, edge.sourcePort, edge.target, edge.targetPort);
+}
+
+// definitions read the same way
+const definition = builder.registries.nodes.get("acme.http.request");
+if (definition !== undefined) {
+  render(definition.label, definition.category, definition.ports);
+}
+```
+
+Two things that surprise a host coming from the serialized format:
+
+- **`EdgeInstanceView` is flat.** The document stores `source: { nodeId, portId }`
+  because a round trip has to keep the direction each port was declared with, and
+  the document is a separate published contract. A view keeps the port identity
+  and hands you two strings.
+- **Absent means absent.** `position` and `version` are omitted when the domain
+  does not have them; nothing is defaulted to `{ x: 0, y: 0 }`.
 
 ## Errors are data
 
@@ -330,6 +375,7 @@ below are the complete lists:
 | Refused with `sdk.disposed` | Still available |
 | --- | --- |
 | `registerNode`, `registerEdge`, `registerProperty`, `registerPanel`, `registerTool` | `builder.registries.*`, `builder.properties` |
+| `registries.nodes.unregister`, `registries.edges.unregister` | every other `builder.registries.*` member |
 | `bindRenderer`, `use`, `createEditor` | `builder.events.on` / `once` / `off` / `emitSdk` |
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |

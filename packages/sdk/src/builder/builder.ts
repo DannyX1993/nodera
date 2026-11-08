@@ -56,6 +56,16 @@ import { createGraphApi, type BuilderGraphApi } from "../graph/graph-api.js";
 import { toNodeDefinition, type NodeDefinitionInput } from "../authoring/nodes.js";
 import { toPropertyDefinition, type PropertyInput } from "../authoring/properties.js";
 import type { RendererBinding } from "../authoring/renderer-binding.js";
+import { toEdgeDefinitionView, toNodeDefinitionView } from "../view/definitions.js";
+import type { EdgeDefinitionView, NodeDefinitionView } from "../view/definitions.js";
+import type {
+  EdgeDefinitionRegistryView,
+  NodeDefinitionRegistryView,
+} from "../view/registries.js";
+import {
+  createEdgeDefinitionRegistryView,
+  createNodeDefinitionRegistryView,
+} from "../view/registries.js";
 import {
   disposedIssue,
   identifierFieldIssue,
@@ -88,8 +98,27 @@ export const DEFAULT_BUILDER_ID = "nodera.builder";
 /** Shape of a semver document version, matching the document package. */
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
-/** Definition registries the builder owns and shares with its editors. */
+/**
+ * Definition registries the builder owns and shares with its editors.
+ *
+ * `nodes` and `edges` are read adapters over the domain registries: they answer
+ * in the public §9 vocabulary (`type`/`label`) instead of handing back core
+ * `id`/`name` shapes. The concrete registries remain reachable through
+ * `builder.editor` (the documented escape hatch) and are what an editor session
+ * mutates.
+ */
 export interface BuilderRegistries {
+  readonly nodes: NodeDefinitionRegistryView;
+  readonly edges: EdgeDefinitionRegistryView;
+  readonly validators: ValidatorRegistry;
+  readonly themes: ThemeRegistry;
+  readonly layouts: LayoutRegistry;
+  readonly panels: PanelRegistry;
+  readonly tools: ToolRegistry;
+}
+
+/** The core registries the builder composes, before the read adapters wrap them. */
+interface BuilderRegistrySources {
   readonly nodes: NodeRegistry;
   readonly edges: EdgeRegistry;
   readonly validators: ValidatorRegistry;
@@ -149,7 +178,15 @@ export interface Builder {
   readonly documentFormat: BuilderDocumentFormat;
   /** Graph-editing facade over the application use cases of the editing session. */
   readonly graph: BuilderGraphApi;
-  /** Portable document facade over the phase-2 document and serializer packages. */
+  /**
+   * Portable document facade over the phase-2 document and serializer packages.
+   *
+   * The document API is the one place where the *wire* contract is visible:
+   * `GraphDocument` keeps its published shape (`graph.nodes[].type`,
+   * `graph.edges[].source.nodeId`, …) because it is the format other tools
+   * read and write. Nothing else in the SDK hands a host a core shape; graph
+   * reads return instance views and definition reads return definition views.
+   */
   readonly document: BuilderDocumentApi;
   /**
    * Event subscriptions: the application events of the editing session plus the
@@ -160,8 +197,10 @@ export interface Builder {
   readonly theme: BuilderThemeApi;
   /** Layout contributions, bound to the builder's UI state store. */
   readonly layout: BuilderLayoutApi;
-  registerNode(input: NodeDefinitionInput): Result<NodeDefinition, SdkIssues>;
-  registerEdge(input: EdgeDefinitionInput): Result<EdgeDefinition, SdkIssues>;
+  /** Registers one node definition and returns it in the public vocabulary. */
+  registerNode(input: NodeDefinitionInput): Result<NodeDefinitionView, SdkIssues>;
+  /** Registers one edge definition and returns it in the public vocabulary. */
+  registerEdge(input: EdgeDefinitionInput): Result<EdgeDefinitionView, SdkIssues>;
   registerProperty(input: PropertyInput): Result<PropertyDefinition, SdkIssues>;
   registerPanel(panel: PanelDefinition): Result<PanelDefinition, SdkIssues>;
   registerTool(tool: ToolDefinition): Result<ToolDefinition, SdkIssues>;
@@ -666,7 +705,7 @@ interface BuilderAssemblerOptions {
   readonly adapter: BuilderAdapter | undefined;
   readonly features: ResolvedFeatures;
   readonly diagnostics: SdkIssues;
-  readonly registries: BuilderRegistries;
+  readonly registries: BuilderRegistrySources;
   readonly properties: RegistryStore<PropertyDefinition>;
   readonly renderers: RendererBindings;
   readonly store: UiStateStore;
@@ -693,6 +732,8 @@ class SdkBuilder implements Builder {
   readonly layout: BuilderLayoutApi;
 
   private readonly domain: NoderaDomain;
+  private readonly nodeRegistry: NodeRegistry;
+  private readonly edgeRegistry: EdgeRegistry;
   private bindings: RendererBindings;
   private disposedFlag = false;
 
@@ -701,13 +742,24 @@ class SdkBuilder implements Builder {
     this.adapter = options.adapter;
     this.features = options.features;
     this.diagnostics = options.diagnostics;
-    this.registries = options.registries;
     this.properties = options.properties;
     this.editor = options.editor;
     this.store = options.store;
     this.documentFormat = options.documentFormat;
     this.domain = options.domain;
+    this.nodeRegistry = options.registries.nodes;
+    this.edgeRegistry = options.registries.edges;
     this.bindings = options.renderers;
+    // One adapter object per builder, so a host can hold on to it across reads.
+    this.registries = {
+      nodes: createNodeDefinitionRegistryView(this.nodeRegistry, () => this.disposedFlag),
+      edges: createEdgeDefinitionRegistryView(this.edgeRegistry, () => this.disposedFlag),
+      validators: options.registries.validators,
+      themes: options.registries.themes,
+      layouts: options.registries.layouts,
+      panels: options.registries.panels,
+      tools: options.registries.tools,
+    };
     this.graph = createGraphApi(this.editor, () => this.disposedFlag);
     this.document = createDocumentApi(this.editor, this.documentFormat, () => this.disposedFlag);
     this.events = createBuilderEvents(this.editor.events);
@@ -729,11 +781,11 @@ class SdkBuilder implements Builder {
     return this.bindings;
   }
 
-  registerNode(input: NodeDefinitionInput): Result<NodeDefinition, SdkIssues> {
+  registerNode(input: NodeDefinitionInput): Result<NodeDefinitionView, SdkIssues> {
     if (this.disposedFlag) {
       return err([disposedIssue("registerNode")]);
     }
-    const added = addNode(this.registries.nodes, this.bindings, input, (id) => [
+    const added = addNode(this.nodeRegistry, this.bindings, input, (id) => [
       "nodes",
       id,
     ]);
@@ -741,14 +793,14 @@ class SdkBuilder implements Builder {
       return err(added.error);
     }
     this.bindings = added.value.renderers;
-    return ok(added.value.definition);
+    return ok(toNodeDefinitionView(added.value.definition));
   }
 
-  registerEdge(input: EdgeDefinitionInput): Result<EdgeDefinition, SdkIssues> {
+  registerEdge(input: EdgeDefinitionInput): Result<EdgeDefinitionView, SdkIssues> {
     if (this.disposedFlag) {
       return err([disposedIssue("registerEdge")]);
     }
-    const added = addEdge(this.registries.edges, this.bindings, input, (id) => [
+    const added = addEdge(this.edgeRegistry, this.bindings, input, (id) => [
       "edges",
       id,
     ]);
@@ -756,7 +808,7 @@ class SdkBuilder implements Builder {
       return err(added.error);
     }
     this.bindings = added.value.renderers;
-    return ok(added.value.definition);
+    return ok(toEdgeDefinitionView(added.value.definition));
   }
 
   registerProperty(input: PropertyInput): Result<PropertyDefinition, SdkIssues> {
@@ -845,7 +897,8 @@ class SdkBuilder implements Builder {
    * Disposing is idempotent and closes every operation that would mutate the
    * graph or extend the composition: `register*`, `bindRenderer`, `use`,
    * `createEditor`, `theme.register`/`setDefault`,
-   * `layout.register`/`setDefault`, every mutating `graph.*` call and
+   * `layout.register`/`setDefault`, `registries.nodes.unregister`,
+   * `registries.edges.unregister`, every mutating `graph.*` call and
    * `document.import` fail with `sdk.disposed`. Reads keep working — `graph`
    * counts, selections, history flags and validation, `document` creation,
    * export, serialization and validation, events and the theme/layout queries —

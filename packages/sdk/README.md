@@ -10,7 +10,8 @@ no canvas library; `pnpm check:architecture` fails when it does. It composes the
 framework-free core (`@nodera/domain`, `@nodera/document`, `@nodera/application`,
 `@nodera/ui-core`, `@nodera/theme-engine`, `@nodera/layout-engine` and the
 definition registries) and adds two things of its own: the composition root and
-the translation between the public vocabulary and the internal contracts.
+the translation between the public vocabulary and the internal contracts — in
+both directions, so a host writes `type`/`label` and reads `type`/`label` back.
 
 It does not do the following:
 
@@ -165,6 +166,52 @@ Two deliberate deviations from `docs/FASE6-DEFINITION.md`:
 - **`label` becomes the definition `name`**. The public vocabulary says `type`
   and `label`, the internal packages say `id` and `name`; the translation
   happens once, in `src/authoring/`, and never leaks the internal naming.
+
+### One vocabulary at the boundary
+
+§9 of `docs/PRODUCT-DESCRIPTION.md` ("Contratos públicos y tipado") names the
+public contracts `type`/`label`. A host must not meet two vocabularies at one
+boundary, so the SDK speaks that vocabulary in **both directions**: what an
+author writes and what the same host reads back are the same names.
+
+| | In (authoring) | Out (reads) |
+| --- | --- | --- |
+| node definition | `type`, `label` | `NodeDefinitionView.type`, `.label` |
+| edge definition | `type`, `label` | `EdgeDefinitionView.type`, `.label` |
+| port | `id`, `dataType`, `required` | `PortView.id`, `.dataType`, `.required` |
+| node instance | `type`, `position`, `properties` | `NodeInstanceView` — same names |
+| edge instance | `type`, `source`, `sourcePort`, `target`, `targetPort` | `EdgeInstanceView` — same names, flat |
+| core shape (`Node`, `Edge`, `NodeDefinition`, `EdgeDefinition`) | — | only through `builder.editor`, the documented escape hatch |
+
+`registerNode`, `registerEdge`, `builder.registries.nodes`, `builder.registries.edges`
+and every `builder.graph` method return those views:
+
+```ts
+const node = assertOk(builder.registerNode(ACME_NODE));
+node.type; // "acme.node" — the definition id, under its public name
+node.label; // "Acme node" — the definition name, under its public name
+
+const added = assertValid(builder.graph.addNode({ type: "acme.node" }));
+added.type; // the definition type; `added.definitionId` does not exist
+added.position; // absent when the node has not been placed yet
+```
+
+Two rules the view types pin:
+
+- **`required` is derived.** `PortView.required` is `minConnections >= 1`, so a
+  renderer gets a boolean and a port without a declared minimum is simply not
+  required.
+- **No key is set to `undefined`.** The SDK compiles with
+  `exactOptionalPropertyTypes`, so an absent value is an absent key.
+
+**`EdgeInstanceView` is flat; the serialized document is not.** A view keeps
+`source`/`sourcePort`/`target`/`targetPort` as four strings, which is what a host
+needs to render an edge and to keep port identity intact in its own state. The
+portable `GraphDocument` keeps nested endpoints
+(`{ nodeId, portId, direction? }`), because its job is to survive a round trip
+with the direction each port was declared with, and it is a separate published
+contract (Phase 2). `builder.document` therefore returns and accepts the
+document's own shape — the *wire* format — while every other read speaks §9.
 
 ### Edges — `builder.registerEdge`
 
@@ -397,10 +444,25 @@ const report = builder.graph.validate();
 (`examples/phase6-demo/src/builder.ts` and `demo-app.tsx`, trimmed.)
 
 Members: `addNode`, `removeNode`, `moveNode`, `updateProperties`, `connect`,
-`disconnect`, `select`, `clearSelection`, `undo`, `redo`, `canUndo`,
-`canRedo`, `validate`, `nodeCount`, `edgeCount`, `selectedNodes`,
+`disconnect`, `nodes`, `edges`, `select`, `clearSelection`, `undo`, `redo`,
+`canUndo`, `canRedo`, `validate`, `nodeCount`, `edgeCount`, `selectedNodes`,
 `selectedEdges`. `sourcePort` / `targetPort` default to the node's first output /
 input port.
+
+Every mutation and every read answers in the §9 instance vocabulary
+(`NodeInstanceView`, `EdgeInstanceView`), so a host can read the whole graph
+without touching `builder.editor`:
+
+```ts
+for (const node of builder.graph.nodes()) {
+  render(node.id, node.type, node.position, node.properties);
+}
+
+for (const edge of builder.graph.edges()) {
+  // flat: no `edge.connection.source.nodeId` anywhere
+  route(edge.source, edge.sourcePort, edge.target, edge.targetPort, edge.type);
+}
+```
 
 ### Document — `builder.document`
 
@@ -442,14 +504,33 @@ framework rule — a duplicate id is an explicit conflict, an unknown id an
 explicit `not-found`, never a silent overwrite. The builder turns those into
 `sdk.duplicate-id` / `sdk.unknown-definition`.
 
+`nodes` and `edges` are **read adapters**: they answer in the §9 vocabulary
+(`type`/`label`), and they are the supported way to read a definition. The
+remaining slots are the framework registries themselves, unchanged.
+
 ```ts
 const panel = builder.registries.panels.get("validation");
-const nodeTypes = builder.registries.nodes.all().map((definition) => definition.id);
+const nodeTypes = builder.registries.nodes.all().map((definition) => definition.type);
+
+builder.registries.nodes.get("demo.http.request"); // NodeDefinitionView | undefined
+builder.registries.nodes.require("demo.http.request"); // Result<NodeDefinitionView, SdkIssues>
+builder.registries.nodes.byCategory("Sources"); // readonly NodeDefinitionView[]
+builder.registries.nodes.categories(); // readonly string[]
+builder.registries.edges.byConnectionType("data-flow"); // the edges registry's grouping
 ```
+
+Members of both adapters: `all()`, `get(type)`, `has(type)`, `require(type)`,
+`size` and `unregister(type)`. The node adapter adds `byCategory(category)` and
+`categories()`; the edge adapter adds `byConnectionType(connectionType)`, because
+the domain's `EdgeDefinition` declares connection types and no category — a
+`byCategory` that could only ever return nothing would be a lie. `require` and
+`unregister` return `Result`s (`sdk.unknown-definition`) and never throw; `get`
+returns `undefined`.
 
 Registering goes through the builder, not the registries, so validation, renderer
 binding and diagnostics stay in one place: `registerNode`, `registerEdge`,
-`registerProperty`, `registerPanel`, `registerTool`.
+`registerProperty`, `registerPanel`, `registerTool`. Unregistering is the one
+mutation the adapters expose, and it returns the view that left the registry.
 
 ### Event — `builder.events`
 
@@ -638,6 +719,7 @@ The closed set, exactly:
 | Refused with `sdk.disposed` | Still available |
 | --- | --- |
 | `registerNode`, `registerEdge`, `registerProperty`, `registerPanel`, `registerTool` | `builder.registries.*`, `builder.properties` |
+| `registries.nodes.unregister`, `registries.edges.unregister` | every other `builder.registries.*` member |
 | `bindRenderer`, `use`, `createEditor` | `builder.events.on` / `once` / `off` / `emitSdk` |
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |

@@ -261,6 +261,14 @@ Reglas de comportamiento:
   React consume el del builder, junto con sus registros, en lugar de construir los
   valores por defecto otra vez: de lo contrario `builder.registerPanel()` o
   `builder.theme.setDefault()` no llegarían nunca a la UI.
+- **Un solo vocabulario en la frontera, en ambos sentidos.** Todo lo que un host
+  *lee* del SDK —`builder.registerNode`/`registerEdge`, `builder.registries.nodes`/
+  `.edges` y cada método de `builder.graph`— habla el vocabulario de §9 de
+  `docs/PRODUCT-DESCRIPTION.md` (`type`/`label`, instancias planas). El formato de
+  *wire* (`GraphDocument`, con endpoints anidados) es el contrato publicado de la
+  Fase 2 y se conserva tal cual en `builder.document`; las formas del core
+  (`Node`, `Edge`, `NodeDefinition`, `EdgeDefinition`) solo son alcanzables por la
+  vía avanzada documentada, `builder.editor` (D12).
 
 Las decisiones de la Fase 6 se documentan en `odd/tasks/fase6-sdk.md`
 (secciones `Specs`, `Non-goals`, `Decisions` D1-D25 y `Log`). El repositorio no

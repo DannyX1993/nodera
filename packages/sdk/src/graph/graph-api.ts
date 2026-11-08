@@ -1,19 +1,24 @@
 /**
- * The SDK Graph API: the supported surface for editing the builder's graph.
+ * The SDK Graph API: the supported surface for editing and reading the
+ * builder's graph.
  *
- * Every method delegates to the application use case of the same name, so the
+ * Every mutation delegates to the application use case of the same name, so the
  * SDK never reimplements validation, history or events: it only translates the
  * public request vocabulary into use case input and the structured
  * `UseCaseError` back into one SDK diagnostic. Identifiers are shape-checked
  * before they reach a use case, because a branded identifier constructor throws
  * and the SDK never throws for data.
  *
+ * Every value this API hands back is a §9 instance view (`NodeInstanceView`,
+ * `EdgeInstanceView`), never the domain `Node`/`Edge`. `builder.editor` is the
+ * documented escape hatch for the core shapes.
+ *
  * `undo`/`redo`/`canUndo`/`canRedo` return the history engine's booleans
  * unwrapped: there is no data problem to report, only a cursor position.
  */
 
 import { err, isValidIdShape, ok, type Result } from "@nodera/contracts";
-import type { Edge, Node, NodePosition, PortDirection } from "@nodera/graph-model";
+import type { NodePosition, PortDirection } from "@nodera/graph-model";
 import {
   addNode,
   clearSelection,
@@ -38,6 +43,8 @@ import {
   type SdkIssue,
   type SdkIssues,
 } from "../errors.js";
+import { toEdgeInstanceView, toNodeInstanceView } from "../view/instances.js";
+import type { EdgeInstanceView, NodeInstanceView } from "../view/instances.js";
 
 /** One node to add, in the public `type` vocabulary of the SDK. */
 export interface AddNodeRequest {
@@ -74,20 +81,24 @@ export interface SelectRequest {
  * The graph surface of the builder.
  *
  * Mutation is reported as `Result` so the host branches once per call; the
- * reads (`nodeCount`, `selectedNodes`, history flags) mirror the editor state
- * and never allocate diagnostics.
+ * reads (`nodes`, `edges`, `nodeCount`, `selectedNodes`, history flags) mirror
+ * the editor state, answer in the §9 vocabulary and never allocate diagnostics.
  */
 export interface BuilderGraphApi {
-  addNode(request: AddNodeRequest): Result<Node, SdkIssues>;
-  removeNode(nodeId: string): Result<Node, SdkIssues>;
-  moveNode(nodeId: string, position: NodePosition): Result<Node, SdkIssues>;
+  addNode(request: AddNodeRequest): Result<NodeInstanceView, SdkIssues>;
+  removeNode(nodeId: string): Result<NodeInstanceView, SdkIssues>;
+  moveNode(nodeId: string, position: NodePosition): Result<NodeInstanceView, SdkIssues>;
   /** Writes each property value through the update use case, one history unit each. */
   updateProperties(
     nodeId: string,
     properties: Readonly<Record<string, unknown>>,
-  ): Result<Node, SdkIssues>;
-  connect(request: ConnectRequest): Result<Edge, SdkIssues>;
-  disconnect(edgeId: string): Result<Edge, SdkIssues>;
+  ): Result<NodeInstanceView, SdkIssues>;
+  connect(request: ConnectRequest): Result<EdgeInstanceView, SdkIssues>;
+  disconnect(edgeId: string): Result<EdgeInstanceView, SdkIssues>;
+  /** Every node of the graph, in the §9 instance vocabulary. */
+  nodes(): readonly NodeInstanceView[];
+  /** Every edge of the graph, flat, in the §9 instance vocabulary. */
+  edges(): readonly EdgeInstanceView[];
   select(request: SelectRequest): Result<void, SdkIssues>;
   clearSelection(): Result<void, SdkIssues>;
   undo(): boolean;
@@ -277,7 +288,7 @@ export function createGraphApi(
   isDisposed: () => boolean,
 ): BuilderGraphApi {
   return {
-    addNode(request: AddNodeRequest): Result<Node, SdkIssues> {
+    addNode(request: AddNodeRequest): Result<NodeInstanceView, SdkIssues> {
       const closed = closedIssues(isDisposed, "graph.addNode");
       if (closed !== undefined) {
         return err(closed);
@@ -301,10 +312,10 @@ export function createGraphApi(
         ...(request.properties === undefined ? {} : { properties: request.properties }),
         ...(request.position === undefined ? {} : { position: request.position }),
       });
-      return added.ok ? ok(added.value) : err([useCaseIssue(added.error)]);
+      return added.ok ? ok(toNodeInstanceView(added.value)) : err([useCaseIssue(added.error)]);
     },
 
-    removeNode(nodeId: string): Result<Node, SdkIssues> {
+    removeNode(nodeId: string): Result<NodeInstanceView, SdkIssues> {
       const closed = closedIssues(isDisposed, "graph.removeNode");
       if (closed !== undefined) {
         return err(closed);
@@ -314,10 +325,12 @@ export function createGraphApi(
         return err(issues);
       }
       const removed = removeNode(editor, { nodeId });
-      return removed.ok ? ok(removed.value.node) : err([useCaseIssue(removed.error)]);
+      return removed.ok
+        ? ok(toNodeInstanceView(removed.value.node))
+        : err([useCaseIssue(removed.error)]);
     },
 
-    moveNode(nodeId: string, position: NodePosition): Result<Node, SdkIssues> {
+    moveNode(nodeId: string, position: NodePosition): Result<NodeInstanceView, SdkIssues> {
       const closed = closedIssues(isDisposed, "graph.moveNode");
       if (closed !== undefined) {
         return err(closed);
@@ -328,13 +341,13 @@ export function createGraphApi(
         return err(issues);
       }
       const moved = moveNode(editor, { nodeId, position });
-      return moved.ok ? ok(moved.value) : err([useCaseIssue(moved.error)]);
+      return moved.ok ? ok(toNodeInstanceView(moved.value)) : err([useCaseIssue(moved.error)]);
     },
 
     updateProperties(
       nodeId: string,
       properties: Readonly<Record<string, unknown>>,
-    ): Result<Node, SdkIssues> {
+    ): Result<NodeInstanceView, SdkIssues> {
       const closed = closedIssues(isDisposed, "graph.updateProperties");
       if (closed !== undefined) {
         return err(closed);
@@ -344,22 +357,24 @@ export function createGraphApi(
       if (issues !== undefined) {
         return err(issues);
       }
-      let updated: Node | undefined;
+      let updated: NodeInstanceView | undefined;
       for (const [name, value] of Object.entries(properties)) {
         const result = updateNodeProperties(editor, { nodeId, name, value });
         if (!result.ok) {
           return err([useCaseIssue(result.error)]);
         }
-        updated = result.value;
+        updated = toNodeInstanceView(result.value);
       }
       if (updated !== undefined) {
         return ok(updated);
       }
       const existing = editor.getNode(nodeId);
-      return existing === undefined ? err([missingNodeIssue(nodeId)]) : ok(existing);
+      return existing === undefined
+        ? err([missingNodeIssue(nodeId)])
+        : ok(toNodeInstanceView(existing));
     },
 
-    connect(request: ConnectRequest): Result<Edge, SdkIssues> {
+    connect(request: ConnectRequest): Result<EdgeInstanceView, SdkIssues> {
       const closed = closedIssues(isDisposed, "graph.connect");
       if (closed !== undefined) {
         return err(closed);
@@ -402,10 +417,10 @@ export function createGraphApi(
         ...(request.type === undefined ? {} : { definitionId: request.type }),
         ...(request.label === undefined ? {} : { label: request.label }),
       });
-      return connected.ok ? ok(connected.value) : err([useCaseIssue(connected.error)]);
+      return connected.ok ? ok(toEdgeInstanceView(connected.value)) : err([useCaseIssue(connected.error)]);
     },
 
-    disconnect(edgeId: string): Result<Edge, SdkIssues> {
+    disconnect(edgeId: string): Result<EdgeInstanceView, SdkIssues> {
       const closed = closedIssues(isDisposed, "graph.disconnect");
       if (closed !== undefined) {
         return err(closed);
@@ -415,7 +430,17 @@ export function createGraphApi(
         return err(issues);
       }
       const removed = removeEdge(editor, { edgeId });
-      return removed.ok ? ok(removed.value) : err([useCaseIssue(removed.error)]);
+      return removed.ok
+        ? ok(toEdgeInstanceView(removed.value))
+        : err([useCaseIssue(removed.error)]);
+    },
+
+    nodes(): readonly NodeInstanceView[] {
+      return editor.graph.getNodes().map(toNodeInstanceView);
+    },
+
+    edges(): readonly EdgeInstanceView[] {
+      return editor.graph.getEdges().map(toEdgeInstanceView);
     },
 
     select(request: SelectRequest): Result<void, SdkIssues> {

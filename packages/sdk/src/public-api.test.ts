@@ -235,7 +235,8 @@ describe("a host integrates through the entry point only", () => {
           category: "ai",
         });
         if (node.ok) {
-          contributionIds.push(node.value.id);
+          // The plugin reads its own contribution back in the §9 vocabulary.
+          contributionIds.push(node.value.type);
         }
       },
     };

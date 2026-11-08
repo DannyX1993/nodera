@@ -109,24 +109,27 @@ describe("registry configuration", () => {
       },
     });
 
+    // The read surface answers in the §9 vocabulary (`type`/`label`), not in the
+    // core one (`id`/`name`); the core definitions stay reachable through the
+    // documented escape hatch.
     const node = builder.registries.nodes.get("demo.node");
     expect(node).toMatchObject({
-      id: "demo.node",
-      name: "Demo node",
+      type: "demo.node",
+      label: "Demo node",
       category: "demo",
       renderer: "demo.node",
     });
+    expect(Object.keys(node ?? {})).not.toContain("id");
+    expect(Object.keys(node ?? {})).not.toContain("name");
     expect(node?.ports.map((port) => port.id)).toEqual(["in", "out"]);
     expect(builder.registries.edges.get("demo.edge")).toMatchObject({
-      id: "demo.edge",
-      name: "Demo edge",
+      type: "demo.edge",
+      label: "Demo edge",
     });
     expect(builder.properties.get("demo.option")?.type).toBe("string");
 
-    expect(builder.editor.domain.nodes.get("demo.node")).toBe(node);
-    expect(builder.editor.domain.edges.get("demo.edge")).toBe(
-      builder.registries.edges.get("demo.edge"),
-    );
+    expect(builder.editor.domain.nodes.get("demo.node")?.id).toBe("demo.node");
+    expect(builder.editor.domain.edges.get("demo.edge")?.name).toBe("Demo edge");
   });
 
   it("aggregates every issue of every invalid entry instead of stopping at the first", () => {

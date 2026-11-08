@@ -31,8 +31,6 @@
  */
 
 import { err, ok, type Result } from "@nodera/contracts";
-import type { EdgeDefinition } from "@nodera/edge-registry";
-import type { NodeDefinition } from "@nodera/node-registry";
 import type { PropertyDefinition } from "@nodera/property-system";
 import type { CreateThemeInput, ThemeDefinition } from "@nodera/theme-engine";
 import type { LayoutDefinition, PanelDefinition, ToolDefinition } from "@nodera/ui-core";
@@ -41,6 +39,7 @@ import type { EdgeDefinitionInput } from "../authoring/edges.js";
 import type { NodeDefinitionInput } from "../authoring/nodes.js";
 import type { PropertyInput } from "../authoring/properties.js";
 import type { Builder } from "../builder/builder.js";
+import type { EdgeDefinitionView, NodeDefinitionView } from "../view/definitions.js";
 import {
   describeValue,
   isPlainObject,
@@ -54,11 +53,13 @@ import {
 
 /** Registration slots a plugin can contribute to. Deliberately not extensible. */
 export interface BuilderPluginApi {
+  /** Registers a node definition; the plugin reads it back in the §9 vocabulary. */
   readonly nodes: {
-    register(input: NodeDefinitionInput): Result<NodeDefinition, SdkIssues>;
+    register(input: NodeDefinitionInput): Result<NodeDefinitionView, SdkIssues>;
   };
+  /** Registers an edge definition; the plugin reads it back in the §9 vocabulary. */
   readonly edges: {
-    register(input: EdgeDefinitionInput): Result<EdgeDefinition, SdkIssues>;
+    register(input: EdgeDefinitionInput): Result<EdgeDefinitionView, SdkIssues>;
   };
   readonly properties: {
     register(input: PropertyInput): Result<PropertyDefinition, SdkIssues>;
@@ -243,11 +244,12 @@ function createPluginApi(
   plugin: BuilderPlugin,
   recorder: PluginRecorder,
 ): BuilderPluginApi {
-  function record<TDefinition extends { readonly id: string }>(
-    registered: Result<TDefinition, SdkIssues>,
-  ): Result<TDefinition, SdkIssues> {
+  function record<TContribution>(
+    registered: Result<TContribution, SdkIssues>,
+    identity: (contribution: TContribution) => string,
+  ): Result<TContribution, SdkIssues> {
     if (registered.ok) {
-      recorder.contributionIds.push(registered.value.id);
+      recorder.contributionIds.push(identity(registered.value));
       return registered;
     }
     recorder.failures.push(...registered.error);
@@ -256,13 +258,21 @@ function createPluginApi(
   }
 
   return {
-    nodes: { register: (input) => record(builder.registerNode(input)) },
-    edges: { register: (input) => record(builder.registerEdge(input)) },
-    properties: { register: (input) => record(builder.registerProperty(input)) },
-    panels: { register: (panel) => record(builder.registerPanel(panel)) },
-    tools: { register: (tool) => record(builder.registerTool(tool)) },
-    themes: { register: (input) => record(builder.theme.register(input)) },
-    layouts: { register: (layout) => record(builder.layout.register(layout)) },
+    // Definitions are contributed and read back in the §9 vocabulary
+    // (`type`), the rest of the slots in the core one (`id`).
+    nodes: { register: (input) => record(builder.registerNode(input), (node) => node.type) },
+    edges: { register: (input) => record(builder.registerEdge(input), (edge) => edge.type) },
+    properties: {
+      register: (input) => record(builder.registerProperty(input), (entry) => entry.id),
+    },
+    panels: { register: (panel) => record(builder.registerPanel(panel), (entry) => entry.id) },
+    tools: { register: (tool) => record(builder.registerTool(tool), (entry) => entry.id) },
+    themes: {
+      register: (input) => record(builder.theme.register(input), (entry) => entry.id),
+    },
+    layouts: {
+      register: (layout) => record(builder.layout.register(layout), (entry) => entry.id),
+    },
     renderers: {
       bind(kind, id, value) {
         const bound = builder.bindRenderer(kind, id, value);

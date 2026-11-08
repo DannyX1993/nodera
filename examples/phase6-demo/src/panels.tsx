@@ -147,7 +147,8 @@ export function createObservabilityPanel(readBuilder: () => Builder): ComponentT
     const features = Object.entries(builder.features)
       .filter(([, enabled]) => enabled)
       .map(([feature]) => feature);
-    const nodeTypes = builder.registries.nodes.all().map((definition) => definition.id);
+    // Definitions are read back in the §9 vocabulary (`type`), not the core one.
+    const nodeTypes = builder.registries.nodes.all().map((definition) => definition.type);
 
     return (
       <div data-demo-panel="observability" style={PANEL_STYLE}>
@@ -172,8 +173,8 @@ export function createObservabilityPanel(readBuilder: () => Builder): ComponentT
         </dl>
         <h3 style={HEADING_STYLE}>Registered definitions</h3>
         <ul style={LIST_STYLE}>
-          {nodeTypes.map((id) => (
-            <li key={id}>{id}</li>
+          {nodeTypes.map((type) => (
+            <li key={type}>{type}</li>
           ))}
         </ul>
       </div>
