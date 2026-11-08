@@ -47,6 +47,14 @@ const DIRECTIONS = ["horizontal", "vertical"] as const;
 /** One placement direction. */
 type Direction = (typeof DIRECTIONS)[number];
 
+/** The values the host's controls hold for one arrangement. */
+interface Arrangement {
+  readonly direction: Direction;
+  readonly spacing: string;
+  readonly rankSpacing: string;
+  readonly strategyId: string;
+}
+
 /** What the status line says before the host arranges anything. */
 const INITIAL_STATUS = "Press Arrange to re-place every node in ranks.";
 
@@ -97,30 +105,36 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
       return;
     }
     setStrategyId(selected.value.id);
-    setStatus(`Strategy "${selected.value.id}" selected. Press Arrange to apply it.`);
+    // Selecting a strategy changes the geometry, so the host applies it at once
+    // instead of leaving the canvas showing an arrangement of another strategy.
+    applyArrangement({ direction, spacing, rankSpacing, strategyId: selected.value.id });
   };
 
   /**
-   * Runs one explicit arrangement with the values the controls hold.
+   * Runs one arrangement with the values the controls hold.
    *
    * The numbers are passed through a parse on purpose: an emptied field becomes
    * `NaN`, which the SDK refuses at `spacing` / `rankSpacing` and moves nothing —
    * the refusal is the behaviour to see, so the demo never hides it.
    */
-  const arrange = (): void => {
+  const applyArrangement = (values: Arrangement): void => {
     const result = builder.graph.arrange({
-      direction,
-      spacing: Number.parseFloat(spacing),
-      rankSpacing: Number.parseFloat(rankSpacing),
+      direction: values.direction,
+      spacing: Number.parseFloat(values.spacing),
+      rankSpacing: Number.parseFloat(values.rankSpacing),
     });
     if (!result.ok) {
       setStatus(`Arrange was refused — ${issueSummary(result.error)}`);
       return;
     }
     setStatus(
-      `Arrange moved ${movedLabel(result.value.length)} with "${strategyId}", ` +
-        `${direction}, spacing ${spacing}, rank spacing ${rankSpacing}.`,
+      `Arranged ${movedLabel(result.value.length)} with "${values.strategyId}", ` +
+        `${values.direction}, spacing ${values.spacing}, rank spacing ${values.rankSpacing}.`,
     );
+  };
+
+  const arrange = (): void => {
+    applyArrangement({ direction, spacing, rankSpacing, strategyId });
   };
 
   /**
@@ -180,6 +194,12 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
               const next = event.target.value;
               if (DIRECTIONS.some((candidate) => candidate === next)) {
                 setDirection(next as Direction);
+                applyArrangement({
+                  direction: next as Direction,
+                  spacing,
+                  rankSpacing,
+                  strategyId,
+                });
               }
             }}
           >
@@ -202,6 +222,12 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
             value={spacing}
             onChange={(event) => {
               setSpacing(event.target.value);
+              applyArrangement({
+                direction,
+                spacing: event.target.value,
+                rankSpacing,
+                strategyId,
+              });
             }}
           />
         </label>
@@ -217,6 +243,12 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
             value={rankSpacing}
             onChange={(event) => {
               setRankSpacing(event.target.value);
+              applyArrangement({
+                direction,
+                spacing,
+                rankSpacing: event.target.value,
+                strategyId,
+              });
             }}
           />
         </label>
