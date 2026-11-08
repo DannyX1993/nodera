@@ -20,6 +20,8 @@ Branch: `feature/graph-layout-node-creation` (off master). Three chained work un
 - T2 — Framework-agnostic graph layout port + `free` no-op strategy + optional `auto` strategy behind it + explicit `Arrange` command applied as one history unit. Specs: S1, S4, S5, S6, S7. Commit: one work unit.
 - T3 — Generic dialog/overlay contract in `ui-core` + accessible renderer in `ui-react` + the "+" action that reuses the registered node palette. Specs: S2, S3, S5, S7. Commit: one work unit.
 
+Slice boundaries: T1 landed as one commit of 494 authored lines (code, tests and docs of one behaviour, 189 of them tests) — over the ~400 slice guideline and recorded here instead of being split after the fact. T2 gets its own commit and splits in two if it reaches ~400 (port + `arrange` application unit, then the optional strategy adapter). T3 gets its own commit.
+
 ## Non-goals
 
 - Any runtime, user-facing toggle for mode/direction/spacing: host configuration only (S4).
