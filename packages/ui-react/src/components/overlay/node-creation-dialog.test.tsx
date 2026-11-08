@@ -183,6 +183,48 @@ describe("NodeCreationDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("does not treat a phantom append session as an edge insertion", () => {
+    const editor = createDiscoveryEditor();
+    addTestNode(editor, { nodeId: "a", position: { x: 0, y: 0 } });
+    const store = createDiscoveryStore();
+    store.setPendingAppendAnchorId("a");
+    const onClose = vi.fn();
+    renderWithEditor(<NodeCreationDialog open onClose={onClose} />, { editor, store });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Transform" }));
+
+    // A phantom append is an add, never an insertion: the node is created by the
+    // add path and no edge is written over a graph that had none.
+    expect(editor.graph.getNodes()).toHaveLength(2);
+    expect(editor.graph.getEdges()).toHaveLength(0);
+    expect(editor.history.labels()).toEqual(["add-node", "add-node"]);
+    expect(store.getState().pendingAppendAnchorId).toBeUndefined();
+    expect(store.getState().pendingEdgeInsertId).toBeUndefined();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the phantom append anchor while the graph refuses the node", () => {
+    const editor = createDiscoveryEditor();
+    editor.domain.nodes.register({
+      id: "broken",
+      name: "Broken",
+      category: "sources",
+      version: "1.0.0",
+      ports: [],
+      properties: [],
+    });
+    const store = createDiscoveryStore();
+    store.setPendingAppendAnchorId("a");
+    const onClose = vi.fn();
+    renderWithEditor(<NodeCreationDialog open onClose={onClose} />, { editor, store });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Broken" }));
+
+    expect(editor.graph.getNodes()).toHaveLength(0);
+    expect(store.getState().pendingAppendAnchorId).toBe("a");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("filters the offered definitions with the search field inside the dialog", () => {
     renderCreateNodeDialog();
 

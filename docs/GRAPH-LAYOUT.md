@@ -22,6 +22,7 @@ nothing moves unless the host asks.
 | `mode: "auto"` | The builder, and only for the nodes the host left unpositioned: the first free slot **forward** of the anchor the host names (`AddNodeRequest.after`), or the slot one step past the graph's extent when there is no anchor, at add time. A node that already carries a position is never moved. |
 | `Arrange` (explicit) | The selected strategy, for every node of the graph, when the host calls `builder.graph.arrange()`. One history unit. |
 | Edge insertion (`builder.graph.insertNode`) | The builder, in `mode: "auto"`, anchored on the edge's **source**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node and the two edges that replace the original. |
+| Phantom "+" (`addNode({ after })` + `connect`) | The builder, in `mode: "auto"`, anchored on the node the placeholder followed — exactly the `after` rule. **Two** history units: the node, then the edge, because both are separate SDK calls (see [The phantom empty state](#the-phantom-empty-state)). |
 
 Three invariants hold in every mode:
 
@@ -250,6 +251,53 @@ keeps the position and the activation path and changes only the control (the
 What the button looks like is the host's; when it lands and what it writes is the
 framework's.
 
+### The phantom empty state
+
+An empty canvas has no edge to put a "+" on, so the same affordance also covers
+the two cases a graph starts from (`GraphCanvas.edgeInsertion`, off by default
+like every other control the framework paints):
+
+| The graph | What the canvas draws |
+| --- | --- |
+| No node at all | A dashed, muted **phantom node** — `data-nodera-phantom-node="inactive"` — carrying the same "`+`" (`aria-label="Insert node"`). |
+| Exactly one node | The same phantom node one visual step beside it, plus a dashed **phantom edge** from the real node to the placeholder, with the "`+`" at its midpoint. |
+| Two nodes or more | Nothing. The phantoms are gone the moment the graph stops qualifying. |
+
+The phantoms are **presentation only**, and that is enforced, not promised:
+
+- they are appended to the arrays the canvas hands to React Flow, never to the
+  engine, so `builder.graph.nodes()` / `edges()`, `nodeCount()` / `edgeCount()`,
+  the events and the history never see them;
+- every capability that would write one back is refused (`selectable`,
+  `draggable`, `deletable`, `connectable` and `focusable` are `false`), and the
+  ids `nodera.phantom.node` / `nodera.phantom.edge` are reserved by the adapter;
+- the minimap skips the placeholder (`MiniMap.nodeComponent`), so presentation
+  geometry never looks like a placed node;
+- inactivity is expressed with the **dashed border and the muted palette**, never
+  by colour alone, and both are theme tokens with literal fallbacks
+  (`--ndr-phantom-node-*`, `--ndr-phantom-edge-*`).
+
+Activating the "`+`" records the anchor in the UI state
+(`UiState.pendingAppendAnchorId`: the single node's id, or absent on an empty
+graph), clears any pending edge insertion, and opens the same
+`nodera.dialog.create-node`. On a pick the host runs, in this order:
+
+```ts
+const added = builder.graph.addNode({ type, after: anchor });   // no `after` on an empty graph
+if (!added.ok) return report(added.error);
+if (anchor !== undefined) {
+  const connected = builder.graph.connect({ source: anchor, target: added.value.id });
+  if (!connected.ok) report(connected.error);                    // the node stays
+}
+```
+
+Both refusals are reported, and **this path is two history units**: create, then
+connect. Unlike the edge "+", where `insertNode` writes the node and both halves
+as one reversible unit, one `undo()` here removes the connecting edge and a
+second one removes the node. A single-unit append-and-connect needs its own
+application use case; it does not exist yet, so no part of this flow claims
+atomicity.
+
 ### `builder.graphLayout`
 
 The composition point of the port:
@@ -286,6 +334,11 @@ every layout action in its own toolbar **above** the canvas:
   `builder.graph.addNode`, passing the anchor it chose (`after`) or none, and
   `mode: "auto"` gives it the slot that follows. The demo passes none, so a new
   node lands at the end of the graph;
+- the phantom node and edge the canvas draws while the graph holds at most one
+  node (turn `features.edgeInsertion` on and empty the graph to see them): their
+  "+" records the anchor in `pendingAppendAnchorId` and the same host handler
+  appends with `builder.graph.addNode({ type, after })` and then connects, which
+  is **two** history units — documented, not hidden;
 - the "+" the canvas paints on every edge, because the demo declares
   `features: { edgeInsertion: true }`: the dialog opens on that edge and the same
   host handler inserts with `builder.graph.insertNode`, so the node lands between
@@ -336,3 +389,10 @@ Stated, not hidden:
   `unpositioned` for a host that calls a strategy directly.
 - No framework toggle and no auto-arrange. Every re-placement is an explicit host
   action.
+- The phantom empty state appends in **two** history units (create, then connect)
+  instead of one. Only the edge "+" — which has an application use case —
+  guarantees all-or-nothing; a single-unit append-and-connect is a pending use
+  case, not implemented here.
+- The phantom placeholder sits a fixed distance (`PHANTOM_NODE_OFFSET`, 240 flow
+  units) beside the single node, because the canvas adapter cannot see
+  `graph.layout.spacing`.

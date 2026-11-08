@@ -68,7 +68,7 @@ decides which components it uses, where it places them and how they look.
 | `Toolbar` | registry-driven actions with availability gating and toolbar renderer replacement |
 | `ContextMenu` | store-driven menu at the pointer position, target-aware items, Escape/outside-click close, menu renderer replacement |
 | `Dialog` | modal surface for one `DialogDefinition`: ARIA name/description, focus move and trap, focus restore, Escape/backdrop dismissal only when the definition is dismissible |
-| `NodeCreationDialog` | the node palette inside `Dialog`: opens on the host's `open`, inserts the chosen definition on the pending edge through the `insert-node` command or adds exactly one node through `add-node` (or the host's `onAddNode`), closes on the accepted selection |
+| `NodeCreationDialog` | the node palette inside `Dialog`: opens on the host's `open`, inserts the chosen definition on the pending edge through the `insert-node` command or adds exactly one node through `add-node` (or the host's `onAddNode`), closes on the accepted selection and clears the pending session |
 | `CreateNodeButton` | the "+" affordance: a native button with `aria-haspopup="dialog"` that opens `nodera.dialog.create-node` through `useDialogActions` |
 | `ValidationPanel` | severity counts, validate action, issue list with element links, optional auto-validate |
 | `HistoryPanel` | undo/redo labels with a current marker and click-to-walk |
@@ -199,6 +199,42 @@ handles the selection itself (`onAddNode`) receives the definition id and reads
 `pendingEdgeInsertId` from `useUiState()` to decide between
 `builder.graph.insertNode` and `builder.graph.addNode`.
 
+### Growing a graph from nothing: the phantom "+"
+
+`GraphCanvas.edgeInsertion` also covers the two states that have no edge to put a
+"+" on. With no node at all the canvas draws a dashed, muted **phantom node**
+carrying the "`+`"; with exactly one node it draws that placeholder beside the
+node plus a dashed **phantom edge** from the node to it, "`+`" at the midpoint.
+From two nodes on there is no phantom at all. The phantoms live only in the
+arrays the canvas hands to React Flow: never in the document, never in
+`builder.graph.nodes()`/`edges()`, no event, no history entry, nothing to select,
+drag or delete, and the minimap skips them.
+
+Activating the phantom "`+`" writes `pendingAppendAnchorId` (the single node's id,
+absent on an empty graph) to the UI store, clears any `pendingEdgeInsertId`, and
+opens the same `nodera.dialog.create-node`. `NodeCreationDialog` treats that
+session as an **add**, never as an edge insertion, and clears the anchor on an
+accepted selection — exactly like the pending edge. The anchor reaches the graph
+through the host's `onAddNode`:
+
+```tsx
+const anchorId = ui.pendingAppendAnchorId;
+const added = builder.graph.addNode(
+  anchorId === undefined ? { type } : { type, after: anchorId },
+);
+if (added.ok && anchorId !== undefined) {
+  builder.graph.connect({ source: anchorId, target: added.value.id });
+}
+```
+
+This path is **two history units** — create, then connect — unlike the edge "+",
+whose insertion is one reversible unit. The framework does not hide that: one
+`undo()` removes the edge, a second removes the node. A single-unit
+append-and-connect needs its own application use case, which does not exist yet,
+so no API here promises atomicity for it. Both calls are reported to the host, and
+a refused `connect` leaves the node it already created (there is no transaction to
+roll it back).
+
 `CreateNodeButton` props: `label` (accessible name, default `Add node`),
 `children` (visible content, default `+`), `className` and `disabled`. It is a
 native `button type="button"`, so `Enter` and `Space` activate it, it has no
@@ -217,6 +253,9 @@ theme variables on its wrapper element.
   refuses an id its `DialogRegistry` does not know
 - `useEdgeInsertActions` — `begin(edgeId)`: records the edge as the pending
   insertion and opens the node-creation dialog
+- `useUiState().pendingAppendAnchorId` — the anchor a phantom "`+`" recorded; the
+  store exposes `setPendingAppendAnchorId(id | undefined)` and `closeDialog()`
+  clears it together with `pendingEdgeInsertId` in one commit
 - `useLayoutActions` — apply/reset layouts, resize, show/hide/toggle, dock, float,
   save and restore preferences
 - `useEditorSnapshot`, `useToolAvailability`, `useGraphQueries`,

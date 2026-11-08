@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, createEvent, act, waitFor, cleanup } from "@testing-library/react";
-import { ReactFlow, ReactFlowProvider } from "@xyflow/react";
+import { ReactFlow, ReactFlowProvider, type EdgeProps, type MiniMapNodeProps } from "@xyflow/react";
 import type { FC, ReactNode } from "react";
 import { createElement } from "react";
 import {
@@ -32,6 +32,11 @@ import {
   commitDraggedNodes,
   commitSelectionFromReactFlow,
   DefaultEdgeInsertButton,
+  MiniMapNodeWithoutPhantom,
+  PhantomEdge,
+  phantomGraphElements,
+  PHANTOM_EDGE_ID,
+  PHANTOM_NODE_ID,
 } from "./graph-canvas.js";
 import type { GraphCanvasProps } from "./graph-canvas.js";
 import { NODE_DEFINITION_MIME_TYPE } from "./definition-drop.js";
@@ -756,5 +761,243 @@ describe("GraphCanvas edge insert affordance", () => {
     );
 
     expect(screen.getByText("App Node")).toBeDefined();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  D: phantom empty state (S7)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The phantoms are presentation only: a node and (with exactly one real node)
+ * an edge the canvas adds to the React Flow arrays it renders. They are
+ * asserted at the two boundaries that own them — the pure derivation
+ * (`phantomGraphElements`) for the geometry and the flags, and the rendered
+ * canvas for what a host sees — because React Flow paints no edge at all in
+ * jsdom (see the C2 note above).
+ */
+describe("GraphCanvas phantom empty state", () => {
+  afterEach(cleanup);
+
+  function phantomStore(): UiStateStore {
+    const dialogs = new DialogRegistry();
+    dialogs.register(CREATE_NODE_DIALOG);
+    return new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      dialogRegistry: dialogs,
+    });
+  }
+
+  function renderPhantomCanvas(
+    engine: EditorEngine,
+    store: UiStateStore,
+    edgeInsertion = true,
+  ) {
+    return render(
+      <NoderaUiProvider store={store} editor={engine}>
+        <div style={{ width: 800, height: 600 }}>
+          <ReactFlowProvider>
+            <GraphCanvas editor={engine} edgeInsertion={edgeInsertion} />
+          </ReactFlowProvider>
+        </div>
+      </NoderaUiProvider>,
+    );
+  }
+
+  it("derives a phantom node at the origin for an empty graph", () => {
+    const elements = phantomGraphElements([]);
+
+    expect(elements.nodes).toHaveLength(1);
+    expect(elements.nodes[0]?.id).toBe(PHANTOM_NODE_ID);
+    expect(elements.nodes[0]?.position).toEqual({ x: 0, y: 0 });
+    // No node to connect therefore no phantom edge.
+    expect(elements.edges).toHaveLength(0);
+  });
+
+  it("derives a phantom edge from the single node to the phantom node", () => {
+    const elements = phantomGraphElements([
+      { id: "n1", position: { x: 40, y: 80 } },
+    ]);
+
+    expect(elements.nodes).toHaveLength(1);
+    expect(elements.edges).toHaveLength(1);
+    const edge = elements.edges[0];
+    expect(edge?.id).toBe(PHANTOM_EDGE_ID);
+    expect(edge?.source).toBe("n1");
+    expect(edge?.target).toBe(PHANTOM_NODE_ID);
+    // The placeholder sits one step beside the node it follows.
+    expect(elements.nodes[0]?.position).toEqual({ x: 280, y: 80 });
+  });
+
+  it("derives nothing once the graph holds two nodes", () => {
+    const elements = phantomGraphElements([
+      { id: "n1", position: { x: 0, y: 0 } },
+      { id: "n2", position: { x: 240, y: 0 } },
+    ]);
+
+    expect(elements.nodes).toEqual([]);
+    expect(elements.edges).toEqual([]);
+  });
+
+  it("keeps the phantoms out of selection, dragging and deletion", () => {
+    const elements = phantomGraphElements([
+      { id: "n1", position: { x: 0, y: 0 } },
+    ]);
+    const node = elements.nodes[0];
+    const edge = elements.edges[0];
+
+    // React Flow is what emits selection, drag and delete changes: refusing the
+    // four capabilities is what keeps the phantoms out of the document.
+    expect(node?.selectable).toBe(false);
+    expect(node?.draggable).toBe(false);
+    expect(node?.deletable).toBe(false);
+    expect(node?.connectable).toBe(false);
+    expect(edge?.selectable).toBe(false);
+    expect(edge?.deletable).toBe(false);
+  });
+
+  it("draws a phantom node in an empty graph when the affordance is enabled", () => {
+    const engine = makeEngine();
+    const { container } = renderPhantomCanvas(engine, phantomStore());
+
+    expect(container.querySelector("[data-nodera-phantom-node]")).not.toBeNull();
+  });
+
+  it("draws a phantom node beside the single node of the graph", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    const { container } = renderPhantomCanvas(engine, phantomStore());
+
+    expect(screen.getAllByText("App Node")).toHaveLength(1);
+    expect(container.querySelector("[data-nodera-phantom-node]")).not.toBeNull();
+  });
+
+  it("draws no phantom when the affordance is disabled", () => {
+    const engine = makeEngine();
+    const { container } = renderPhantomCanvas(engine, phantomStore(), false);
+
+    expect(container.querySelector("[data-nodera-phantom-node]")).toBeNull();
+  });
+
+  it("draws no phantom once the graph holds two nodes", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 240, y: 0 } });
+    const { container } = renderPhantomCanvas(engine, phantomStore());
+
+    expect(container.querySelector("[data-nodera-phantom-node]")).toBeNull();
+  });
+
+  it("writes no phantom into the graph, its history or its events", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    const nodeCreated = vi.fn();
+    const edgeCreated = vi.fn();
+    engine.events.subscribe("node.created", nodeCreated);
+    engine.events.subscribe("edge.created", edgeCreated);
+    const historyBefore = engine.history.size();
+
+    renderPhantomCanvas(engine, phantomStore());
+
+    expect(engine.graph.getNodes().map((node) => String(node.id))).toEqual(["n1"]);
+    expect(engine.graph.getEdges()).toHaveLength(0);
+    expect(engine.history.size()).toBe(historyBefore);
+    expect(nodeCreated).not.toHaveBeenCalled();
+    expect(edgeCreated).not.toHaveBeenCalled();
+  });
+
+  it("keeps the phantom out of the minimap", () => {
+    // The minimap draws every node React Flow knows, and jsdom gives it no node
+    // dimensions, so the filter is asserted where the adapter owns it: the node
+    // component the canvas hands to `<MiniMap nodeComponent>`.
+    const props = {
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      className: "",
+      shapeRendering: "crispEdges",
+      selected: false,
+    } as unknown as MiniMapNodeProps;
+
+    const phantom = render(
+      createElement(
+        "svg",
+        null,
+        createElement(MiniMapNodeWithoutPhantom, { ...props, id: PHANTOM_NODE_ID }),
+      ),
+    );
+    expect(phantom.container.querySelector("[data-nodera-minimap-node]")).toBeNull();
+    cleanup();
+
+    const real = render(
+      createElement("svg", null, createElement(MiniMapNodeWithoutPhantom, { ...props, id: "n1" })),
+    );
+    expect(real.container.querySelector("[data-nodera-minimap-node='n1']")).not.toBeNull();
+  });
+
+  it("renders the minimap alongside the phantom", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    const { container } = renderPhantomCanvas(engine, phantomStore());
+
+    expect(container.querySelector(".react-flow__minimap")).not.toBeNull();
+    expect(container.querySelector("[data-nodera-phantom-node]")).not.toBeNull();
+  });
+
+  it("records an empty anchor and opens the dialog from the empty-graph phantom", () => {
+    const engine = makeEngine();
+    const store = phantomStore();
+    // A session left over from another affordance must not survive the click.
+    store.setPendingEdgeInsertId("edge-1");
+    const { container } = renderPhantomCanvas(engine, store);
+
+    const button = container.querySelector("[data-nodera-phantom-insert]");
+    expect(button).not.toBeNull();
+    fireEvent.click(button as HTMLElement);
+
+    expect(store.getState().pendingAppendAnchorId).toBeUndefined();
+    expect(store.getState().pendingEdgeInsertId).toBeUndefined();
+    expect(store.getState().activeDialogId).toBe(NODERA_CREATE_NODE_DIALOG_ID);
+  });
+
+  it("records the existing node as the anchor from the phantom edge '+'", () => {
+    const store = phantomStore();
+    render(
+      <NoderaUiProvider store={store} editor={makeEngine()}>
+        <ReactFlowProvider>
+          <ReactFlow nodes={[]} edges={[]}>
+            {createElement(PhantomEdge, {
+              id: PHANTOM_EDGE_ID,
+              source: "n1",
+              target: PHANTOM_NODE_ID,
+              sourceX: 0,
+              sourceY: 0,
+              targetX: 240,
+              targetY: 0,
+              selected: false,
+              data: { anchorId: "n1" },
+            } as unknown as EdgeProps)}
+          </ReactFlow>
+        </ReactFlowProvider>
+      </NoderaUiProvider>,
+    );
+
+    const button = document.querySelector("[data-nodera-phantom-insert]");
+    expect(button).not.toBeNull();
+    fireEvent.click(button as HTMLElement);
+
+    expect(store.getState().pendingAppendAnchorId).toBe("n1");
+    expect(store.getState().activeDialogId).toBe(NODERA_CREATE_NODE_DIALOG_ID);
+  });
+
+  it("styles the phantoms as inactive with a shape channel, never colour alone", () => {
+    const { container } = renderPhantomCanvas(makeEngine(), phantomStore());
+    const phantom = container.querySelector("[data-nodera-phantom-node]") as HTMLElement;
+
+    expect(phantom.getAttribute("data-nodera-phantom-node")).toBe("inactive");
+    expect(phantom.style.borderStyle).toBe("dashed");
   });
 });

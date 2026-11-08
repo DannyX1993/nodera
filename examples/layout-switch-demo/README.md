@@ -31,6 +31,7 @@ rankSpacing: 280 }`, so the seed nodes are first placed on a deterministic grid.
 | Drag         | `builder.graphLayout.setDragPolicy(policy)` — `locked`, `snap-back`, `free` |
 | "+"          | `CreateNodeButton` → the built-in node-creation dialog               |
 | "+" on an edge | `features.edgeInsertion` → the canvas affordance → `builder.graph.insertNode` |
+| "+" on the phantom | `features.edgeInsertion` with 0 or 1 node → `addNode({ after })` + `connect` |
 
 Pressing **Arrange** is the only thing that re-places nodes. It is one explicit
 action and one history unit: `builder.graph.undo()` puts every previous position
@@ -57,6 +58,19 @@ undo restores the original edge. A refused insertion prints the SDK diagnostic i
 the status line and leaves the graph untouched. The button is the framework's
 default; `NoderaEditor.renderEdgeInsert` replaces it when a host wants its own
 icon or control.
+
+An empty graph has no edge to paint a "+" on, so the same flag also paints the
+**phantom empty state**: with no node the canvas draws a dashed placeholder node
+carrying the "`+`", and with exactly one node it adds the dashed placeholder
+beside it plus a phantom edge between the two. Clicking that "`+`" opens the same
+dialog and the host sees `pendingAppendAnchorId` in the UI state: it appends with
+`builder.graph.addNode({ type, after: anchor })` and then connects the pair with
+`builder.graph.connect`. That is **two history units** — create, then connect —
+which the status line says out loud, because one undo removes the edge and a
+second removes the node; a single-unit append needs an application use case the
+framework does not have yet. The phantoms themselves are presentation only: they
+never reach `builder.graph.nodes()`, the history or the minimap, and they vanish
+once the graph holds two nodes.
 
 The **Drag** select calls `builder.graphLayout.setDragPolicy` and starts from
 `builder.graphLayout.dragPolicy()`, so it always shows the policy the canvas is

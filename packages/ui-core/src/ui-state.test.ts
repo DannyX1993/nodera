@@ -56,8 +56,52 @@ describe("UiStateStore", () => {
       activePanelId: undefined,
       activeDialogId: undefined,
       pendingEdgeInsertId: undefined,
+      pendingAppendAnchorId: undefined,
       dragPolicy: "free",
     });
+  });
+
+  it("records the anchor of a phantom append session and notifies once per change", () => {
+    const store = createStore();
+    const seen: (string | undefined)[] = [];
+    store.subscribe((state) => seen.push(state.pendingAppendAnchorId));
+
+    store.setPendingAppendAnchorId("node-1");
+    store.setPendingAppendAnchorId("node-1");
+
+    expect(store.getState().pendingAppendAnchorId).toBe("node-1");
+    expect(seen).toEqual(["node-1"]);
+
+    store.setPendingAppendAnchorId(undefined);
+
+    expect(store.getState().pendingAppendAnchorId).toBeUndefined();
+    expect(seen).toEqual(["node-1", undefined]);
+  });
+
+  it("clears the pending append anchor together with the pending edge when the dialog closes", () => {
+    const store = createDialogStore();
+    store.setPendingAppendAnchorId("node-1");
+    store.setPendingEdgeInsertId("edge-1");
+    store.openDialog("acme.dialog.create-node");
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.closeDialog();
+
+    expect(store.getState().activeDialogId).toBeUndefined();
+    expect(store.getState().pendingEdgeInsertId).toBeUndefined();
+    expect(store.getState().pendingAppendAnchorId).toBeUndefined();
+    // One commit: a closed dialog never leaves half of its session behind.
+    expect(notifications).toBe(1);
+  });
+
+  it("ends a phantom append session whose dialog was already closed", () => {
+    const store = createStore();
+    store.setPendingAppendAnchorId("node-1");
+
+    store.closeDialog();
+
+    expect(store.getState().pendingAppendAnchorId).toBeUndefined();
   });
 
   it("records the edge an insertion is pending for and notifies once per change", () => {

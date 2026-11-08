@@ -68,7 +68,10 @@ export interface NoderaEditorProps {
    * becomes the pending insertion and the node-creation dialog opens); this prop
    * only changes what the control looks like, so a host can ship an icon, a
    * different label or its own component. The affordance itself is still enabled
-   * by `features.edgeInsertion`, never by rendering it.
+   * by `features.edgeInsertion`, never by rendering it, and the phantom empty
+   * state (a placeholder node, plus a placeholder edge while the graph holds one
+   * node) keeps the framework's own `"+"`: it records an append anchor instead of
+   * an edge, so a host button wired to `useEdgeInsertActions` could not run it.
    */
   readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
   readonly className?: string;

@@ -18,6 +18,8 @@
  * |                | whose selection the host adds with `builder.graph.addNode` |
  * | "+" on an edge  | the canvas affordance (`features.edgeInsertion`), whose     |
  * |                | selection the host inserts with `builder.graph.insertNode` |
+ * | "+" on the     | the same affordance on the phantom empty state: the host   |
+ * | phantom        | appends with `addNode({ after })` + `connect` (two units)  |
  *
  * Nothing is persisted by those overrides: they win for the one `Arrange` call
  * that carries them, and the next call without them reads `graph.layout` again.
@@ -183,10 +185,28 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   /**
    * Creates the node the dialog offered.
    *
-   * One dialog, two creation paths: when an edge "+" opened it, the definition
-   * is inserted **into** that edge (`builder.graph.insertNode`, one history unit,
-   * so one undo restores the original edge); otherwise it is added with
-   * `builder.graph.addNode` and `mode: "auto"` gives it a free slot.
+   * One dialog, three creation paths, each identified by the presentation state
+   * the affordance that opened it recorded:
+   *
+   * - an edge "+" (`pendingEdgeInsertId`): the definition is inserted **into**
+   *   that edge with `builder.graph.insertNode`, one history unit, so one undo
+   *   restores the original edge;
+   * - the phantom "+" (`pendingAppendAnchorId`, see `docs/GRAPH-LAYOUT.md`): the
+   *   node is appended with `builder.graph.addNode({ type, after })` — the anchor
+   *   is the node the placeholder followed, or absent on an empty graph — and
+   *   then connected to it with `builder.graph.connect`;
+   * - the toolbar "+" (neither): `addNode({ type })` and `mode: "auto"` gives it
+   *   a free slot.
+   *
+   * The phantom path is **two history units**, not one: create, then connect,
+   * because both are separate SDK calls. One `undo()` removes the connecting edge
+   * and a second removes the node. A single-unit append-and-connect needs its own
+   * application use case, which does not exist yet, so this demo says so instead
+   * of pretending.
+   *
+   * Both calls are reported: a refused `addNode` leaves the graph untouched, and
+   * a refused `connect` is printed together with the node that did land, because
+   * there is no transaction here that could roll it back.
    */
   const addNode = (definitionId: string): void => {
     const edgeId = ui.pendingEdgeInsertId;
@@ -205,14 +225,43 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
       );
       return;
     }
-    const added = builder.graph.addNode({ type: definitionId });
+
+    const anchorId = ui.pendingAppendAnchorId;
+    const added = builder.graph.addNode(
+      anchorId === undefined
+        ? { type: definitionId }
+        : { type: definitionId, after: anchorId },
+    );
     if (!added.ok) {
       setStatus(`Node "${definitionId}" was not added — ${issueSummary(added.error)}`);
       return;
     }
+
+    if (anchorId === undefined) {
+      setStatus(
+        `Node "${added.value.id}" added at ${positionLabel(added.value.position)}. ` +
+          "Press Arrange to rank it with the rest.",
+      );
+      return;
+    }
+
+    const connected = builder.graph.connect({
+      source: anchorId,
+      target: added.value.id,
+    });
+    if (!connected.ok) {
+      setStatus(
+        `Node "${added.value.id}" was added after "${anchorId}" at ` +
+          `${positionLabel(added.value.position)} but could not be connected — ` +
+          `${issueSummary(connected.error)}. Two history units: the node stays, ` +
+          "and undo removes it without an edge.",
+      );
+      return;
+    }
     setStatus(
-      `Node "${added.value.id}" added at ${positionLabel(added.value.position)}. ` +
-        "Press Arrange to rank it with the rest.",
+      `Node "${added.value.id}" added after "${anchorId}" and connected to it at ` +
+        `${positionLabel(added.value.position)}. Two history units: undo removes ` +
+        "the edge first, then the node. Press Arrange to rank it with the rest.",
     );
   };
 

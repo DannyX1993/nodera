@@ -81,6 +81,21 @@ export interface UiState {
    */
   readonly pendingEdgeInsertId: string | undefined;
   /**
+   * Node a phantom append places the chosen definition after, if one was opened
+   * from the phantom empty state of the canvas.
+   *
+   * Presentation state only: it tells the host which node the new node follows
+   * (`addNode({ after })`), so it never enters the portable document, and it is
+   * cleared when the dialog closes (see {@link UiStateStore.closeDialog}) or when
+   * the selection completes.
+   *
+   * An empty graph records `undefined`, exactly like "no session": the anchor
+   * is then simply absent and the host adds the first node. Nothing needs the two
+   * cases apart, because the value *is* the anchor and the store clears it with
+   * the dialog either way.
+   */
+  readonly pendingAppendAnchorId: string | undefined;
+  /**
    * What a manual drag does with the positions the layout assigned.
    *
    * The canvas adapter reads it reactively (a policy change re-renders without
@@ -139,6 +154,7 @@ export class UiStateStore {
       activePanelId: undefined,
       activeDialogId: undefined,
       pendingEdgeInsertId: undefined,
+      pendingAppendAnchorId: undefined,
       dragPolicy: options.dragPolicy ?? "free",
     };
   }
@@ -282,17 +298,40 @@ export class UiStateStore {
   }
 
   /**
-   * Closes the open dialog, if any, and ends its edge-insertion session.
+   * Records (or clears, with `undefined`) the node a phantom append follows.
    *
-   * The pending edge lives exactly as long as the dialog it was opened for, so
-   * both fields are cleared in one commit: a closed dialog can never leave a
-   * later `add-node` guessing that it has to insert instead.
+   * The node id is opaque here: the store is framework-agnostic and does not
+   * check it against a graph. Setting the value already stored notifies nobody.
    */
-  closeDialog(): void {
-    if (this.state.activeDialogId === undefined && this.state.pendingEdgeInsertId === undefined) {
+  setPendingAppendAnchorId(pendingAppendAnchorId: string | undefined): void {
+    if (pendingAppendAnchorId === this.state.pendingAppendAnchorId) {
       return;
     }
-    this.commit({ ...this.state, activeDialogId: undefined, pendingEdgeInsertId: undefined });
+    this.commit({ ...this.state, pendingAppendAnchorId });
+  }
+
+  /**
+   * Closes the open dialog, if any, and ends its insertion session.
+   *
+   * The pending edge and the pending append anchor live exactly as long as the
+   * dialog they were opened for, so every field is cleared in one commit: a
+   * closed dialog can never leave a later `add-node` guessing that it has to
+   * insert into an edge or follow an anchor nobody selected anymore.
+   */
+  closeDialog(): void {
+    if (
+      this.state.activeDialogId === undefined &&
+      this.state.pendingEdgeInsertId === undefined &&
+      this.state.pendingAppendAnchorId === undefined
+    ) {
+      return;
+    }
+    this.commit({
+      ...this.state,
+      activeDialogId: undefined,
+      pendingEdgeInsertId: undefined,
+      pendingAppendAnchorId: undefined,
+    });
   }
 
   /**

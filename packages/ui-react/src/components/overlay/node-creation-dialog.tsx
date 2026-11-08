@@ -84,9 +84,13 @@ export interface NodeCreationDialogProps {
  *
  * Two creation paths, one dialog: a selection inserts into the edge an affordance
  * recorded (`UiState.pendingEdgeInsertId`) and adds a node otherwise, so an edge
- * `+` and the toolbar `+` never need two surfaces. The pending edge is cleared as
- * soon as the insertion is accepted, and the store clears it on close, so a
- * closed dialog can never make the next add insert somewhere unexpected.
+ * `+` and the toolbar `+` never need two surfaces. A phantom append
+ * (`UiState.pendingAppendAnchorId`) is **not** an insertion: it takes the add
+ * path, and the host honours the anchor by passing it as `addNode({ after })`
+ * from its `onAddNode` handler. The pending edge and the pending anchor are
+ * cleared as soon as the selection is accepted, and the store clears both on
+ * close, so a closed dialog can never make the next add insert somewhere
+ * unexpected or follow an anchor nobody selected anymore.
  *
  * Visual composition only: no state, no layout and no focus handling of its
  * own. Focus lands on the palette search field because that is the first
@@ -114,9 +118,11 @@ export function NodeCreationDialog(props: NodeCreationDialogProps): ReactNode {
       accepted = executeCommand({ kind: "add-node", definitionId });
     }
     if (accepted) {
-      // The insertion is done, so its pending edge must not outlive it: a later
-      // `add-node` from the palette would otherwise insert into that edge.
+      // The session is done, so neither half of it must outlive it: a later
+      // `add-node` from the palette would otherwise insert into that edge or
+      // follow the anchor of a placeholder the user already used.
       store.setPendingEdgeInsertId(undefined);
+      store.setPendingAppendAnchorId(undefined);
       close();
     }
   };
