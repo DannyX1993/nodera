@@ -13,7 +13,13 @@ import type {
   PortDirection,
   PortMultiplicity,
 } from "@nodera/graph-model";
-import { sdkError, type SdkIssue, type SdkIssues } from "../errors.js";
+import {
+  isPlainObject,
+  sdkError,
+  shapeIssue,
+  type SdkIssue,
+  type SdkIssues,
+} from "../errors.js";
 
 /** One port as the host declares it. */
 export interface PortInput {
@@ -83,31 +89,66 @@ function toDeclaration(port: PortInput, direction: PortDirection): PortDeclarati
 /**
  * Translates grouped authoring ports into flat declarations, reporting every
  * invalid or repeated id instead of silently dropping it.
+ *
+ * Ports are data, so the group and each declaration are shape-checked here:
+ * the flat declarations below dereference every field, and a port that is not
+ * an object must never reach them.
  */
 export function toPortDeclarations(
   group: PortGroupInput = {},
 ): Result<readonly PortDeclaration[], SdkIssues> {
+  if (!isPlainObject(group)) {
+    return err([
+      shapeIssue(
+        "Ports must be an object grouping inputs, outputs and bidirectional",
+        group,
+        ["ports"],
+      ),
+    ]);
+  }
+
   const issues: SdkIssue[] = [];
   const declarations: PortDeclaration[] = [];
   const firstGroupById = new Map<string, keyof PortGroupInput>();
 
   for (const [groupName, direction] of GROUPS) {
-    const ports = group[groupName];
-    if (ports === undefined) {
+    const declaredPorts = group[groupName];
+    if (declaredPorts === undefined) {
       continue;
     }
-    for (const port of ports) {
+    if (!Array.isArray(declaredPorts)) {
+      issues.push(
+        shapeIssue(
+          `Ports "${groupName}" must be an array of port declarations`,
+          declaredPorts,
+          ["ports", groupName],
+        ),
+      );
+      continue;
+    }
+    const portInputs: readonly PortInput[] = declaredPorts;
+    portInputs.forEach((port, index) => {
+      if (!isPlainObject(port)) {
+        issues.push(
+          shapeIssue(
+            `Port "${groupName}" must be an object declaring at least an id`,
+            port,
+            ["ports", groupName, String(index)],
+          ),
+        );
+        return;
+      }
       const path = ["ports", groupName, port.id];
-      if (!PORT_ID_PATTERN.test(port.id)) {
+      if (typeof port.id !== "string" || !PORT_ID_PATTERN.test(port.id)) {
         issues.push({
           ...sdkError(
             "sdk.invalid-id",
-            `Port id "${port.id}" of the "${groupName}" group must be a short identifier without whitespace`,
-            { path },
+            `Port id "${String(port.id)}" of the "${groupName}" group must be a short identifier without whitespace`,
+            { path: ["ports", groupName, String(port.id ?? index)] },
           ),
           severity: "error",
         });
-        continue;
+        return;
       }
       const firstGroup = firstGroupById.get(port.id);
       if (firstGroup !== undefined) {
@@ -119,11 +160,11 @@ export function toPortDeclarations(
           ),
           severity: "error",
         });
-        continue;
+        return;
       }
       firstGroupById.set(port.id, groupName);
       declarations.push(toDeclaration(port, direction));
-    }
+    });
   }
 
   return issues.length > 0 ? err(issues) : ok(declarations);

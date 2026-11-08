@@ -30,7 +30,14 @@ import {
   type UseCaseError,
 } from "@nodera/application";
 import type { ValidationLevel, ValidationReport } from "@nodera/validation";
-import { sdkError, type SdkIssue, type SdkIssues } from "../errors.js";
+import {
+  disposedIssue,
+  isPlainObject,
+  sdkError,
+  shapeIssue,
+  type SdkIssue,
+  type SdkIssues,
+} from "../errors.js";
 
 /** One node to add, in the public `type` vocabulary of the SDK. */
 export interface AddNodeRequest {
@@ -118,7 +125,11 @@ function useCaseIssue(error: UseCaseError): SdkIssue {
  * Branded id constructors throw `RangeError`; the SDK reports every data
  * problem as a `Result`, so the shape is checked here instead.
  */
-function identifierIssues(kind: string, value: string): SdkIssues | undefined {
+function identifierIssues(
+  kind: string,
+  value: unknown,
+  path: readonly string[],
+): SdkIssues | undefined {
   if (isValidIdShape(value)) {
     return undefined;
   }
@@ -127,24 +138,96 @@ function identifierIssues(kind: string, value: string): SdkIssues | undefined {
       ...sdkError(
         "sdk.invalid-input",
         `${kind} id must be a non-empty string without whitespace`,
-        { metadata: { value } },
+        { path, metadata: { value } },
       ),
       severity: "error",
     },
   ];
 }
 
-/** First identifier that is malformed, in the order the caller passed them. */
-function endpointIssues(
-  endpoints: readonly (readonly [string, string])[],
+/** Rejects a required text field that is missing or is not a string. */
+function textIssues(
+  owner: string,
+  field: string,
+  value: unknown,
+  path: readonly string[],
 ): SdkIssues | undefined {
-  for (const [kind, value] of endpoints) {
-    const issues = identifierIssues(kind, value);
+  if (typeof value === "string" && value.trim().length > 0) {
+    return undefined;
+  }
+  return [
+    {
+      ...sdkError(
+        "sdk.invalid-input",
+        typeof value === "string"
+          ? `${owner} must declare a non-empty ${field}`
+          : `${owner} must declare ${field} as a string`,
+        { path, metadata: { value } },
+      ),
+      severity: "error",
+    },
+  ];
+}
+
+/** Rejects a request object that is not an object at all. */
+function requestIssues(request: unknown, expected: string): SdkIssues | undefined {
+  return isPlainObject(request) ? undefined : [shapeIssue(expected, request, ["request"])];
+}
+
+/** Rejects a property map that is not an object. */
+function propertyMapIssues(properties: unknown): SdkIssues | undefined {
+  return isPlainObject(properties)
+    ? undefined
+    : [shapeIssue("Properties must be an object of property values", properties, ["properties"])];
+}
+
+/** Rejects a node position that is not an `{ x, y }` pair of numbers. */
+function positionIssues(position: NodePosition): SdkIssues | undefined {
+  if (!isPlainObject(position)) {
+    return [
+      shapeIssue("Node position must be an object with numeric x and y", position, [
+        "position",
+      ]),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  for (const axis of ["x", "y"] as const) {
+    const value = position[axis];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      issues.push(
+        shapeIssue(`Node position ${axis} must be a finite number`, value, [
+          "position",
+          axis,
+        ]),
+      );
+    }
+  }
+  return issues.length > 0 ? issues : undefined;
+}
+
+/** Rejects a selection list that is not an array of identifiers. */
+function selectionIssues(
+  kind: string,
+  values: readonly unknown[],
+): SdkIssues | undefined {
+  for (const [index, value] of values.entries()) {
+    const issues = identifierIssues(kind, value, [
+      kind === "Node" ? "nodes" : "edges",
+      String(index),
+    ]);
     if (issues !== undefined) {
       return issues;
     }
   }
   return undefined;
+}
+
+/** The diagnostic a disposed builder refuses a mutation with, if it is disposed. */
+function closedIssues(
+  isDisposed: () => boolean,
+  operation: string,
+): SdkIssues | undefined {
+  return isDisposed() ? [disposedIssue(operation)] : undefined;
 }
 
 /** First port of a node usable by the given endpoint role. */
@@ -185,15 +268,32 @@ function missingNodeIssue(nodeId: string): SdkIssue {
  *
  * The editor owns the graph, the history and the events; this API owns only
  * the translation between the public vocabulary and the use case contracts.
+ * `isDisposed` is the builder's own lifecycle flag: a disposed builder refuses
+ * every mutation with `sdk.disposed` and keeps every read working, because the
+ * state the host already received must stay renderable.
  */
-export function createGraphApi(editor: EditorEngine): BuilderGraphApi {
+export function createGraphApi(
+  editor: EditorEngine,
+  isDisposed: () => boolean,
+): BuilderGraphApi {
   return {
     addNode(request: AddNodeRequest): Result<Node, SdkIssues> {
-      if (request.nodeId !== undefined) {
-        const issues = identifierIssues("Node", request.nodeId);
-        if (issues !== undefined) {
-          return err(issues);
-        }
+      const closed = closedIssues(isDisposed, "graph.addNode");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const invalid =
+        requestIssues(request, "Add-node request must be an object declaring a node type") ??
+        textIssues("Add-node request", "type", request.type, ["type"]) ??
+        (request.nodeId === undefined
+          ? undefined
+          : identifierIssues("Node", request.nodeId, ["nodeId"])) ??
+        (request.properties === undefined
+          ? undefined
+          : propertyMapIssues(request.properties)) ??
+        (request.position === undefined ? undefined : positionIssues(request.position));
+      if (invalid !== undefined) {
+        return err(invalid);
       }
       const added = addNode(editor, {
         definitionId: request.type,
@@ -205,7 +305,11 @@ export function createGraphApi(editor: EditorEngine): BuilderGraphApi {
     },
 
     removeNode(nodeId: string): Result<Node, SdkIssues> {
-      const issues = identifierIssues("Node", nodeId);
+      const closed = closedIssues(isDisposed, "graph.removeNode");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const issues = identifierIssues("Node", nodeId, ["nodeId"]);
       if (issues !== undefined) {
         return err(issues);
       }
@@ -214,7 +318,12 @@ export function createGraphApi(editor: EditorEngine): BuilderGraphApi {
     },
 
     moveNode(nodeId: string, position: NodePosition): Result<Node, SdkIssues> {
-      const issues = identifierIssues("Node", nodeId);
+      const closed = closedIssues(isDisposed, "graph.moveNode");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const issues =
+        identifierIssues("Node", nodeId, ["nodeId"]) ?? positionIssues(position);
       if (issues !== undefined) {
         return err(issues);
       }
@@ -226,7 +335,12 @@ export function createGraphApi(editor: EditorEngine): BuilderGraphApi {
       nodeId: string,
       properties: Readonly<Record<string, unknown>>,
     ): Result<Node, SdkIssues> {
-      const issues = identifierIssues("Node", nodeId);
+      const closed = closedIssues(isDisposed, "graph.updateProperties");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const issues =
+        identifierIssues("Node", nodeId, ["nodeId"]) ?? propertyMapIssues(properties);
       if (issues !== undefined) {
         return err(issues);
       }
@@ -246,12 +360,31 @@ export function createGraphApi(editor: EditorEngine): BuilderGraphApi {
     },
 
     connect(request: ConnectRequest): Result<Edge, SdkIssues> {
-      const issues = endpointIssues([
-        ["Source node", request.source],
-        ["Target node", request.target],
-      ]);
-      if (issues !== undefined) {
-        return err(issues);
+      const closed = closedIssues(isDisposed, "graph.connect");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const invalid =
+        requestIssues(
+          request,
+          "Connection request must be an object declaring a source and a target",
+        ) ??
+        identifierIssues("Source node", request.source, ["source"]) ??
+        identifierIssues("Target node", request.target, ["target"]) ??
+        (request.sourcePort === undefined
+          ? undefined
+          : identifierIssues("Source port", request.sourcePort, ["sourcePort"])) ??
+        (request.targetPort === undefined
+          ? undefined
+          : identifierIssues("Target port", request.targetPort, ["targetPort"])) ??
+        (request.type === undefined
+          ? undefined
+          : textIssues("Connection request", "type", request.type, ["type"])) ??
+        (request.label === undefined
+          ? undefined
+          : textIssues("Connection request", "label", request.label, ["label"]));
+      if (invalid !== undefined) {
+        return err(invalid);
       }
       const sourcePort =
         request.sourcePort ?? defaultPort(editor, request.source, SOURCE_DIRECTIONS);
@@ -273,7 +406,11 @@ export function createGraphApi(editor: EditorEngine): BuilderGraphApi {
     },
 
     disconnect(edgeId: string): Result<Edge, SdkIssues> {
-      const issues = identifierIssues("Edge", edgeId);
+      const closed = closedIssues(isDisposed, "graph.disconnect");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const issues = identifierIssues("Edge", edgeId, ["edgeId"]);
       if (issues !== undefined) {
         return err(issues);
       }
@@ -282,14 +419,35 @@ export function createGraphApi(editor: EditorEngine): BuilderGraphApi {
     },
 
     select(request: SelectRequest): Result<void, SdkIssues> {
-      const nodes = request.nodes ?? [];
-      const edges = request.edges ?? [];
-      const issues = endpointIssues([
-        ...nodes.map((nodeId) => ["Node", nodeId] as const),
-        ...edges.map((edgeId) => ["Edge", edgeId] as const),
-      ]);
-      if (issues !== undefined) {
-        return err(issues);
+      const closed = closedIssues(isDisposed, "graph.select");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const invalid =
+        requestIssues(
+          request,
+          "Selection request must be an object declaring the nodes and edges to select",
+        ) ??
+        (request.nodes !== undefined && !Array.isArray(request.nodes)
+          ? [
+              shapeIssue("Selected nodes must be an array of node ids", request.nodes, [
+                "nodes",
+              ]),
+            ]
+          : undefined) ??
+        (request.edges !== undefined && !Array.isArray(request.edges)
+          ? [
+              shapeIssue("Selected edges must be an array of edge ids", request.edges, [
+                "edges",
+              ]),
+            ]
+          : undefined) ??
+        (Array.isArray(request.nodes)
+          ? selectionIssues("Node", request.nodes)
+          : undefined) ??
+        (Array.isArray(request.edges) ? selectionIssues("Edge", request.edges) : undefined);
+      if (invalid !== undefined) {
+        return err(invalid);
       }
       const selected = selectMultiple(editor, {
         ...(request.nodes === undefined ? {} : { nodeIds: request.nodes }),
@@ -299,16 +457,27 @@ export function createGraphApi(editor: EditorEngine): BuilderGraphApi {
     },
 
     clearSelection(): Result<void, SdkIssues> {
+      const closed = closedIssues(isDisposed, "graph.clearSelection");
+      if (closed !== undefined) {
+        return err(closed);
+      }
       const cleared = clearSelection(editor);
       return cleared.ok ? ok(undefined) : err([useCaseIssue(cleared.error)]);
     },
 
+    /**
+     * Steps the history back.
+     *
+     * The signature is the history engine's boolean, so a disposed builder
+     * cannot report a code here: it performs no mutation and reports `false`.
+     */
     undo(): boolean {
-      return undo(editor);
+      return isDisposed() ? false : undo(editor);
     },
 
+    /** Steps the history forward; `false` on a disposed builder, see {@link undo}. */
     redo(): boolean {
-      return redo(editor);
+      return isDisposed() ? false : redo(editor);
     },
 
     canUndo(): boolean {
@@ -322,9 +491,10 @@ export function createGraphApi(editor: EditorEngine): BuilderGraphApi {
     validate(
       options: { readonly levels?: readonly ValidationLevel[] } = {},
     ): ValidationReport {
-      return options.levels === undefined
+      const levels = isPlainObject(options) ? options.levels : undefined;
+      return levels === undefined
         ? validateGraph(editor)
-        : validateGraph(editor, { levels: options.levels });
+        : validateGraph(editor, { levels });
     },
 
     nodeCount(): number {

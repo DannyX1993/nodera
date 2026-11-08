@@ -8,7 +8,12 @@
  */
 
 import { err, ok, type Result } from "@nodera/contracts";
-import { sdkError, type SdkError } from "../errors.js";
+import {
+  describeValue,
+  isPlainObject,
+  sdkError,
+  type SdkError,
+} from "../errors.js";
 import type { RendererBinding } from "../authoring/renderer-binding.js";
 
 /** Every kind of renderer a host may bind. */
@@ -44,6 +49,11 @@ export const EMPTY_RENDERER_BINDINGS: RendererBindings = Object.freeze({
 /** A renderer id is a short identifier, optionally dot-qualified. */
 const RENDERER_ID_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
 
+/** Whether a value is one of the slots a host may bind a renderer to. */
+function isRendererKind(kind: string): kind is RendererKind {
+  return (RENDERER_KINDS as readonly string[]).includes(kind);
+}
+
 /**
  * Adds one binding, returning a new snapshot. Rebinding a live id is a
  * conflict, never a silent overwrite.
@@ -53,13 +63,34 @@ export function withRendererBinding(
   kind: RendererKind,
   binding: RendererBinding,
 ): Result<RendererBindings, SdkError> {
-  const path = ["renderers", kind, binding.id];
-  if (!RENDERER_ID_PATTERN.test(binding.id)) {
+  if (!isPlainObject(binding)) {
+    return err(
+      sdkError(
+        "sdk.invalid-input",
+        `A renderer binding must be an object with an id and a value; received ${describeValue(binding)}`,
+        { path: ["renderers"] },
+      ),
+    );
+  }
+  if (typeof kind !== "string" || !isRendererKind(kind)) {
+    return err(
+      sdkError(
+        "sdk.invalid-input",
+        `Renderer kind "${String(kind)}" is not one of: ${RENDERER_KINDS.join(", ")}`,
+        { path: ["renderers"], metadata: { value: kind } },
+      ),
+    );
+  }
+  const path =
+    typeof binding.id === "string"
+      ? ["renderers", kind, binding.id]
+      : ["renderers", kind];
+  if (typeof binding.id !== "string" || !RENDERER_ID_PATTERN.test(binding.id)) {
     return err(
       sdkError(
         "sdk.invalid-id",
-        `Renderer id "${binding.id}" must be a non-empty identifier without whitespace`,
-        { path },
+        `Renderer id "${String(binding.id)}" must be a non-empty identifier without whitespace`,
+        { path, metadata: { value: binding.id } },
       ),
     );
   }

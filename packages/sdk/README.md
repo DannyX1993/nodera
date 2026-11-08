@@ -276,6 +276,16 @@ export type SdkIssues = readonly SdkIssue[];
   honoured, currently the capability gaps collected in `builder.diagnostics`:
   a definition needs a renderer slot the selected engine does not declare
   (`sdk.renderer-unsupported`). A warning never fails `createBuilder`.
+- **Malformed data is a `Result`, never a throw.** A value the SDK requires to
+  be an object, an array, a string or a boolean is checked once at the boundary
+  that owns it and reported with the `path` of the offending input: `["features"]`,
+  `["adapter", "capabilities"]`, `["panels", "id"]`, `["request"]`, and — inside
+  a definition, where every path is relative to it — `["label"]`. `null` where an
+  object is required, a number where a string is required and an object where an
+  array is required are `sdk.invalid-input` (or `sdk.invalid-id` when the rule is
+  about an identifier, or `sdk.plugin-invalid` for a plugin), never a
+  `TypeError`. An *internal invariant* violation still throws.
+  `src/public-contract.test.ts` is the guard for this rule.
 - **The list holds only codes the SDK actually emits.** A capability an engine
   cannot honour is a `sdk.renderer-unsupported` warning, and a renderer value
   that is not a component is rejected by the React binding with
@@ -606,6 +616,42 @@ const bound = builder.renderers.nodes.get("demo.http.request");
 `builder.renderers` is an immutable snapshot of the bindings by kind, and it is a
 new object after every registration, which is what the React binding memoises on.
 Binding the same id twice is `sdk.duplicate-id`.
+
+### Lifecycle — `builder.dispose()`
+
+Disposing is how a host releases the composition. It is idempotent, and the
+contract is one sentence you can rely on:
+
+> **After `dispose()` every operation that mutates the graph or extends the
+> builder fails with `sdk.disposed`; every read keeps working.**
+
+The closed set, exactly:
+
+| Refused with `sdk.disposed` | Still available |
+| --- | --- |
+| `registerNode`, `registerEdge`, `registerProperty`, `registerPanel`, `registerTool` | `builder.registries.*`, `builder.properties` |
+| `bindRenderer`, `use`, `createEditor` | `builder.events.on` / `once` / `off` / `emitSdk` |
+| `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
+| `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
+| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `connect`, `disconnect`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
+| `graph.undo`, `graph.redo` — no mutation runs, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
+| `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |
+
+Reads stay open on purpose: a host that unmounts an editor still renders the
+state it already received, so killing `document.create()` or `theme.active()`
+would break a disposed builder's last frame. `undo()`/`redo()` are the two
+mutations whose signature is the history engine's boolean, so they perform
+nothing and report `false` instead of a code.
+
+```ts
+const builder = assertValid(createBuilder({ registry: { nodes: [ACME_NODE] } }));
+builder.dispose();
+
+const refused = builder.graph.addNode({ type: "acme.node" });
+// refused.ok === false, refused.error[0].code === "sdk.disposed"
+
+builder.graph.nodeCount(); // still a number: reads never fail
+```
 
 ## Deliberately absent (Phases 7 and 8)
 

@@ -9,7 +9,15 @@
 
 import { err, ok, type Result } from "@nodera/contracts";
 import type { EdgeVisual } from "@nodera/edge-registry";
-import { isQualifiedId, sdkError, type SdkIssue, type SdkIssues } from "../errors.js";
+import {
+  isPlainObject,
+  isQualifiedId,
+  sdkError,
+  shapeIssue,
+  stringFieldIssue,
+  type SdkIssue,
+  type SdkIssues,
+} from "../errors.js";
 
 /** Every capability an adapter may declare. */
 export const ADAPTER_CAPABILITIES = [
@@ -63,37 +71,94 @@ const DEFAULT_CAPABILITIES: AdapterCapabilities = {
   customPanels: false,
 };
 
+/** Whether a key is a capability the port declares. */
+function isCapability(key: string): key is AdapterCapability {
+  return (ADAPTER_CAPABILITIES as readonly string[]).includes(key);
+}
+
 /** Validates an adapter declaration and resolves its capabilities. */
 export function normalizeAdapter(
   input: BuilderAdapterInput,
 ): Result<BuilderAdapter, SdkIssues> {
+  if (!isPlainObject(input)) {
+    return err([
+      shapeIssue(
+        "Adapter must be an object declaring an id, a label and its capabilities",
+        input,
+        ["adapter"],
+      ),
+    ]);
+  }
+
   const issues: SdkIssue[] = [];
-  if (!isQualifiedId(input.id)) {
+  const id = typeof input.id === "string" ? input.id : undefined;
+  const label =
+    typeof input.label === "string" && input.label.trim().length > 0
+      ? input.label
+      : undefined;
+
+  if (id === undefined) {
+    issues.push(
+      shapeIssue("Adapter must declare id as a string", input.id, ["adapter", "id"]),
+    );
+  } else if (!isQualifiedId(id)) {
     issues.push({
       ...sdkError(
         "sdk.invalid-id",
-        `Adapter id "${input.id}" must be globally qualified, e.g. "vendor.canvas-engine"`,
-        { path: ["adapter", "id"], metadata: { value: input.id } },
+        `Adapter id "${id}" must be globally qualified, e.g. "vendor.canvas-engine"`,
+        { path: ["adapter", "id"], metadata: { value: id } },
       ),
       severity: "error",
     });
   }
-  if (input.label.trim().length === 0) {
-    issues.push({
-      ...sdkError("sdk.invalid-input", "Adapter must declare a non-empty label", {
-        path: ["adapter", "label"],
-      }),
-      severity: "error",
-    });
+  if (label === undefined) {
+    issues.push(stringFieldIssue("Adapter", "label", input.label, ["adapter", "label"]));
   }
-  if (issues.length > 0) {
+
+  const overrides: Partial<Record<AdapterCapability, boolean>> = {};
+  if (input.capabilities !== undefined) {
+    if (!isPlainObject(input.capabilities)) {
+      issues.push(
+        shapeIssue(
+          "Adapter capabilities must be an object of booleans",
+          input.capabilities,
+          ["adapter", "capabilities"],
+        ),
+      );
+    } else {
+      for (const [capability, value] of Object.entries(input.capabilities)) {
+        if (!isCapability(capability)) {
+          issues.push(
+            shapeIssue(
+              `Adapter capability "${capability}" is not one of: ${ADAPTER_CAPABILITIES.join(", ")}`,
+              value,
+              ["adapter", "capabilities", capability],
+            ),
+          );
+          continue;
+        }
+        if (value !== undefined && typeof value !== "boolean") {
+          issues.push(
+            shapeIssue(
+              `Adapter capability "${capability}" must be a boolean`,
+              value,
+              ["adapter", "capabilities", capability],
+            ),
+          );
+          continue;
+        }
+        if (typeof value === "boolean") {
+          overrides[capability] = value;
+        }
+      }
+    }
+  }
+
+  if (issues.length > 0 || id === undefined || label === undefined) {
     return err(issues);
   }
-  const capabilities: AdapterCapabilities = {
-    ...DEFAULT_CAPABILITIES,
-    ...(input.capabilities ?? {}),
-  };
-  return ok({ id: input.id, label: input.label, capabilities });
+  const capabilities: AdapterCapabilities = { ...DEFAULT_CAPABILITIES, ...overrides };
+  return ok({ id, label, capabilities });
 }
 
 /** Presentation surface a set of authored definitions actually needs. */

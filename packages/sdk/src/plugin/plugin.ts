@@ -37,6 +37,8 @@ import type { NodeDefinitionInput } from "../authoring/nodes.js";
 import type { PropertyInput } from "../authoring/properties.js";
 import type { Builder } from "../builder/builder.js";
 import {
+  describeValue,
+  isPlainObject,
   isQualifiedId,
   sdkError,
   type SdkIssue,
@@ -148,8 +150,26 @@ function installedOn(builder: Builder): Set<string> {
 
 /** Every reason a plugin cannot be installed, checked before `install` runs. */
 function pluginIssues(plugin: BuilderPlugin): SdkIssue[] {
+  if (!isPlainObject(plugin)) {
+    return [
+      pluginIssue(
+        "sdk.plugin-invalid",
+        `A plugin must be an object declaring id, version and install; received ${describeValue(plugin)}`,
+        { path: ["plugin"] },
+      ),
+    ];
+  }
+
   const issues: SdkIssue[] = [];
-  if (!isQualifiedId(plugin.id)) {
+  if (typeof plugin.id !== "string") {
+    issues.push(
+      pluginIssue(
+        "sdk.plugin-invalid",
+        `Plugin id must be a string; received ${describeValue(plugin.id)}`,
+        { path: ["id"] },
+      ),
+    );
+  } else if (!isQualifiedId(plugin.id)) {
     issues.push(
       pluginIssue(
         "sdk.plugin-invalid",
@@ -158,12 +178,29 @@ function pluginIssues(plugin: BuilderPlugin): SdkIssue[] {
       ),
     );
   }
-  if (!PLUGIN_VERSION_PATTERN.test(plugin.version)) {
+  if (typeof plugin.version !== "string") {
+    issues.push(
+      pluginIssue(
+        "sdk.plugin-invalid",
+        `Plugin version must be a string; received ${describeValue(plugin.version)}`,
+        { path: ["version"] },
+      ),
+    );
+  } else if (!PLUGIN_VERSION_PATTERN.test(plugin.version)) {
     issues.push(
       pluginIssue(
         "sdk.plugin-invalid",
         `Plugin version "${plugin.version}" must be semver-shaped (major.minor.patch)`,
         { path: ["version"], metadata: { value: plugin.version } },
+      ),
+    );
+  }
+  if (typeof plugin.install !== "function") {
+    issues.push(
+      pluginIssue(
+        "sdk.plugin-invalid",
+        `Plugin install must be a function; received ${describeValue(plugin.install)}`,
+        { path: ["install"] },
       ),
     );
   }

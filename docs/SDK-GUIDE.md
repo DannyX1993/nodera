@@ -267,7 +267,7 @@ export interface SdkIssue extends SdkError {
 export type SdkIssues = readonly SdkIssue[];
 ```
 
-`SDK_ISSUE_CODES` is the closed list of the 15 codes such an issue can carry.
+`SDK_ISSUE_CODES` is the closed list of the 13 codes such an issue can carry.
 
 Consequences worth designing around:
 
@@ -283,6 +283,13 @@ Consequences worth designing around:
   (`SDK_ISSUE_CODES`); `message` is for humans and may be reworded. Match on
   `code`, and keep `metadata` for detail you may display (`domainCode` keeps the
   originating document or parse code, `elementId` names the graph element).
+- **Malformed data is a `Result`.** A value the SDK requires to be an object,
+  an array, a string or a boolean is shape-checked once, at the boundary that
+  owns it, and reported with the `path` of the offending input (`["features"]`,
+  `["document"]`, `["panels", "id"]`, `["request"]`, or — inside a definition —
+  `["label"]`). A `null` where an object is required, a number where a string is
+  required and an object where an array is required are `sdk.invalid-input` (or
+  the more specific code), never a `TypeError`.
 - **Two ways to consume.** `.ok` for hosts that render diagnostics, `assertOk` /
   `assertValid` for linear boot code that should stop.
 
@@ -297,6 +304,51 @@ if (!result.ok) {
 ```
 
 (`examples/phase6-demo/src/demo-app.tsx`, same pattern in every handler.)
+
+## Lifecycle: creating and disposing a builder
+
+`createBuilder` returns the builder or every problem of the configuration,
+whichever applies, and never a partially wired object:
+
+```ts
+const result = createBuilder({ registry: { nodes: [ACME_NODE] } });
+if (!result.ok) {
+  // one diagnostic per problem, none of them thrown
+  return result.error.map((issue) => `${issue.path?.join(".") ?? ""} ${issue.code}`);
+}
+const builder = result.value; // fully composed: registries, store, editor, facades
+```
+
+`builder.dispose()` releases it. The contract is one sentence, and the columns
+below are the complete lists:
+
+> **After `dispose()` every operation that mutates the graph or extends the
+> builder fails with `sdk.disposed`; every read keeps working.**
+
+| Refused with `sdk.disposed` | Still available |
+| --- | --- |
+| `registerNode`, `registerEdge`, `registerProperty`, `registerPanel`, `registerTool` | `builder.registries.*`, `builder.properties` |
+| `bindRenderer`, `use`, `createEditor` | `builder.events.on` / `once` / `off` / `emitSdk` |
+| `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
+| `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
+| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `connect`, `disconnect`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
+| `graph.undo`, `graph.redo` — nothing is undone, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
+| `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |
+
+Disposal closes mutations because they would change state the host is no longer
+composing; it leaves reads open because a host that unmounts an editor still
+renders the state it already received. `undo()` and `redo()` keep the history
+engine's boolean signature, so they have no code to report: they perform nothing
+and return `false`. Disposing twice is safe.
+
+```ts
+builder.dispose();
+
+const refused = builder.graph.addNode({ type: "acme.http.request" });
+// refused.ok === false && refused.error[0].code === "sdk.disposed"
+
+const exported = builder.document.serialize("json"); // still exports
+```
 
 ## Choosing the engine
 
@@ -423,5 +475,8 @@ These are honest boundaries of Phase 6, not roadmap guesses.
 - `docs/PROJECT-STRUCTURE.md` §7.3 — the package boundaries and the executable
   rules that enforce them.
 - `examples/phase6-demo` — the complete integration, importing only
-  `@nodera/sdk` and `@nodera/sdk-react`.
+  `@nodera/sdk` and `@nodera/sdk-react`. Its `pnpm test` runs
+  `src/imports.test.ts`, which parses every source file and fails on any other
+  internal `@nodera/*` package or on an `@xyflow/react` import other than its
+  stylesheet.
 - `odd/tasks/fase6-sdk.md` — the Phase 6 decisions (D1–D21) with their rationale.

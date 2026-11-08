@@ -15,7 +15,14 @@ import {
   type PropertyOption,
 } from "@nodera/property-system";
 import type { RendererBinding } from "./renderer-binding.js";
-import { sdkError, type SdkIssue, type SdkIssues } from "../errors.js";
+import {
+  identifierFieldIssue,
+  isPlainObject,
+  shapeIssue,
+  sdkError,
+  type SdkIssue,
+  type SdkIssues,
+} from "../errors.js";
 
 /** One property as the host declares it. */
 export interface PropertyInput {
@@ -67,6 +74,18 @@ function toOptions(
   );
 }
 
+/** Options entry that is neither a string nor a `{ value, label }` pair. */
+function isOptionInput(option: unknown): boolean {
+  return (
+    typeof option === "string" ||
+    (isPlainObject(option) &&
+      "value" in option &&
+      "label" in option &&
+      typeof option.value === "string" &&
+      typeof option.label === "string")
+  );
+}
+
 /**
  * Translates one authored property, reporting every structural violation of
  * the public vocabulary instead of deferring it to a validator the caller may
@@ -76,21 +95,27 @@ export function toPropertyDefinition(
   input: PropertyInput,
   options: PropertyTranslationOptions = {},
 ): Result<PropertyTranslation, SdkIssues> {
-  const issues: SdkIssue[] = [];
-  const base = ["properties", input.id];
-
-  if (!PROPERTY_ID_PATTERN.test(input.id)) {
-    issues.push({
-      ...sdkError(
-        "sdk.invalid-id",
-        `Property id "${input.id}" must be a non-empty identifier without whitespace`,
-        { path: ["properties", input.id] },
+  if (!isPlainObject(input)) {
+    return err([
+      shapeIssue(
+        "Property definition must be an object declaring at least an id and a type",
+        input,
+        ["property"],
       ),
-      severity: "error",
-    });
+    ]);
   }
 
-  if (!isPropertyType(input.type)) {
+  const issues: SdkIssue[] = [];
+  const id = typeof input.id === "string" ? input.id : undefined;
+  const base = id === undefined ? ["properties"] : ["properties", id];
+
+  if (id === undefined || !PROPERTY_ID_PATTERN.test(id)) {
+    issues.push(
+      identifierFieldIssue("Property definition", "id", input.id, ["properties"]),
+    );
+  }
+
+  if (typeof input.type !== "string" || !isPropertyType(input.type)) {
     issues.push({
       ...sdkError(
         "sdk.invalid-input",
@@ -100,14 +125,40 @@ export function toPropertyDefinition(
       severity: "error",
     });
   } else if (input.type === "select" || input.type === "multi-select") {
-    if (input.options === undefined || input.options.length === 0) {
+    if (!Array.isArray(input.options) || input.options.length === 0) {
       issues.push({
         ...sdkError(
           "sdk.invalid-input",
-          `Property "${input.id}" of type "${input.type}" must declare at least one option`,
+          `Property "${String(input.id)}" of type "${input.type}" must declare at least one option`,
           { path: [...base, "options"] },
         ),
         severity: "error",
+      });
+    }
+  }
+
+  if (input.options !== undefined) {
+    const declaredOptions = input.options;
+    if (!Array.isArray(declaredOptions)) {
+      issues.push(
+        shapeIssue(
+          `Property "${String(input.id)}" must declare its options as an array`,
+          declaredOptions,
+          [...base, "options"],
+        ),
+      );
+    } else {
+      const optionInputs: readonly (string | PropertyOption)[] = declaredOptions;
+      optionInputs.forEach((option, index) => {
+        if (!isOptionInput(option)) {
+          issues.push(
+            shapeIssue(
+              "A property option must be a string or a { value, label } pair of strings",
+              option,
+              [...base, "options", String(index)],
+            ),
+          );
+        }
       });
     }
   }
@@ -125,23 +176,23 @@ export function toPropertyDefinition(
       component = { id: componentId, value: input.component };
     }
   }
-  if (input.type === "custom" && componentId === undefined) {
+  if (typeof input.type === "string" && input.type === "custom" && componentId === undefined) {
     issues.push({
       ...sdkError(
         "sdk.invalid-input",
-        `Property "${input.id}" of type "custom" must declare a component`,
+        `Property "${String(input.id)}" of type "custom" must declare a component`,
         { path: [...base, "component"] },
       ),
       severity: "error",
     });
   }
 
-  if (issues.length > 0) {
+  if (issues.length > 0 || id === undefined) {
     return err(issues);
   }
 
   const definition: PropertyDefinition = {
-    id: input.id,
+    id,
     type: input.type,
     ...(input.label === undefined ? {} : { label: input.label }),
     ...(input.description === undefined ? {} : { description: input.description }),

@@ -11,7 +11,15 @@
 import { err, ok, type Result } from "@nodera/contracts";
 import { validateEdgeDefinition } from "@nodera/edge-registry";
 import type { EdgeDefinition, EdgeVisual } from "@nodera/edge-registry";
-import { sdkError, isQualifiedId, type SdkIssue, type SdkIssues } from "../errors.js";
+import {
+  isPlainObject,
+  isQualifiedId,
+  sdkError,
+  shapeIssue,
+  stringFieldIssue,
+  type SdkIssue,
+  type SdkIssues,
+} from "../errors.js";
 import { DEFAULT_DEFINITION_VERSION } from "./nodes.js";
 import type { RendererBinding } from "./renderer-binding.js";
 import { fromDomainValidationIssues } from "./validation-issues.js";
@@ -91,7 +99,8 @@ function splitStyle(style: EdgeStyleInput | undefined): {
 }
 
 function toVisual(input: EdgeDefinitionInput): EdgeVisual | undefined {
-  const { known, hints } = splitStyle(input.style);
+  const style = isPlainObject(input.style) ? input.style : undefined;
+  const { known, hints } = splitStyle(style);
   const hasKnown = Object.keys(known).length > 0;
   const hasHints = Object.keys(hints).length > 0;
   if (input.visual === undefined && !hasKnown && !hasHints) {
@@ -108,6 +117,57 @@ function toVisual(input: EdgeDefinitionInput): EdgeVisual | undefined {
   };
 }
 
+/** Text fields of an edge definition, once each one proved to be a string. */
+interface EdgeTextFields {
+  readonly type: string;
+  readonly label: string;
+  readonly version: string | undefined;
+}
+
+/**
+ * Reads the required text fields of an edge definition, or `undefined` when
+ * one of them is missing or is not a string.
+ */
+function readTextFields(
+  input: EdgeDefinitionInput,
+  issues: SdkIssue[],
+): EdgeTextFields | undefined {
+  const { type, label, version } = input;
+  let complete = true;
+
+  if (typeof type !== "string") {
+    issues.push(
+      shapeIssue("Edge definition must declare type as a string", type, ["type"]),
+    );
+    complete = false;
+  } else if (!isQualifiedId(type)) {
+    issues.push({
+      ...sdkError(
+        "sdk.invalid-id",
+        `Edge type "${type}" must be globally qualified, e.g. "vendor.feature-name"`,
+        { path: ["type"], metadata: { value: type } },
+      ),
+      severity: "error",
+    });
+  }
+
+  if (typeof label !== "string" || label.trim().length === 0) {
+    issues.push(stringFieldIssue("Edge definition", "label", label, ["label"]));
+    complete = false;
+  }
+  if (version !== undefined && typeof version !== "string") {
+    issues.push(
+      shapeIssue("Edge definition must declare version as a string", version, ["version"]),
+    );
+    complete = false;
+  }
+
+  if (!complete || typeof type !== "string" || typeof label !== "string") {
+    return undefined;
+  }
+  return { type, label, version: typeof version === "string" ? version : undefined };
+}
+
 /**
  * Translates one authored edge definition, reporting every invalid part of the
  * input at once.
@@ -115,37 +175,43 @@ function toVisual(input: EdgeDefinitionInput): EdgeVisual | undefined {
 export function toEdgeDefinition(
   input: EdgeDefinitionInput,
 ): Result<EdgeDefinitionTranslation, SdkIssues> {
-  const issues: SdkIssue[] = [];
-
-  if (!isQualifiedId(input.type)) {
-    issues.push({
-      ...sdkError(
-        "sdk.invalid-id",
-        `Edge type "${input.type}" must be globally qualified, e.g. "vendor.feature-name"`,
-        { path: ["type"], metadata: { value: input.type } },
+  if (!isPlainObject(input)) {
+    return err([
+      shapeIssue(
+        "Edge definition must be an object declaring at least a type and a label",
+        input,
+        ["edge"],
       ),
-      severity: "error",
-    });
+    ]);
   }
-  if (input.label.trim().length === 0) {
-    issues.push({
-      ...sdkError("sdk.invalid-input", "Edge definition must declare a non-empty label", {
-        path: ["label"],
-      }),
-      severity: "error",
-    });
+
+  const issues: SdkIssue[] = [];
+  const fields = readTextFields(input, issues);
+
+  if (input.style !== undefined && !isPlainObject(input.style)) {
+    issues.push(
+      shapeIssue("Edge style must be an object of visual hints", input.style, ["style"]),
+    );
   }
-  if (issues.length > 0) {
+  if (input.visual !== undefined && !isPlainObject(input.visual)) {
+    issues.push(
+      shapeIssue("Edge visual must be an object of declared visual keys", input.visual, [
+        "visual",
+      ]),
+    );
+  }
+
+  if (issues.length > 0 || fields === undefined) {
     return err(issues);
   }
 
   const visual = toVisual(input);
   const definition: EdgeDefinition = {
-    id: input.type,
-    name: input.label,
-    version: input.version ?? DEFAULT_DEFINITION_VERSION,
+    id: fields.type,
+    name: fields.label,
+    version: fields.version ?? DEFAULT_DEFINITION_VERSION,
     ...(input.description === undefined ? {} : { description: input.description }),
-    ...(input.renderer === undefined ? {} : { renderer: input.type }),
+    ...(input.renderer === undefined ? {} : { renderer: fields.type }),
     ...(visual === undefined ? {} : { visual }),
     ...(input.connectionTypes === undefined
       ? {}
@@ -174,6 +240,6 @@ export function toEdgeDefinition(
     definition,
     ...(input.renderer === undefined
       ? {}
-      : { renderer: { id: input.type, value: input.renderer } }),
+      : { renderer: { id: fields.type, value: input.renderer } }),
   });
 }

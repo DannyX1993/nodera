@@ -32,6 +32,7 @@ import {
   createDefaultPanelRegistry,
   createDefaultToolRegistry,
   type LayoutDefinition,
+  type LayoutPanelPlacement,
   type PanelDefinition,
   type PanelRegistry,
   type ToolDefinition,
@@ -56,8 +57,13 @@ import { toNodeDefinition, type NodeDefinitionInput } from "../authoring/nodes.j
 import { toPropertyDefinition, type PropertyInput } from "../authoring/properties.js";
 import type { RendererBinding } from "../authoring/renderer-binding.js";
 import {
+  disposedIssue,
+  identifierFieldIssue,
+  isPlainObject,
   isQualifiedId,
   sdkError,
+  shapeIssue,
+  stringFieldIssue,
   toIssues,
   type SdkError,
   type SdkIssue,
@@ -170,6 +176,13 @@ export interface Builder {
   use(plugin: BuilderPlugin): Result<PluginInstallation, SdkIssues>;
   /** Opens a new editing session over the builder's registries. */
   createEditor(options?: EditorEngineOptions): Result<EditorEngine, SdkIssues>;
+  /**
+   * Releases the builder. Idempotent.
+   *
+   * Afterwards every operation that mutates the graph or extends the builder
+   * fails with `sdk.disposed`; every read keeps working, because the state the
+   * host already received must stay renderable.
+   */
   dispose(): void;
 }
 
@@ -185,14 +198,6 @@ function registryIssue(error: RegistryError, path: readonly string[]): SdkIssue 
     path,
     metadata: { registryId: error.id, registryErrorKind: error.kind },
   };
-}
-
-function disposed(operation: string): SdkError {
-  return sdkError(
-    "sdk.disposed",
-    `The builder has been disposed; "${operation}" is no longer available`,
-    { metadata: { operation } },
-  );
 }
 
 /** Issue for a theme id no registry entry matches. */
@@ -241,6 +246,28 @@ function registerTheme(
   input: CreateThemeInput,
   path: readonly string[],
 ): Result<ThemeDefinition, SdkIssues> {
+  if (!isPlainObject(input)) {
+    return err([
+      shapeIssue(
+        "A theme must be an object declaring an id, a name and its design tokens",
+        input,
+        path,
+      ),
+    ]);
+  }
+
+  const id = typeof input.id === "string" && input.id.trim().length > 0 ? input.id : undefined;
+  const issues: SdkIssue[] = [];
+  if (id === undefined) {
+    issues.push(identifierFieldIssue("Theme", "id", input.id, [...path, "id"]));
+  }
+  if (typeof input.name !== "string") {
+    issues.push(stringFieldIssue("Theme", "name", input.name, [...path, "name"]));
+  }
+  if (issues.length > 0 || id === undefined) {
+    return err(issues);
+  }
+
   let theme: ThemeDefinition;
   try {
     theme = createTheme(input);
@@ -249,7 +276,7 @@ function registerTheme(
       toIssue(
         sdkError("sdk.invalid-input", messageOf(error), {
           path,
-          metadata: { value: input.id },
+          metadata: { value: id },
         }),
       ),
     ]);
@@ -269,47 +296,136 @@ function registerTheme(
  * lets the registry decide conflicts.
  */
 function layoutIssues(layout: LayoutDefinition, path: readonly string[]): SdkIssue[] {
-  const issues: SdkIssue[] = [];
-  if (typeof layout.id !== "string" || layout.id.trim().length === 0) {
-    issues.push(
-      toIssue(
-        sdkError("sdk.invalid-input", "Layout must declare a non-empty id", {
-          path,
-          metadata: { value: layout.id },
-        }),
+  if (!isPlainObject(layout)) {
+    return [
+      shapeIssue(
+        "A layout must be an object declaring an id and its panel placements",
+        layout,
+        path,
       ),
-    );
+    ];
   }
-  if (!Array.isArray(layout.panels)) {
+
+  const issues: SdkIssue[] = [];
+  const id = typeof layout.id === "string" && layout.id.trim().length > 0 ? layout.id : undefined;
+  if (id === undefined) {
+    issues.push(identifierFieldIssue("Layout", "id", layout.id, [...path, "id"]));
+  }
+  const declaredPanels = layout.panels;
+  if (!Array.isArray(declaredPanels)) {
     issues.push(
-      toIssue(
-        sdkError("sdk.invalid-input", "Layout must declare its panels as an array", { path }),
-      ),
+      shapeIssue("A layout must declare its panels as an array", declaredPanels, [
+        ...path,
+        "panels",
+      ]),
     );
     return issues;
   }
-  layout.panels.forEach((placement, index) => {
+  const placements: readonly LayoutPanelPlacement[] = declaredPanels;
+  placements.forEach((placement, index) => {
+    if (!isPlainObject(placement)) {
+      issues.push(
+        shapeIssue(
+          "A layout panel placement must be an object declaring a panel id and a region",
+          placement,
+          [...path, "panels", String(index)],
+        ),
+      );
+      return;
+    }
     if (typeof placement.panelId !== "string" || placement.panelId.trim().length === 0) {
       issues.push(
-        toIssue(
-          sdkError(
-            "sdk.invalid-input",
-            "Layout panel placement must declare a non-empty panel id",
-            { path: [...path, "panels", String(index), "panelId"] },
-          ),
-        ),
+        stringFieldIssue("Layout panel placement", "panelId", placement.panelId, [
+          ...path,
+          "panels",
+          String(index),
+          "panelId",
+        ]),
       );
     }
     if (typeof placement.region !== "string" || placement.region.trim().length === 0) {
       issues.push(
-        toIssue(
-          sdkError("sdk.invalid-input", "Layout panel placement must declare a region", {
-            path: [...path, "panels", String(index), "region"],
-          }),
-        ),
+        stringFieldIssue("Layout panel placement", "region", placement.region, [
+          ...path,
+          "panels",
+          String(index),
+          "region",
+        ]),
       );
     }
   });
+  return issues;
+}
+
+/**
+ * Structural checks of a panel definition.
+ *
+ * `PanelRegistry` only owns duplicate and unknown ids, and a panel without an
+ * id would be stored under an undefined key, so the SDK validates the shape a
+ * host hands in before the registry sees it.
+ */
+function panelIssues(panel: PanelDefinition): SdkIssue[] {
+  if (!isPlainObject(panel)) {
+    return [
+      shapeIssue(
+        "A panel must be an object declaring an id, a title and a region",
+        panel,
+        ["panels"],
+      ),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  if (typeof panel.id !== "string" || panel.id.trim().length === 0) {
+    issues.push(identifierFieldIssue("Panel", "id", panel.id, ["panels", "id"]));
+  }
+  if (typeof panel.title !== "string" || panel.title.trim().length === 0) {
+    issues.push(stringFieldIssue("Panel", "title", panel.title, ["panels", "title"]));
+  }
+  if (typeof panel.region !== "string" || panel.region.trim().length === 0) {
+    issues.push(stringFieldIssue("Panel", "region", panel.region, ["panels", "region"]));
+  }
+  return issues;
+}
+
+/**
+ * Structural checks of a tool definition.
+ *
+ * A tool is a declarative command, so the command must be an object with a
+ * string `kind` the presentation layer can map to a use case.
+ */
+function toolIssues(tool: ToolDefinition): SdkIssue[] {
+  if (!isPlainObject(tool)) {
+    return [
+      shapeIssue(
+        "A tool must be an object declaring an id, a label and a command",
+        tool,
+        ["tools"],
+      ),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  if (typeof tool.id !== "string" || tool.id.trim().length === 0) {
+    issues.push(identifierFieldIssue("Tool", "id", tool.id, ["tools", "id"]));
+  }
+  if (typeof tool.label !== "string" || tool.label.trim().length === 0) {
+    issues.push(stringFieldIssue("Tool", "label", tool.label, ["tools", "label"]));
+  }
+  if (!isPlainObject(tool.command)) {
+    issues.push(
+      shapeIssue("A tool must declare its command as an object with a kind", tool.command, [
+        "tools",
+        "command",
+      ]),
+    );
+  } else if (typeof tool.command.kind !== "string" || tool.command.kind.trim().length === 0) {
+    issues.push(
+      stringFieldIssue("Tool command", "kind", tool.command.kind, [
+        "tools",
+        "command",
+        "kind",
+      ]),
+    );
+  }
   return issues;
 }
 
@@ -476,6 +592,16 @@ function addProperty(
 function resolveDocumentFormat(
   configuration: BuilderDocumentConfiguration | undefined,
 ): Result<BuilderDocumentFormat, SdkIssues> {
+  if (configuration !== undefined && !isPlainObject(configuration)) {
+    return err([
+      shapeIssue(
+        "Builder document configuration must be an object declaring a format and a version",
+        configuration,
+        ["document"],
+      ),
+    ]);
+  }
+
   const issues: SdkIssue[] = [];
   const format = configuration?.format ?? GGD_FORMAT;
   const version = configuration?.version ?? DEFAULT_FORMAT_VERSION;
@@ -492,12 +618,12 @@ function resolveDocumentFormat(
       ),
     );
   }
-  if (!VERSION_PATTERN.test(version)) {
+  if (typeof version !== "string" || !VERSION_PATTERN.test(version)) {
     issues.push(
       toIssue(
         sdkError(
           "sdk.document-invalid",
-          `Document version "${version}" must be semver-shaped (major.minor.patch)`,
+          `Document version "${String(version)}" must be semver-shaped (major.minor.patch)`,
           { path: ["document", "version"], metadata: { value: version } },
         ),
       ),
@@ -505,6 +631,33 @@ function resolveDocumentFormat(
   }
 
   return issues.length > 0 ? err(issues) : ok({ format, version });
+}
+
+/**
+ * Reads one configured registry list.
+ *
+ * A list that is not an array is reported at its own path instead of being
+ * iterated, so a malformed configuration never reaches a `for…of` loop.
+ */
+function declaredList<T>(
+  value: readonly T[] | undefined,
+  key: string,
+  issues: SdkIssue[],
+): readonly T[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    issues.push(
+      shapeIssue(
+        `Builder registry "${key}" must be an array of definitions`,
+        value,
+        ["registry", key],
+      ),
+    );
+    return [];
+  }
+  return value;
 }
 
 /** Values a fully validated composition needs to build the builder. */
@@ -555,8 +708,8 @@ class SdkBuilder implements Builder {
     this.documentFormat = options.documentFormat;
     this.domain = options.domain;
     this.bindings = options.renderers;
-    this.graph = createGraphApi(this.editor);
-    this.document = createDocumentApi(this.editor, this.documentFormat);
+    this.graph = createGraphApi(this.editor, () => this.disposedFlag);
+    this.document = createDocumentApi(this.editor, this.documentFormat, () => this.disposedFlag);
     this.events = createBuilderEvents(this.editor.events);
     this.theme = {
       register: (input) => this.addTheme(input),
@@ -578,7 +731,7 @@ class SdkBuilder implements Builder {
 
   registerNode(input: NodeDefinitionInput): Result<NodeDefinition, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("registerNode"))]);
+      return err([disposedIssue("registerNode")]);
     }
     const added = addNode(this.registries.nodes, this.bindings, input, (id) => [
       "nodes",
@@ -593,7 +746,7 @@ class SdkBuilder implements Builder {
 
   registerEdge(input: EdgeDefinitionInput): Result<EdgeDefinition, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("registerEdge"))]);
+      return err([disposedIssue("registerEdge")]);
     }
     const added = addEdge(this.registries.edges, this.bindings, input, (id) => [
       "edges",
@@ -608,7 +761,7 @@ class SdkBuilder implements Builder {
 
   registerProperty(input: PropertyInput): Result<PropertyDefinition, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("registerProperty"))]);
+      return err([disposedIssue("registerProperty")]);
     }
     const added = addProperty(this.properties, this.bindings, input, (id) => [
       "properties",
@@ -623,7 +776,11 @@ class SdkBuilder implements Builder {
 
   registerPanel(panel: PanelDefinition): Result<PanelDefinition, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("registerPanel"))]);
+      return err([disposedIssue("registerPanel")]);
+    }
+    const issues = panelIssues(panel);
+    if (issues.length > 0) {
+      return err(issues);
     }
     const registered = this.registries.panels.register(panel);
     if (!registered.ok) {
@@ -634,7 +791,11 @@ class SdkBuilder implements Builder {
 
   registerTool(tool: ToolDefinition): Result<ToolDefinition, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("registerTool"))]);
+      return err([disposedIssue("registerTool")]);
+    }
+    const issues = toolIssues(tool);
+    if (issues.length > 0) {
+      return err(issues);
     }
     const registered = this.registries.tools.register(tool);
     if (!registered.ok) {
@@ -649,7 +810,7 @@ class SdkBuilder implements Builder {
     value: unknown,
   ): Result<Builder, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("bindRenderer"))]);
+      return err([disposedIssue("bindRenderer")]);
     }
     const next = withRendererBinding(this.bindings, kind, { id, value });
     if (!next.ok) {
@@ -661,22 +822,34 @@ class SdkBuilder implements Builder {
 
   createEditor(options: EditorEngineOptions = {}): Result<EditorEngine, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("createEditor"))]);
+      return err([disposedIssue("createEditor")]);
+    }
+    if (!isPlainObject(options)) {
+      return err([
+        shapeIssue("Editor options must be an object", options, ["options"]),
+      ]);
     }
     return ok(new EditorEngine({ ...options, domain: this.domain }));
   }
 
   use(plugin: BuilderPlugin): Result<PluginInstallation, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("use"))]);
+      return err([disposedIssue("use")]);
     }
     return installPlugin(this, plugin);
   }
 
   /**
-   * Releases the builder. Disposing is idempotent and closes every operation
-   * that would mutate or extend the composition; the state the host already
-   * received stays readable.
+   * Releases the builder.
+   *
+   * Disposing is idempotent and closes every operation that would mutate the
+   * graph or extend the composition: `register*`, `bindRenderer`, `use`,
+   * `createEditor`, `theme.register`/`setDefault`,
+   * `layout.register`/`setDefault`, every mutating `graph.*` call and
+   * `document.import` fail with `sdk.disposed`. Reads keep working — `graph`
+   * counts, selections, history flags and validation, `document` creation,
+   * export, serialization and validation, events and the theme/layout queries —
+   * because they observe state the host already received.
    */
   dispose(): void {
     this.disposedFlag = true;
@@ -684,7 +857,7 @@ class SdkBuilder implements Builder {
 
   private addTheme(input: CreateThemeInput): Result<ThemeDefinition, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("theme.register"))]);
+      return err([disposedIssue("theme.register")]);
     }
     return registerTheme(this.registries.themes, input, ["themes"]);
   }
@@ -697,7 +870,7 @@ class SdkBuilder implements Builder {
    */
   private selectTheme(themeId: string): Result<ThemeDefinition, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("theme.setDefault"))]);
+      return err([disposedIssue("theme.setDefault")]);
     }
     const selected = this.registries.themes.setDefault(themeId);
     if (!selected.ok) {
@@ -714,7 +887,7 @@ class SdkBuilder implements Builder {
 
   private addLayout(layout: LayoutDefinition): Result<LayoutDefinition, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("layout.register"))]);
+      return err([disposedIssue("layout.register")]);
     }
     return registerLayout(this.registries.layouts, layout, ["layouts"]);
   }
@@ -727,7 +900,7 @@ class SdkBuilder implements Builder {
    */
   private selectLayout(layoutId: string): Result<LayoutDefinition, SdkIssues> {
     if (this.disposedFlag) {
-      return err([toIssue(disposed("layout.setDefault"))]);
+      return err([disposedIssue("layout.setDefault")]);
     }
     const selected = this.registries.layouts.setDefault(layoutId);
     if (!selected.ok) {
@@ -755,10 +928,20 @@ class SdkBuilder implements Builder {
 export function createBuilder(
   configuration: BuilderConfiguration = {},
 ): Result<Builder, SdkIssues> {
+  if (!isPlainObject(configuration)) {
+    return err([
+      shapeIssue("Builder configuration must be an object", configuration, [
+        "configuration",
+      ]),
+    ]);
+  }
+
   const issues: SdkIssue[] = [];
 
   const id = configuration.id ?? DEFAULT_BUILDER_ID;
-  if (!isQualifiedId(id)) {
+  if (typeof id !== "string") {
+    issues.push(shapeIssue("Builder id must be a string", id, ["id"]));
+  } else if (!isQualifiedId(id)) {
     issues.push(
       toIssue(
         sdkError(
@@ -769,6 +952,60 @@ export function createBuilder(
       ),
     );
   }
+
+  const registry = configuration.registry;
+  if (registry !== undefined && !isPlainObject(registry)) {
+    issues.push(
+      shapeIssue(
+        "Builder registry must be an object grouping nodes, edges, properties, themes and layouts",
+        registry,
+        ["registry"],
+      ),
+    );
+  }
+
+  const ui = configuration.ui;
+  if (ui !== undefined && !isPlainObject(ui)) {
+    issues.push(
+      shapeIssue("Builder ui must be an object declaring a theme and a layout", ui, [
+        "ui",
+      ]),
+    );
+  } else if (ui !== undefined) {
+    if (ui.theme !== undefined && typeof ui.theme !== "string") {
+      issues.push(shapeIssue("Builder ui theme must be a theme id", ui.theme, [
+        "ui",
+        "theme",
+      ]));
+    }
+    if (ui.layout !== undefined && typeof ui.layout !== "string") {
+      issues.push(
+        shapeIssue("Builder ui layout must be a layout id", ui.layout, ["ui", "layout"]),
+      );
+    }
+  }
+
+  if (configuration.graph !== undefined && !isPlainObject(configuration.graph)) {
+    issues.push(
+      shapeIssue("Builder graph must be an object declaring a graph id and settings", configuration.graph, [
+        "graph",
+      ]),
+    );
+  }
+
+  if (configuration.plugins !== undefined && !Array.isArray(configuration.plugins)) {
+    issues.push(
+      shapeIssue("Builder plugins must be an array of plugin definitions", configuration.plugins, [
+        "plugins",
+      ]),
+    );
+  }
+
+  const nodeInputs = declaredList(registry?.nodes, "nodes", issues);
+  const edgeInputs = declaredList(registry?.edges, "edges", issues);
+  const propertyInputs = declaredList(registry?.properties, "properties", issues);
+  const themeInputs = declaredList(registry?.themes, "themes", issues);
+  const layoutInputs = declaredList(registry?.layouts, "layouts", issues);
 
   let adapter: BuilderAdapter | undefined;
   if (configuration.adapter !== undefined) {
@@ -804,7 +1041,7 @@ export function createBuilder(
   const nodeDefinitions: NodeDefinition[] = [];
   const edgeDefinitions: EdgeDefinition[] = [];
 
-  for (const input of configuration.registry?.nodes ?? []) {
+  for (const input of nodeInputs) {
     const added = addNode(nodes, renderers, input, (id) => ["registry", "nodes", id]);
     if (!added.ok) {
       issues.push(...added.error);
@@ -814,7 +1051,7 @@ export function createBuilder(
     nodeDefinitions.push(added.value.definition);
   }
 
-  for (const input of configuration.registry?.edges ?? []) {
+  for (const input of edgeInputs) {
     const added = addEdge(edges, renderers, input, (id) => ["registry", "edges", id]);
     if (!added.ok) {
       issues.push(...added.error);
@@ -824,7 +1061,7 @@ export function createBuilder(
     edgeDefinitions.push(added.value.definition);
   }
 
-  for (const input of configuration.registry?.properties ?? []) {
+  for (const input of propertyInputs) {
     const added = addProperty(properties, renderers, input, (id) => [
       "registry",
       "properties",
@@ -837,26 +1074,26 @@ export function createBuilder(
     renderers = added.value.renderers;
   }
 
-  for (const input of configuration.registry?.themes ?? []) {
+  for (const input of themeInputs) {
     const registered = registerTheme(themes, input, ["registry", "themes"]);
     if (!registered.ok) {
       issues.push(...registered.error);
     }
   }
 
-  for (const layout of configuration.registry?.layouts ?? []) {
+  for (const layout of layoutInputs) {
     const registered = registerLayout(layouts, layout, ["registry", "layouts"]);
     if (!registered.ok) {
       issues.push(...registered.error);
     }
   }
 
-  const themeId = configuration.ui?.theme ?? DEFAULT_THEME_ID;
+  const themeId = ui?.theme ?? DEFAULT_THEME_ID;
   if (!themes.has(themeId)) {
     issues.push(unknownThemeIssue(themeId, themes, ["ui", "theme"]));
   }
 
-  const layoutId = configuration.ui?.layout ?? EDITOR_LAYOUT_ID;
+  const layoutId = ui?.layout ?? EDITOR_LAYOUT_ID;
   const layoutDefinition = layouts.get(layoutId);
   if (layoutDefinition === undefined) {
     issues.push(unknownLayoutIssue(layoutId, layouts, ["ui", "layout"]));
@@ -881,13 +1118,10 @@ export function createBuilder(
     layout: createLayoutState(layoutDefinition, { panels: panels.all() }),
   });
 
+  const graph = configuration.graph;
   const editorOptions: EditorEngineOptions = {
-    ...(configuration.graph?.graphId === undefined
-      ? {}
-      : { graphId: configuration.graph.graphId }),
-    ...(configuration.graph?.settings === undefined
-      ? {}
-      : { graphSettings: configuration.graph.settings }),
+    ...(graph?.graphId === undefined ? {} : { graphId: graph.graphId }),
+    ...(graph?.settings === undefined ? {} : { graphSettings: graph.settings }),
     domain,
   };
 
@@ -915,7 +1149,7 @@ export function createBuilder(
 
   // Configured plugins run last, once every declarative registry is populated,
   // so a plugin sees the same builder a host would after construction.
-  for (const plugin of configuration.plugins ?? []) {
+  for (const plugin of Array.isArray(configuration.plugins) ? configuration.plugins : []) {
     const installed = builder.use(plugin);
     if (!installed.ok) {
       issues.push(...installed.error);

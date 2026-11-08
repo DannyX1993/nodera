@@ -90,11 +90,40 @@ describe("public SDK surface", () => {
     );
   });
 
-  it("publishes the vocabulary its own signatures use", () => {
-    // `PublicVocabulary` names one re-exported type per entry, so the guard only
-    // compiles while the barrel publishes every one of them; the count is its
-    // runtime side and is itself checked against the tuple length.
+  it("publishes the vocabulary its own signatures use, by name", () => {
+    // `PublicVocabulary` pairs one re-exported type with the name a host writes
+    // for it, so the guard only compiles while the barrel publishes every one of
+    // them; the count and the ordered name list are its runtime side.
     expect(VOCABULARY_TYPE_COUNT).toBe(27);
+    expect(VOCABULARY_TYPE_NAMES).toEqual([
+      "PanelDefinition",
+      "PanelRegion",
+      "ToolDefinition",
+      "ToolCommand",
+      "ToolAvailability",
+      "LayoutDefinition",
+      "LayoutState",
+      "ThemeDefinition",
+      "CreateThemeInput",
+      "DesignTokens",
+      "Graph",
+      "Node",
+      "Edge",
+      "Connection",
+      "NodePosition",
+      "GraphSettings",
+      "PortDeclaration",
+      "PropertyDefinition",
+      "PropertyOption",
+      "PropertyType",
+      "GraphDocument",
+      "DocumentValidationReport",
+      "NodeDefinition",
+      "EdgeDefinition",
+      "ValidationReport",
+      "ValidationLevel",
+      "ValidationIssue",
+    ]);
   });
 
   it("lets a host type a theme input and a layout with the exported names", () => {
@@ -254,37 +283,75 @@ describe("a host integrates through the entry point only", () => {
  * `Parameters<Builder["theme"]["register"]>[0]` or any other derivation.
  */
 type PublicVocabulary = readonly [
-  PanelDefinition,
-  PanelRegion,
-  ToolDefinition,
-  ToolCommand,
-  ToolAvailability,
-  LayoutDefinition,
-  LayoutState,
-  ThemeDefinition,
-  CreateThemeInput,
-  DesignTokens,
-  Graph,
-  Node,
-  Edge,
-  Connection,
-  NodePosition,
-  GraphSettings,
-  PortDeclaration,
-  PropertyDefinition,
-  PropertyOption,
-  PropertyType,
-  GraphDocument,
-  DocumentValidationReport,
-  NodeDefinition,
-  EdgeDefinition,
-  ValidationReport,
-  ValidationLevel,
-  ValidationIssue,
+  readonly [name: "PanelDefinition", contract: PanelDefinition],
+  readonly [name: "PanelRegion", contract: PanelRegion],
+  readonly [name: "ToolDefinition", contract: ToolDefinition],
+  readonly [name: "ToolCommand", contract: ToolCommand],
+  readonly [name: "ToolAvailability", contract: ToolAvailability],
+  readonly [name: "LayoutDefinition", contract: LayoutDefinition],
+  readonly [name: "LayoutState", contract: LayoutState],
+  readonly [name: "ThemeDefinition", contract: ThemeDefinition],
+  readonly [name: "CreateThemeInput", contract: CreateThemeInput],
+  readonly [name: "DesignTokens", contract: DesignTokens],
+  readonly [name: "Graph", contract: Graph],
+  readonly [name: "Node", contract: Node],
+  readonly [name: "Edge", contract: Edge],
+  readonly [name: "Connection", contract: Connection],
+  readonly [name: "NodePosition", contract: NodePosition],
+  readonly [name: "GraphSettings", contract: GraphSettings],
+  readonly [name: "PortDeclaration", contract: PortDeclaration],
+  readonly [name: "PropertyDefinition", contract: PropertyDefinition],
+  readonly [name: "PropertyOption", contract: PropertyOption],
+  readonly [name: "PropertyType", contract: PropertyType],
+  readonly [name: "GraphDocument", contract: GraphDocument],
+  readonly [name: "DocumentValidationReport", contract: DocumentValidationReport],
+  readonly [name: "NodeDefinition", contract: NodeDefinition],
+  readonly [name: "EdgeDefinition", contract: EdgeDefinition],
+  readonly [name: "ValidationReport", contract: ValidationReport],
+  readonly [name: "ValidationLevel", contract: ValidationLevel],
+  readonly [name: "ValidationIssue", contract: ValidationIssue],
 ];
 
 /** Entry count of {@link PublicVocabulary}, typed against the tuple itself. */
 const VOCABULARY_TYPE_COUNT: PublicVocabulary["length"] = 27;
+
+/**
+ * The published names in tuple order.
+ *
+ * The annotation is the compile-time half of the guard: a name the tuple does
+ * not publish (a renamed or removed type) stops this file compiling. The
+ * assertion above is the runtime half, so an omission or a reordering is caught
+ * as well — a count alone would not notice either.
+ */
+const VOCABULARY_TYPE_NAMES: readonly PublicVocabulary[number][0][] = [
+  "PanelDefinition",
+  "PanelRegion",
+  "ToolDefinition",
+  "ToolCommand",
+  "ToolAvailability",
+  "LayoutDefinition",
+  "LayoutState",
+  "ThemeDefinition",
+  "CreateThemeInput",
+  "DesignTokens",
+  "Graph",
+  "Node",
+  "Edge",
+  "Connection",
+  "NodePosition",
+  "GraphSettings",
+  "PortDeclaration",
+  "PropertyDefinition",
+  "PropertyOption",
+  "PropertyType",
+  "GraphDocument",
+  "DocumentValidationReport",
+  "NodeDefinition",
+  "EdgeDefinition",
+  "ValidationReport",
+  "ValidationLevel",
+  "ValidationIssue",
+];
 
 /** Names this guard expects the entry point to publish. */
 const SUPPORTED_EXPORTS = [

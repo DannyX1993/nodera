@@ -37,7 +37,12 @@ import { loadGraph, type EditorEngine } from "@nodera/application";
 import { parseJsonDocument, serializeJson } from "@nodera/serialization-json";
 import { parseYamlDocument, serializeYaml } from "@nodera/serialization-yaml";
 import type { BuilderDocumentFormat } from "../builder/configuration.js";
-import { sdkError, type SdkIssue, type SdkIssues } from "../errors.js";
+import {
+  disposedIssue,
+  sdkError,
+  type SdkIssue,
+  type SdkIssues,
+} from "../errors.js";
 
 /** Text formats a portable document can be serialized to. */
 export type BuilderDocumentFormatName = "json" | "yaml";
@@ -214,10 +219,15 @@ function importGraph(document: GraphDocument): Result<Graph, SdkIssues> {
  *
  * The builder's configured format version is stamped on every document the
  * API produces, so a host exports exactly the contract version it declared.
+ * `isDisposed` is the builder's lifecycle flag: `import` is the only mutating
+ * call, so it is the only one disposal closes — creating, exporting,
+ * serializing, deserializing and validating documents keep working, because
+ * they observe state the host already received.
  */
 export function createDocumentApi(
   editor: EditorEngine,
   format: BuilderDocumentFormat,
+  isDisposed: () => boolean,
 ): BuilderDocumentApi {
   let carried: GraphDocument | undefined;
 
@@ -266,6 +276,9 @@ export function createDocumentApi(
     create,
 
     import(input: unknown): Result<Graph, SdkIssues> {
+      if (isDisposed()) {
+        return err([disposedIssue("document.import")]);
+      }
       const normalized = normalizeGraphDocument(input);
       if (!normalized.ok) {
         return err(documentIssues(normalized.error));

@@ -8,7 +8,13 @@
  */
 
 import { err, ok, type Result } from "@nodera/contracts";
-import { sdkError, type SdkIssue, type SdkIssues } from "../errors.js";
+import {
+  isPlainObject,
+  sdkError,
+  shapeIssue,
+  type SdkIssue,
+  type SdkIssues,
+} from "../errors.js";
 
 /** Capabilities the builder implements today, and therefore accepts. */
 export const SUPPORTED_FEATURES = ["minimap", "history", "validation"] as const;
@@ -46,15 +52,28 @@ function isSupportedFeature(feature: string): feature is BuilderFeature {
  * Supported flags keep the declared value (default: enabled). A key this SDK
  * does not implement is rejected only when the host enables it: reporting the
  * same diagnostic for `grouping: false` would punish a caller that explicitly
- * asked for the absence of the capability.
+ * asked for the absence of the capability. A flag that is not a boolean is
+ * malformed data, never a truthy value.
  */
 export function resolveFeatures(
   input: BuilderFeaturesInput = {},
 ): Result<ResolvedFeatures, SdkIssues> {
+  if (!isPlainObject(input)) {
+    return err([
+      shapeIssue("Builder features must be an object of booleans", input, ["features"]),
+    ]);
+  }
+
   const issues: SdkIssue[] = [];
   const resolved: Record<BuilderFeature, boolean> = { ...DEFAULT_FEATURES };
 
   for (const [feature, value] of Object.entries(input)) {
+    if (value !== undefined && typeof value !== "boolean") {
+      issues.push(
+        shapeIssue(`Feature "${feature}" must be a boolean`, value, ["features", feature]),
+      );
+      continue;
+    }
     if (!isSupportedFeature(feature)) {
       if (value === true) {
         issues.push({
@@ -69,7 +88,7 @@ export function resolveFeatures(
       }
       continue;
     }
-    if (value !== undefined) {
+    if (typeof value === "boolean") {
       resolved[feature] = value;
     }
   }

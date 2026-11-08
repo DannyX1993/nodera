@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Result } from "@nodera/contracts";
 import { EDITOR_LAYOUT_ID, CANVAS_ONLY_LAYOUT_ID } from "@nodera/layout-engine";
 import {
   DARK_THEME,
@@ -461,7 +462,7 @@ describe("editor sessions", () => {
     expect(editor.domain.nodes.get("demo.node")).toBeDefined();
   });
 
-  it("refuses every operation after dispose and tolerates disposing twice", () => {
+  it("refuses every builder extension after dispose and tolerates disposing twice", () => {
     const builder = create();
 
     builder.dispose();
@@ -493,8 +494,98 @@ describe("editor sessions", () => {
   });
 });
 
-describe("public error shape", () => {
-  it("reports bindRenderer and createEditor failures as SdkIssues lists", () => {
+describe("disposal", () => {
+  /** A builder with one registered definition and one node already added. */
+  function disposableView(): Builder {
+    const builder = create();
+    builder.registerNode(nodeInput());
+    builder.graph.addNode({ type: "demo.node", nodeId: "n1" });
+    builder.graph.select({ nodes: ["n1"] });
+    builder.dispose();
+    return builder;
+  }
+
+  it("refuses every graph mutation and document import after dispose", () => {
+    const builder = disposableView();
+    const exported = builder.document.create();
+
+    const mutations: readonly (readonly [string, () => Result<unknown, SdkIssues>])[] = [
+      ["graph.addNode", () => builder.graph.addNode({ type: "demo.node" })],
+      ["graph.removeNode", () => builder.graph.removeNode("n1")],
+      ["graph.moveNode", () => builder.graph.moveNode("n1", { x: 1, y: 2 })],
+      ["graph.updateProperties", () => builder.graph.updateProperties("n1", { a: 1 })],
+      [
+        "graph.connect",
+        () => builder.graph.connect({ source: "n1", target: "n1", sourcePort: "out", targetPort: "in" }),
+      ],
+      ["graph.disconnect", () => builder.graph.disconnect("e1")],
+      ["graph.select", () => builder.graph.select({ nodes: ["n1"] })],
+      ["graph.clearSelection", () => builder.graph.clearSelection()],
+      ["document.import", () => builder.document.import(exported)],
+    ];
+
+    for (const [operation, call] of mutations) {
+      const result = call();
+      expect(result.ok).toBe(false);
+      if (result.ok) {
+        continue;
+      }
+      expect(result.error).toEqual([
+        expect.objectContaining({
+          code: "sdk.disposed",
+          severity: "error",
+          metadata: { operation },
+        }),
+      ]);
+    }
+
+    // undo/redo keep the history engine's boolean signature, so a disposed
+    // builder performs no mutation and reports `false` instead of a code.
+    expect(builder.graph.undo()).toBe(false);
+    expect(builder.graph.redo()).toBe(false);
+
+    expect(builder.graph.nodeCount()).toBe(1);
+    expect(builder.graph.selectedNodes()).toEqual(["n1"]);
+    expect(builder.document.create().graph.nodes.map((node) => node.id)).toEqual(["n1"]);
+  });
+
+  it("keeps every read working after dispose", () => {
+    const builder = disposableView();
+    const listened: string[] = [];
+
+    expect(builder.graph.validate().isValid).toBe(true);
+    expect(builder.graph.nodeCount()).toBe(1);
+    expect(builder.graph.edgeCount()).toBe(0);
+    expect(builder.graph.selectedNodes()).toEqual(["n1"]);
+    expect(builder.graph.selectedEdges()).toEqual([]);
+    expect(builder.graph.canUndo()).toBe(true);
+    expect(builder.graph.canRedo()).toBe(false);
+
+    const document = builder.document.create();
+    expect(builder.document.validate(document).documentValid).toBe(true);
+    expect(builder.document.export("json").ok).toBe(true);
+    const serialized = builder.document.serialize("yaml");
+    expect(serialized.ok).toBe(true);
+    if (serialized.ok) {
+      expect(builder.document.deserialize("yaml", serialized.value).ok).toBe(true);
+    }
+
+    const off = builder.events.on("node.created", () => {
+      listened.push("node.created");
+    });
+    expect(typeof off).toBe("function");
+    off();
+
+    expect(builder.theme.active().id).toBe(DEFAULT_THEME_ID);
+    expect(builder.theme.all().map((theme) => theme.id)).toContain(DEFAULT_THEME_ID);
+    expect(builder.layout.active().id).toBe(EDITOR_LAYOUT_ID);
+    expect(builder.layout.all().map((layout) => layout.id)).toContain(EDITOR_LAYOUT_ID);
+    expect(builder.registries.nodes.get("demo.node")).toBeDefined();
+    expect(listened).toEqual([]);
+  });
+});
+
+describe("public error shape", () => {  it("reports bindRenderer and createEditor failures as SdkIssues lists", () => {
     const builder = create();
     const Component = (): null => null;
     expect(builder.bindRenderer("panels", "demo.panel", Component).ok).toBe(true);

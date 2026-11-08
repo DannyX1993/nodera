@@ -12,7 +12,15 @@ import { err, ok, type Result } from "@nodera/contracts";
 import { validateNodeDefinition } from "@nodera/node-registry";
 import type { NodeDefinition } from "@nodera/node-registry";
 import type { PropertyDefinition } from "@nodera/property-system";
-import { sdkError, isQualifiedId, type SdkIssue, type SdkIssues } from "../errors.js";
+import {
+  isPlainObject,
+  isQualifiedId,
+  sdkError,
+  shapeIssue,
+  stringFieldIssue,
+  type SdkIssue,
+  type SdkIssues,
+} from "../errors.js";
 import { toPortDeclarations, type PortGroupInput } from "./ports.js";
 import { toPropertyDefinition, type PropertyInput } from "./properties.js";
 import type { RendererBinding } from "./renderer-binding.js";
@@ -55,6 +63,62 @@ export interface NodeDefinitionTranslation {
   readonly components: readonly RendererBinding[];
 }
 
+/** Text fields of a node definition, once each one proved to be a string. */
+interface NodeTextFields {
+  readonly type: string;
+  readonly label: string;
+  readonly category: string;
+  readonly version: string | undefined;
+}
+
+/**
+ * Reads the required text fields of a node definition.
+ *
+ * Returns `undefined` when one of them is missing or is not a string, so the
+ * caller never builds a definition from a value it only hoped was text.
+ */
+function readTextFields(
+  input: NodeDefinitionInput,
+  issues: SdkIssue[],
+): NodeTextFields | undefined {
+  const { type, label, category, version } = input;
+  let complete = true;
+
+  if (typeof type !== "string") {
+    issues.push(
+      shapeIssue("Node definition must declare type as a string", type, ["type"]),
+    );
+    complete = false;
+  } else if (!isQualifiedId(type)) {
+    issues.push({
+      ...sdkError(
+        "sdk.invalid-id",
+        `Node type "${type}" must be globally qualified, e.g. "vendor.feature-name"`,
+        { path: ["type"], metadata: { value: type } },
+      ),
+      severity: "error",
+    });
+  }
+
+  if (typeof label !== "string" || label.trim().length === 0) {
+    issues.push(stringFieldIssue("Node definition", "label", label, ["label"]));
+    complete = false;
+  }
+  if (typeof category !== "string" || category.trim().length === 0) {
+    issues.push(stringFieldIssue("Node definition", "category", category, ["category"]));
+    complete = false;
+  }
+  if (version !== undefined && typeof version !== "string") {
+    issues.push(shapeIssue("Node definition must declare version as a string", version, ["version"]));
+    complete = false;
+  }
+
+  if (!complete || typeof type !== "string" || typeof label !== "string" || typeof category !== "string") {
+    return undefined;
+  }
+  return { type, label, category, version: typeof version === "string" ? version : undefined };
+}
+
 /**
  * Translates one authored node definition.
  *
@@ -64,34 +128,40 @@ export interface NodeDefinitionTranslation {
 export function toNodeDefinition(
   input: NodeDefinitionInput,
 ): Result<NodeDefinitionTranslation, SdkIssues> {
-  const issues: SdkIssue[] = [];
-
-  if (!isQualifiedId(input.type)) {
-    issues.push({
-      ...sdkError(
-        "sdk.invalid-id",
-        `Node type "${input.type}" must be globally qualified, e.g. "vendor.feature-name"`,
-        { path: ["type"], metadata: { value: input.type } },
+  if (!isPlainObject(input)) {
+    return err([
+      shapeIssue(
+        "Node definition must be an object declaring type, label and category",
+        input,
+        ["node"],
       ),
-      severity: "error",
-    });
+    ]);
   }
-  if (input.label.trim().length === 0) {
-    issues.push({
-      ...sdkError("sdk.invalid-input", "Node definition must declare a non-empty label", {
-        path: ["label"],
-      }),
-      severity: "error",
-    });
+
+  const issues: SdkIssue[] = [];
+  const fields = readTextFields(input, issues);
+
+  if (input.ports !== undefined && !isPlainObject(input.ports)) {
+    issues.push(
+      shapeIssue(
+        "Node ports must be an object grouping inputs, outputs and bidirectional",
+        input.ports,
+        ["ports"],
+      ),
+    );
   }
-  if (input.category.trim().length === 0) {
-    issues.push({
-      ...sdkError("sdk.invalid-input", "Node definition must declare a non-empty category", {
-        path: ["category"],
-      }),
-      severity: "error",
-    });
+
+  const declaredProperties = input.properties;
+  if (declaredProperties !== undefined && !Array.isArray(declaredProperties)) {
+    issues.push(
+      shapeIssue("Node properties must be an array of property definitions", declaredProperties, [
+        "properties",
+      ]),
+    );
   }
+  const propertyInputs: readonly PropertyInput[] = Array.isArray(declaredProperties)
+    ? declaredProperties
+    : [];
 
   const ports = toPortDeclarations(input.ports ?? {});
   if (!ports.ok) {
@@ -100,8 +170,10 @@ export function toNodeDefinition(
 
   const properties: PropertyDefinition[] = [];
   const components: RendererBinding[] = [];
-  for (const property of input.properties ?? []) {
-    const translated = toPropertyDefinition(property, { ownerType: input.type });
+  for (const property of propertyInputs) {
+    const translated = toPropertyDefinition(property, {
+      ownerType: fields?.type ?? "",
+    });
     if (!translated.ok) {
       issues.push(...translated.error);
       continue;
@@ -112,18 +184,18 @@ export function toNodeDefinition(
     }
   }
 
-  if (issues.length > 0) {
+  if (issues.length > 0 || fields === undefined) {
     return err(issues);
   }
 
   const definition: NodeDefinition = {
-    id: input.type,
-    name: input.label,
-    category: input.category,
-    version: input.version ?? DEFAULT_DEFINITION_VERSION,
+    id: fields.type,
+    name: fields.label,
+    category: fields.category,
+    version: fields.version ?? DEFAULT_DEFINITION_VERSION,
     ...(input.description === undefined ? {} : { description: input.description }),
     ...(input.icon === undefined ? {} : { icon: input.icon }),
-    ...(input.renderer === undefined ? {} : { renderer: input.type }),
+    ...(input.renderer === undefined ? {} : { renderer: fields.type }),
     ports: ports.ok ? ports.value : [],
     properties,
     ...(input.connectionPolicy === undefined
@@ -145,7 +217,7 @@ export function toNodeDefinition(
     definition,
     ...(input.renderer === undefined
       ? {}
-      : { renderer: { id: input.type, value: input.renderer } }),
+      : { renderer: { id: fields.type, value: input.renderer } }),
     components,
   });
 }
