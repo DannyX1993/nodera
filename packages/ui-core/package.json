@@ -2,5 +2,19 @@
   "name": "@nodera/ui-core",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/ui-core"
+  "type": "module",
+  "description": "Framework-agnostic UI composition contracts and editor UI state for Nodera",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.5"
+  }
 }

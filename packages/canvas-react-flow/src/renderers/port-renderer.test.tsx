@@ -81,4 +81,35 @@ describe("PortHandle", () => {
     const div = container.querySelector("[data-nodera-port-id='attr-test']");
     expect(div).not.toBeNull();
   });
+
+  /* ---------------------------------------------------------------- */
+  /*  Token-driven handle styles (S3 Handle Styles, D8)                */
+  /* ---------------------------------------------------------------- */
+
+  it("styles the handle from the design tokens with fallbacks", () => {
+    const { container } = render(<PortHandle portId="styled" />, { wrapper: TestWrapper });
+    const handle = container.querySelector(
+      "[data-nodera-port-id='styled']",
+    ) as HTMLElement;
+
+    expect(handle.style.getPropertyValue("width")).toBe(
+      "var(--ndr-handle-size, 8px)",
+    );
+    expect(handle.style.getPropertyValue("height")).toBe(
+      "var(--ndr-handle-size, 8px)",
+    );
+    expect(handle.style.getPropertyValue("background-color")).toBe(
+      "var(--ndr-handle-background, #ffffff)",
+    );
+    expect(handle.style.getPropertyValue("border-width")).toBe(
+      "var(--ndr-handle-border-width, 1.5px)",
+    );
+    expect(handle.style.getPropertyValue("border-style")).toBe("solid");
+    expect(handle.style.getPropertyValue("border-color")).toBe(
+      "var(--ndr-handle-border-color, #7c8896)",
+    );
+    expect(handle.style.getPropertyValue("border-radius")).toBe(
+      "var(--ndr-handle-radius, 50%)",
+    );
+  });
 });

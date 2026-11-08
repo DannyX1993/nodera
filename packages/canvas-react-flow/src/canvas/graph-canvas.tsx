@@ -6,11 +6,13 @@ import {
   type FC,
   type ComponentType,
   type MouseEvent,
+  type DragEvent as ReactDragEvent,
 } from "react";
 
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   ConnectionMode,
@@ -24,6 +26,7 @@ import {
   type NodeTypes,
   type EdgeTypes,
   type OnNodeDrag,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 
 import type { EditorEngine } from "@nodera/application";
@@ -41,6 +44,7 @@ import {
 
 import { useEditorGraph } from "./use-editor-graph.js";
 import { useNodeTypes } from "./custom-node.js";
+import { isNodeDefinitionDrag, nodeDefinitionFromDataTransfer } from "./definition-drop.js";
 import { DEFAULT_NODE_RENDERER_ID } from "../registries/renderer-registries.js";
 import {
   nodePositionFromReactFlow,
@@ -49,10 +53,85 @@ import {
   applyMeasuredDimensions,
   hasNewDimensions,
 } from "../map/react-flow-mapper.js";
-import type { NodeRendererRegistry, EdgeRendererRegistry } from "../registries/renderer-registries.js";
+import type { NodeRendererRegistry, EdgeRendererRegistry, PortRendererRegistry } from "../registries/renderer-registries.js";
 import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
 import { DefaultEdgeRenderer } from "../renderers/default-edge-renderer.js";
 import type { NoderaNodeData } from "../renderers/node-renderer-props.js";
+import { canvasInteractionSettings, type CanvasInteractionMode } from "./interaction-mode.js";
+
+/* ------------------------------------------------------------------ */
+/*  Canvas background (token contract)                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Gap between background dots, in flow units.
+ *
+ * The theme contract publishes `canvas.backgroundDotSize` as a CSS *token
+ * string* (`"16"`), but React Flow's `<Background gap>` is a **number** and a
+ * CSS custom property can never feed a numeric React prop. The adapter
+ * therefore owns this documented numeric default (the token's value): a host
+ * that needs another gap renders its own `<Background />` or overrides the
+ * pattern through CSS.
+ */
+const CANVAS_BACKGROUND_DOT_GAP = 16;
+
+/**
+ * Colour of the canvas background dots: the theme variable with a literal
+ * fallback (D2), so an unthemed host still renders a visible pattern.
+ */
+const CANVAS_BACKGROUND_DOT_COLOR = "var(--ndr-canvas-background-dot, #cbd5e1)";
+
+/** Props the canvas hands to React Flow's `<Background />`. */
+export interface CanvasBackgroundOptions {
+  readonly variant: BackgroundVariant;
+  readonly gap: number;
+  readonly color: string;
+}
+
+/**
+ * Background pattern options derived from the theme token contract.
+ *
+ * Single source for what the canvas passes to `<Background />`: the dot colour
+ * is a CSS variable reference (themeable without re-rendering React) and the
+ * dot gap is the documented numeric default explained above.
+ */
+export function canvasBackgroundOptions(): CanvasBackgroundOptions {
+  return {
+    variant: BackgroundVariant.Dots,
+    gap: CANVAS_BACKGROUND_DOT_GAP,
+    color: CANVAS_BACKGROUND_DOT_COLOR,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Edge types                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * React Flow edge-type map built from an edge renderer registry.
+ *
+ * Every registered renderer id becomes an RF edge type, and the Nodera default
+ * is always present under {@link DEFAULT_EDGE_RENDERER_ID}. A definition that
+ * names an unregistered renderer id is absent from this map, so React Flow
+ * falls back to its built-in default edge instead of blanking the graph.
+ *
+ * Casts stay confined to the adapter boundary: React Flow's `EdgeTypes` is a
+ * `ComponentType<any>` map while Nodera renderers have stricter props.
+ */
+export function canvasEdgeTypes(edgeRenderers?: EdgeRendererRegistry): EdgeTypes {
+  const types: EdgeTypes = {};
+  if (edgeRenderers) {
+    for (const id of edgeRenderers.listIds()) {
+      try {
+        types[id] = edgeRenderers.get(id) as unknown as EdgeTypes[string];
+      } catch {
+        // Skip unresolvable registrations.
+      }
+    }
+  }
+  types[DEFAULT_EDGE_RENDERER_ID] = DefaultEdgeRenderer;
+  return types;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Drag commit                                                        */
@@ -105,6 +184,16 @@ export interface GraphCanvasProps {
   readonly nodeRenderers?: NodeRendererRegistry;
   /** Optional edge renderer registry. When provided, registered renderers are used. */
   readonly edgeRenderers?: EdgeRendererRegistry;
+  /** Optional port renderer registry. When provided, ports use registered renderers. */
+  readonly portRenderers?: PortRendererRegistry;
+  /**
+   * Interaction mode of the canvas (S5 "Modo de interacción").
+   *
+   * The host owns the value (it is UI state in `@nodera/ui-core`); the canvas
+   * only maps it onto React Flow's drag props through
+   * `canvasInteractionSettings`. Defaults to `"select"`.
+   */
+  readonly interactionMode?: CanvasInteractionMode;
   /** CSS class for the outer container. */
   readonly className?: string;
   /** Show the minimap. */
@@ -125,6 +214,14 @@ export interface GraphCanvasProps {
   readonly onEdgeClick?: (event: MouseEvent, edge: RfEdge) => void;
   /** Optional callback after a connection is validated (non-persisting probe). */
   readonly onLinkValidate?: (valid: boolean, issues: readonly import("@nodera/contracts").ValidationIssue[]) => void;
+  /**
+   * Optional callback for a node definition dropped on the canvas (D7).
+   *
+   * The adapter only translates the drop into a definition id plus a flow
+   * position; creating the node stays a host decision. Without this
+   * callback the canvas ignores drops entirely.
+   */
+  readonly onDropNodeDefinition?: (definitionId: string, position: XYPosition) => void;
 }
 
 /**
@@ -146,6 +243,8 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   editor,
   nodeRenderers,
   edgeRenderers,
+  portRenderers,
+  interactionMode = "select",
   className,
   showMinimap = true,
   showControls = true,
@@ -156,13 +255,14 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   onNodeClick: externalOnNodeClick,
   onEdgeClick: externalOnEdgeClick,
   onLinkValidate: externalOnLinkValidate,
+  onDropNodeDefinition: externalOnDropNodeDefinition,
 }) => {
   // Derive RF nodes/edges/selection from engine via event-driven hook.
   const { nodes, edges, refresh } = useEditorGraph(editor);
 
   // nodeTypes: wrapper components that resolve the definition renderer
   // and ALWAYS render the port handles (via useNodeTypes/createNodeType).
-  const nodeTypes = useNodeTypes(nodeRenderers);
+  const nodeTypes = useNodeTypes(nodeRenderers, portRenderers);
 
   // Measured node dimensions are canvas state (never domain state): RF
   // reports them through `dimensions` node changes and both the minimap
@@ -184,23 +284,65 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [nodesWithDims, nodeTypes],
   );
 
-  // Build edgeTypes map: registry renderers + default sentinel. Casts are
-  // confined to the adapter boundary: React Flow's NodeTypes/EdgeTypes are
-  // ComponentType<any> maps and our renderer props are stricter.
-  const edgeTypes = useMemo((): EdgeTypes => {
-    const types: EdgeTypes = {};
-    if (edgeRenderers) {
-      for (const id of edgeRenderers.listIds()) {
-        try {
-          types[id] = edgeRenderers.get(id) as unknown as EdgeTypes[string];
-        } catch {
-          // Skip unresolvable registrations.
-        }
+  // Build edgeTypes map: registry renderers + default sentinel.
+  const edgeTypes = useMemo(() => canvasEdgeTypes(edgeRenderers), [edgeRenderers]);
+
+  // Interaction mode → React Flow drag props (pure mapping, see
+  // interaction-mode.ts). The mode itself is never stored in the adapter, and
+  // the memo keeps the prop identity stable between unrelated re-renders so
+  // React Flow does not re-register its drag handlers.
+  const interaction = useMemo(
+    () => canvasInteractionSettings(interactionMode),
+    [interactionMode],
+  );
+
+  // React Flow instance, captured through `onInit`. Kept in a ref (canvas
+  // state, never domain state) so `screenToFlowPosition` is available to
+  // the drop handler without re-rendering the whole canvas.
+  const flowInstance = useRef<ReactFlowInstance | null>(null);
+
+  const handleInit = useCallback((instance: ReactFlowInstance) => {
+    flowInstance.current = instance;
+  }, []);
+
+  // Drag over: accept the drag only when a drop handler exists AND the
+  // payload announces the node definition MIME type (D7).
+  const handleDragOver = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!externalOnDropNodeDefinition) {
+        return;
       }
-    }
-    types[DEFAULT_EDGE_RENDERER_ID] = DefaultEdgeRenderer;
-    return types;
-  }, [edgeRenderers]);
+      if (!isNodeDefinitionDrag(event.dataTransfer)) {
+        return;
+      }
+      event.preventDefault();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [externalOnDropNodeDefinition],
+  );
+
+  // Drop: screen coordinates → flow coordinates through the instance, so
+  // the host creates the node where the user dropped it. Falls back to raw
+  // client coordinates when no instance is available yet.
+  const handleDrop = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!externalOnDropNodeDefinition) {
+        return;
+      }
+      const definitionId = nodeDefinitionFromDataTransfer(event.dataTransfer);
+      if (definitionId === undefined) {
+        return;
+      }
+      event.preventDefault();
+      const screenPosition = { x: event.clientX, y: event.clientY };
+      const position = flowInstance.current
+        ? flowInstance.current.screenToFlowPosition(screenPosition)
+        : screenPosition;
+      externalOnDropNodeDefinition(definitionId, position);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [externalOnDropNodeDefinition],
+  );
 
   // Invalidate connection validation: probe without persisting.
   const isValidConnection = useCallback<IsValidConnection>(
@@ -320,8 +462,11 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [editor, refresh],
   );
 
-  // Edge click handler: selection → selectEdge. `selectEdge` emits no
-  // event (phase-3 gap), so the canvas forces re-derivation itself.
+  // Edge click handler: selection → selectEdge. `selectEdge` now emits
+  // `selection.changed` (D5) for panels, but the canvas deliberately keeps
+  // its own `refresh()`: re-deriving from that event would make React Flow
+  // re-emit its own selection change and re-enter this loop (the phase-4
+  // selection ping-pong documented in the feature log).
   const handleEdgeClick = useCallback(
     (event: MouseEvent, edge: RfEdge) => {
       if (externalOnEdgeClick) {
@@ -334,8 +479,10 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [editor, refresh],
   );
 
-  // Clicking the pane clears the selection. `clearSelection` emits no
-  // dedicated event, so force re-derivation.
+  // Clicking the pane clears the selection. `clearSelection` emits
+  // `selection.changed` (D5) for panels, but the canvas still re-derives
+  // locally for the same reason as `handleEdgeClick`: refreshing on that
+  // event re-enters React Flow's selection emission.
   const handlePaneClick = useCallback(() => {
     clearSelection(editor);
     refresh();
@@ -365,10 +512,13 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       className={className}
       style={{ width: "100%", height: "100%" }}
       data-color-mode={colorMode}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       <ReactFlow
         nodes={nodesWithTypes}
         edges={edges}
+        onInit={handleInit}
         nodeTypes={nodeTypes as unknown as NodeTypes}
         edgeTypes={edgeTypes}
         deleteKeyCode={["Delete", "Backspace"]}
@@ -382,11 +532,13 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         onEdgeClick={handleEdgeClick}
         onPaneClick={handlePaneClick}
         onSelectionChange={handleSelectionChange}
+        panOnDrag={interaction.panOnDrag}
+        selectionOnDrag={interaction.selectionOnDrag}
         colorMode={colorMode}
         fitView
         nodesDraggable
       >
-        <Background />
+        <Background {...canvasBackgroundOptions()} />
         {showMinimap && <MiniMap nodeColor={minimapNodeColor} pannable zoomable />}
         {showControls && <Controls />}
       </ReactFlow>

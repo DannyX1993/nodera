@@ -105,6 +105,97 @@ describe("selectNode use case", () => {
   });
 });
 
+describe("selection.changed event", () => {
+  it("selectNode emits the resulting selection", () => {
+    const editor = makeEditor();
+    seed(editor);
+    const onChanged = vi.fn();
+    editor.events.subscribe("selection.changed", onChanged);
+
+    selectNode(editor, { nodeId: "a" });
+
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith({
+      name: "selection.changed",
+      payload: { selectedNodes: ["a"], selectedEdges: [] },
+    });
+  });
+
+  it("selectEdge emits the resulting selection", () => {
+    const editor = makeEditor();
+    seed(editor);
+    const onChanged = vi.fn();
+    editor.events.subscribe("selection.changed", onChanged);
+
+    selectEdge(editor, { edgeId: "e1" });
+
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith({
+      name: "selection.changed",
+      payload: { selectedNodes: [], selectedEdges: ["e1"] },
+    });
+  });
+
+  it("selectMultiple emits the resulting selection", () => {
+    const editor = makeEditor();
+    seed(editor);
+    const onChanged = vi.fn();
+    editor.events.subscribe("selection.changed", onChanged);
+
+    selectMultiple(editor, { nodeIds: ["a", "b"], edgeIds: ["e1"] });
+
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith({
+      name: "selection.changed",
+      payload: { selectedNodes: ["a", "b"], selectedEdges: ["e1"] },
+    });
+  });
+
+  it("clearSelection emits the resulting empty selection", () => {
+    const editor = makeEditor();
+    seed(editor);
+    selectMultiple(editor, { nodeIds: ["a"], edgeIds: ["e1"] });
+    const onChanged = vi.fn();
+    editor.events.subscribe("selection.changed", onChanged);
+
+    clearSelection(editor);
+
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith({
+      name: "selection.changed",
+      payload: { selectedNodes: [], selectedEdges: [] },
+    });
+  });
+
+  it("emits nothing when the selection use case fails", () => {
+    const editor = makeEditor();
+    seed(editor);
+    const onChanged = vi.fn();
+    editor.events.subscribe("selection.changed", onChanged);
+
+    selectNode(editor, { nodeId: "ghost" });
+    selectEdge(editor, { edgeId: "ghost" });
+    selectMultiple(editor, { nodeIds: ["ghost"] });
+
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("keeps emitting node.selected with its unchanged payload", () => {
+    const editor = makeEditor();
+    seed(editor);
+    const onSelected = vi.fn();
+    const onChanged = vi.fn();
+    editor.events.subscribe("node.selected", onSelected);
+    editor.events.subscribe("selection.changed", onChanged);
+
+    selectNode(editor, { nodeId: "a" });
+
+    expect(onSelected).toHaveBeenCalledTimes(1);
+    expect(onSelected).toHaveBeenCalledWith({ name: "node.selected", payload: { nodeId: "a" } });
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("selectEdge use case", () => {
   it("selects one edge replacing the previous selection", () => {
     const editor = makeEditor();

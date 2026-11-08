@@ -4,7 +4,8 @@ import { ReactFlowProvider } from "@xyflow/react";
 import type { FC, ComponentType } from "react";
 
 import { NoderaNodeRenderer, createNodeType, useNodeTypes } from "./custom-node.js";
-import { NodeRendererRegistry } from "../registries/renderer-registries.js";
+import { NodeRendererRegistry, PortRendererRegistry } from "../registries/renderer-registries.js";
+import type { NoderaPortRendererProps } from "../renderers/node-renderer-props.js";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -160,5 +161,122 @@ describe("createNodeType factory", () => {
     );
 
     expect(container.querySelector('[data-testid="custom-marker"]')).toBeTruthy();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Custom port renderers (S3 component replacement, D8)              */
+/* ------------------------------------------------------------------ */
+
+/** Port renderer marker that exposes every prop it receives. */
+function PortMarker({
+  portId,
+  direction,
+  name,
+  visual,
+}: NoderaPortRendererProps) {
+  return (
+    <span
+      data-testid="custom-port"
+      data-port-id={portId}
+      data-port-direction={direction}
+      data-port-name={name ?? ""}
+      data-port-renderer={visual?.renderer ?? ""}
+      data-port-metadata={JSON.stringify(visual?.metadata ?? null)}
+    />
+  );
+}
+
+function makePortData(): Record<string, unknown> {
+  return {
+    definitionId: "test-def",
+    label: "Ports",
+    ports: [
+      {
+        id: "p-custom",
+        name: "Custom",
+        direction: "input" as const,
+        visual: { renderer: "acme.port", metadata: { shape: "diamond" } },
+      },
+      { id: "p-plain", direction: "output" as const },
+      {
+        id: "p-unknown",
+        direction: "input" as const,
+        visual: { renderer: "nope.port" },
+      },
+    ],
+    properties: {},
+  };
+}
+
+describe("custom port renderers", () => {
+  it("renders a registered port renderer for a matching visual.renderer", () => {
+    const portRegistry = new PortRendererRegistry();
+    portRegistry.register("acme.port", PortMarker as ComponentType<NoderaPortRendererProps>);
+
+    const NodeType = createNodeType(undefined, portRegistry);
+
+    const { container } = render(
+      <ReactFlowProvider>
+        <NodeType data={makePortData() as any} selected={false} />
+      </ReactFlowProvider>
+    );
+
+    const marker = container.querySelector('[data-testid="custom-port"]') as HTMLElement;
+    expect(marker).not.toBeNull();
+    expect(marker.getAttribute("data-port-id")).toBe("p-custom");
+    expect(marker.getAttribute("data-port-direction")).toBe("input");
+    expect(marker.getAttribute("data-port-name")).toBe("Custom");
+    expect(marker.getAttribute("data-port-renderer")).toBe("acme.port");
+    expect(marker.getAttribute("data-port-metadata")).toBe('{"shape":"diamond"}');
+  });
+
+  it("falls back to PortHandle for an unregistered id and for a port without visual", () => {
+    const portRegistry = new PortRendererRegistry();
+    portRegistry.register("acme.port", PortMarker as ComponentType<NoderaPortRendererProps>);
+
+    const NodeType = createNodeType(undefined, portRegistry);
+
+    const { container } = render(
+      <ReactFlowProvider>
+        <NodeType data={makePortData() as any} selected={false} />
+      </ReactFlowProvider>
+    );
+
+    const handles = container.querySelectorAll("[data-nodera-port-id]");
+    expect(handles).toHaveLength(2);
+    expect(container.querySelector("[data-nodera-port-id='p-plain']")).not.toBeNull();
+    expect(container.querySelector("[data-nodera-port-id='p-unknown']")).not.toBeNull();
+  });
+
+  it("renders PortHandle for every port when no port registry is supplied", () => {
+    const NodeType = createNodeType();
+
+    const { container } = render(
+      <ReactFlowProvider>
+        <NodeType data={makePortData() as any} selected={false} />
+      </ReactFlowProvider>
+    );
+
+    expect(container.querySelectorAll("[data-nodera-port-id]")).toHaveLength(3);
+    expect(container.querySelector('[data-testid="custom-port"]')).toBeNull();
+  });
+
+  it("NoderaNodeRenderer accepts a port renderer registry", () => {
+    const portRegistry = new PortRendererRegistry();
+    portRegistry.register("acme.port", PortMarker as ComponentType<NoderaPortRendererProps>);
+
+    const { container } = render(
+      <ReactFlowProvider>
+        <NoderaNodeRenderer
+          data={makePortData() as any}
+          selected={false}
+          portRendererRegistry={portRegistry}
+        />
+      </ReactFlowProvider>
+    );
+
+    expect(container.querySelector('[data-testid="custom-port"]')).not.toBeNull();
+    expect(container.querySelectorAll("[data-nodera-port-id]")).toHaveLength(2);
   });
 });
