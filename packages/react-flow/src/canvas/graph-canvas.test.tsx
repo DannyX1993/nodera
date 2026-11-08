@@ -1017,8 +1017,8 @@ describe("GraphCanvas connections and ports policy", () => {
     return engine;
   }
 
-  function handles(container: HTMLElement): readonly Element[] {
-    return [...container.querySelectorAll("[data-nodera-port-id]")];
+  function handles(container: HTMLElement): readonly HTMLElement[] {
+    return [...container.querySelectorAll<HTMLElement>("[data-nodera-port-id]")];
   }
 
   it("offers no connectable handle under the fixed connections policy", () => {

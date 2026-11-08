@@ -741,12 +741,8 @@ const HIDDEN_PORT_HANDLE_STYLE: CSSProperties = {
 };
 
 /** A port handle a person cannot start or end a connection from. */
-function InertPort({
-  portId,
-  direction = "bidirectional",
-  name,
-}: NoderaPortRendererProps): ReactNode {
-  return inertPort({ portId, direction, name }, false);
+function InertPort(props: NoderaPortRendererProps): ReactNode {
+  return inertPort({ ...props, direction: props.direction ?? "bidirectional" }, false);
 }
 
 /**
