@@ -39,6 +39,11 @@ export const DEMO_LAYOUT = {
   direction: "horizontal",
   spacing: 240,
   rankSpacing: 280,
+  // The demo boots on the ranked strategy, so the surface it implies is declared
+  // here too: fixed connections and no port handles, exactly what the strategy
+  // control applies when the host switches back to `layered`.
+  connections: "fixed",
+  ports: "hidden",
 } as const satisfies GraphLayoutConfiguration;
 
 /** Nodes of the seed graph, added without a position. */

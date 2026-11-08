@@ -1069,13 +1069,20 @@ describe("GraphCanvas connections and ports policy", () => {
     expect(engine.history.size()).toBe(historyBefore + 1);
   });
 
-  it("renders no port handle at all under the hidden ports policy", () => {
+  it("keeps the port handles in the DOM but out of sight under the hidden ports policy", () => {
     const { container } = renderCanvas(seededEngine(), { portsPolicy: "hidden" });
 
-    // Not hidden with CSS: no handle element is rendered, so there is nothing
-    // for React Flow to connect from or to.
-    expect(container.querySelectorAll(".react-flow__handle")).toHaveLength(0);
-    expect(handles(container)).toHaveLength(0);
+    // The handle has to stay: React Flow anchors every edge to one by id, so
+    // removing it would take the edges with it. It is present, invisible and
+    // inert instead — no affordance, no connection, edges still drawn.
+    const rendered = handles(container);
+    expect(rendered.length).toBeGreaterThan(0);
+    for (const handle of rendered) {
+      expect(handle.style.opacity).toBe("0");
+      expect(handle.style.pointerEvents).toBe("none");
+      expect(handle.getAttribute("aria-hidden")).toBe("true");
+      expect(handle.classList.contains("connectable")).toBe(false);
+    }
     expect(screen.getAllByText("App Node")).toHaveLength(2);
   });
 
@@ -1099,7 +1106,12 @@ describe("GraphCanvas connections and ports policy", () => {
 
     const { container } = renderCanvas(engine, { nodeRenderers, portsPolicy: "hidden" });
 
-    expect(container.querySelectorAll("[data-nodera-port-id]")).toHaveLength(0);
+    // The handle stays (edge anchoring needs it) but paints nothing.
+    const painted = container.querySelectorAll<HTMLElement>("[data-nodera-port-id]");
+    expect(painted.length).toBeGreaterThan(0);
+    for (const handle of painted) {
+      expect(handle.style.opacity).toBe("0");
+    }
     expect(screen.getAllByTestId("port-names").map((element) => element.textContent)).toEqual([
       "in-1,out-1",
       "in-1,out-1",
@@ -1113,6 +1125,11 @@ describe("GraphCanvas connections and ports policy", () => {
 
     rerender(createElement(Canvas, { editor: engine, portsPolicy: "hidden" }));
 
-    expect(handles(container)).toHaveLength(0);
+    const hidden = handles(container);
+    expect(hidden).toHaveLength(4);
+    for (const handle of hidden) {
+      expect(handle.style.opacity).toBe("0");
+      expect(handle.style.pointerEvents).toBe("none");
+    }
   });
 });

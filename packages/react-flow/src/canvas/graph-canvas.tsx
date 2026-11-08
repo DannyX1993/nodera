@@ -684,8 +684,33 @@ export interface CanvasConnection {
   readonly targetHandle?: string | null;
 }
 
-/** A port renderer that draws nothing: no React Flow `Handle`, no control. */
-const HiddenPort: FC<NoderaPortRendererProps> = () => null;
+/**
+ * A port handle a person cannot start or end a connection from, or see.
+ *
+ * `hidden` keeps the element in the DOM on purpose: React Flow anchors every
+ * edge to a `Handle` by id, so removing them takes the edges with them. The
+ * handle stays, invisible and inert, and only the affordance disappears.
+ */
+function inertPort(props: NoderaPortRendererProps, hidden: boolean): ReactNode {
+  const isInput = props.direction === "input";
+  return (
+    <Handle
+      id={props.portId}
+      type={isInput ? "target" : "source"}
+      position={isInput ? Position.Left : Position.Right}
+      isConnectable={false}
+      aria-label={props.name ?? props.portId}
+      aria-hidden={hidden}
+      data-nodera-port-id={props.portId}
+      data-nodera-port-direction={props.direction ?? "bidirectional"}
+      className="nodera-port-handle"
+      style={hidden ? HIDDEN_PORT_HANDLE_STYLE : INERT_PORT_HANDLE_STYLE}
+    />
+  );
+}
+
+/** A port handle kept for edge anchoring but invisible to a person. */
+const HiddenPort: FC<NoderaPortRendererProps> = (props) => inertPort(props, true);
 
 /**
  * Visual contract of a port handle, mirrored from `PortHandle` so a themed host
@@ -708,26 +733,20 @@ const INERT_PORT_HANDLE_STYLE: CSSProperties = {
   borderRadius: "var(--ndr-handle-radius, 50%)",
 };
 
+/** Same handle, painted away: present for edge anchoring, absent for a person. */
+const HIDDEN_PORT_HANDLE_STYLE: CSSProperties = {
+  ...INERT_PORT_HANDLE_STYLE,
+  opacity: 0,
+  pointerEvents: "none",
+};
+
 /** A port handle a person cannot start or end a connection from. */
 function InertPort({
   portId,
   direction = "bidirectional",
   name,
 }: NoderaPortRendererProps): ReactNode {
-  const isInput = direction === "input";
-  return (
-    <Handle
-      id={portId}
-      type={isInput ? "target" : "source"}
-      position={isInput ? Position.Left : Position.Right}
-      isConnectable={false}
-      aria-label={name ?? portId}
-      data-nodera-port-id={portId}
-      data-nodera-port-direction={direction}
-      className="nodera-port-handle"
-      style={INERT_PORT_HANDLE_STYLE}
-    />
-  );
+  return inertPort({ portId, direction, name }, false);
 }
 
 /**
