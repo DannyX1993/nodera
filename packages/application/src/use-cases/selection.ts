@@ -4,13 +4,30 @@
  *
  * Selection is editor state (AGENTS.md §5.3): it is never serialized into the
  * portable document and it does not create history units. The documented
- * `node.selected` event is emitted when a node enters the selection; the
- * event contract of this phase declares no edge-selected event.
+ * `node.selected` event is emitted when a node enters the selection, and every
+ * successful selection use case emits `selection.changed` with the resulting
+ * selection, so panels can re-render without reading editor internals.
  */
 
 import { createEdgeId, createNodeId, err, ok, type Result } from "@nodera/contracts";
 import type { EditorEngine } from "../editor-engine.js";
 import type { UseCaseError } from "./errors.js";
+
+/**
+ * Emits `selection.changed` with the selection the mutation produced.
+ *
+ * The payload carries the post-mutation identifiers in selection order, so a
+ * listener never needs to read the editor state to render the selection.
+ */
+function emitSelectionChanged(editor: EditorEngine): void {
+  editor.events.emit({
+    name: "selection.changed",
+    payload: {
+      selectedNodes: editor.getSelectedNodes(),
+      selectedEdges: editor.getSelectedEdges(),
+    },
+  });
+}
 
 export interface SelectNodeInput {
   readonly nodeId: string;
@@ -37,6 +54,7 @@ export function selectNode(
   }
   editor.editorState.selectedNodes.add(nodeId);
   editor.events.emit({ name: "node.selected", payload: { nodeId } });
+  emitSelectionChanged(editor);
   return ok(undefined);
 }
 
@@ -63,6 +81,7 @@ export function selectEdge(
     editor.editorState.selectedEdges.clear();
   }
   editor.editorState.selectedEdges.add(edgeId);
+  emitSelectionChanged(editor);
   return ok(undefined);
 }
 
@@ -104,6 +123,7 @@ export function selectMultiple(
   for (const raw of edgeIds) {
     editor.editorState.selectedEdges.add(createEdgeId(raw));
   }
+  emitSelectionChanged(editor);
   return ok(undefined);
 }
 
@@ -111,5 +131,6 @@ export function selectMultiple(
 export function clearSelection(editor: EditorEngine): Result<void, UseCaseError> {
   editor.editorState.selectedNodes.clear();
   editor.editorState.selectedEdges.clear();
+  emitSelectionChanged(editor);
   return ok(undefined);
 }

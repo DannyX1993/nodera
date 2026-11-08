@@ -27,6 +27,7 @@ export const EDITOR_EVENT_NAMES: ReadonlySet<EditorEventName> = new Set([
   "validation.completed",
   "plugin.registered",
   "plugin.error",
+  "selection.changed",
 ] as EditorEventName[]);
 
 /** Union of every editor event name. */
@@ -46,7 +47,8 @@ export type EditorEventName =
   | "property.changed"
   | "validation.completed"
   | "plugin.registered"
-  | "plugin.error";
+  | "plugin.error"
+  | "selection.changed";
 
 /** Typed payloads for every editor event name. */
 export interface EditorEventPayloads {
@@ -66,6 +68,10 @@ export interface EditorEventPayloads {
   "validation.completed": { readonly report: ValidationReport };
   "plugin.registered": { readonly pluginId: string };
   "plugin.error": { readonly pluginId: string; readonly message: string };
+  "selection.changed": {
+    readonly selectedNodes: readonly string[];
+    readonly selectedEdges: readonly string[];
+  };
 }
 
 /** A typed editor event: name plus its payload. */

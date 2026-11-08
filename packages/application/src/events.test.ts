@@ -7,7 +7,9 @@ import {
 } from "./events.js";
 
 describe("editor event contract", () => {
-  it("declares exactly the sixteen documented event names", () => {
+  it("declares the sixteen documented event names plus the appended selection.changed", () => {
+    // Append-only addition (Phase 5, D5): panels must react to edge selection
+    // and deselection, which the original sixteen names never described.
     expect([...EDITOR_EVENT_NAMES].sort()).toEqual(
       [
         "graph.created",
@@ -26,6 +28,7 @@ describe("editor event contract", () => {
         "validation.completed",
         "plugin.registered",
         "plugin.error",
+        "selection.changed",
       ].sort(),
     );
   });
