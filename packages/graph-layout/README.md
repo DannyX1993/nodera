@@ -8,6 +8,41 @@ It never imports React, React Flow or a canvas, never reads or writes a graph
 instance, and never applies anything: the application layer decides when a
 placement becomes a document change. Nothing here is applied automatically.
 
+The package declares **no defaults of its own**. Every option is required in
+`GraphLayoutOptions`, so the values a graph is arranged with are the host's
+declaration or the SDK's documented resolution of it (see
+[Defaults](#defaults) and `docs/GRAPH-LAYOUT.md`).
+
+## Exports
+
+Everything below is re-exported from the package root (`src/index.ts`).
+
+| Export | Kind | What it is |
+| --- | --- | --- |
+| `GraphLayoutStrategy` | interface | The port: a qualified `id` and `place(input)` |
+| `GraphLayoutInput` | interface | `nodes`, `edges` and `options` — the whole input |
+| `GraphLayoutNodeInput` | interface | `id` plus the `position` the document already carries, when it has one |
+| `GraphLayoutEdgeInput` | interface | `source` and `target` node ids |
+| `GraphLayoutOptions` | interface | `direction`, `nodeSpacing`, `rankSpacing` and `scope` |
+| `GraphLayoutDirection` | type | `"horizontal"` or `"vertical"` |
+| `GraphLayoutScope` | type | `"all"` or `"unpositioned"` |
+| `GraphLayoutPlacedNode` | interface | `nodeId` plus the computed `position` |
+| `GraphLayoutResult` | interface | `positions`, the answer of a strategy |
+| `GraphLayoutDiagnostic` | interface | `code`, `message` and the optional `nodeId` |
+| `GraphLayoutDiagnosticCode` | type | The three stable codes below |
+| `createFreeStrategy` / `FREE_STRATEGY_ID` | factory / constant | The no-op strategy, id `nodera.graph-layout.free` |
+| `createLayeredStrategy` / `LAYERED_STRATEGY_ID` | factory / constant | The in-house layered strategy, id `nodera.graph-layout.layered` |
+| `LayoutStrategyRegistry` | class | The composition point: holds strategies, names a default |
+| `LayoutStrategyRegistryOptions` | interface | `strategies` and `defaultStrategyId` |
+| `BUILT_IN_STRATEGIES` | constant | One instance each of `free` and `layered` |
+| `BUILT_IN_STRATEGY_IDS` | constant | `[FREE_STRATEGY_ID, LAYERED_STRATEGY_ID]` |
+| `DEFAULT_STRATEGY_ID` | constant | `LAYERED_STRATEGY_ID` |
+
+Results use `Result` from `@nodera/contracts`; positions use `NodePosition` from
+`@nodera/graph-model`. Those two packages are the only dependencies: the port
+types import them type-only, and the registry takes `RegistryStore`, `ok`, `err`
+and `notFoundError` from `@nodera/contracts` at runtime.
+
 ## The strategy port
 
 ```ts
@@ -40,7 +75,9 @@ configuration and never sees the algorithm.
 `scope` decides which nodes the answer covers: `"all"` places every node of the
 graph, `"unpositioned"` answers only for the nodes the document does not position
 yet, so an automatic placement can never move a node the host or the user already
-placed.
+placed. The scopes cover the same graph: a node the document positions keeps its
+slot in the grid, so switching between `all` and `unpositioned` does not shift the
+nodes that are answered.
 
 ## Strategies
 
@@ -49,17 +86,86 @@ placed.
 | `createFreeStrategy()` | `nodera.graph-layout.free` | places nothing (`positions: []`); every position stays in the host's hands |
 | `createLayeredStrategy()` | `nodera.graph-layout.layered` | ranks by longest path from the source nodes and lays the ranks out in node-id order |
 
-The layered strategy ranks every node by longest path from the source nodes
-(nodes with no incoming edge). A node no source can reach — a cycle, and whatever
-depends on it — is placed after every resolved rank, ordered by node id, so the
-answer stays deterministic. Within a rank the nodes are ordered by node id, never
-by the order the caller listed them: the same graph always arranges the same way.
-`horizontal` puts the rank on `x` (`rankSpacing`) and the in-rank index on `y`
-(`nodeSpacing`); `vertical` swaps the axes.
+The free strategy never inspects its input, so it ignores the options and cannot
+fail: an empty placement answer is the honest one, and the caller applies no write
+at all.
 
-Validation is fail-closed: `nodeSpacing` and `rankSpacing` must be positive finite
-numbers, node ids must be unique and every edge endpoint must be a known node. A
-failed call returns only a diagnostic — never a partial placement.
+### The layered placement rule
+
+`createLayeredStrategy().place(input)` does exactly this, in this order:
+
+1. **Validates the options** (see [Diagnostics](#diagnostics)) and returns the
+   diagnostic before computing anything.
+2. **Validates the input**: every node id must appear once, and every edge
+   endpoint must be a known node id. The source endpoint of an edge is checked
+   before its target.
+3. **Sorts** the nodes by id and the edges by `(source, target)` before building
+   the ranks, and sorts every rank by id afterwards, so the answer depends on the
+   *set* of nodes and edges and never on the order the caller listed them in.
+4. **Ranks by longest path from the sources.** A source is a node with no incoming
+   edge and starts at rank `0`. Ranks are relaxed edge by edge, repeating over the
+   sorted edge list; the number of passes is capped at the node count, so the
+   relaxation always terminates even with a cycle in the graph.
+5. **Places the cycle-locked nodes.** A node no source can reach — every node of a
+   cycle, and every node that only depends on one — never gets a rank from the
+   relaxation. All of them are placed in one extra rank, `highest resolved rank +
+   1`, ordered by node id.
+6. **Orders each rank by node id** and then applies the axes:
+   `horizontal` puts the rank on `x` (`rank × rankSpacing`) and the in-rank index
+   on `y` (`index × nodeSpacing`); `vertical` swaps them.
+7. **Filters by `scope`** last: `all` answers for every node, `unpositioned` drops
+   the nodes the document positions but keeps their in-rank index, so the slots of
+   the answered nodes do not move.
+
+The answer is a ranked, evenly spaced grid, which is what an explicit `Arrange`
+action needs. There is no crossing minimization, no edge bend point and no edge
+routing (see [Stated limitations](#stated-limitations)).
+
+## Defaults
+
+The strategy has no defaults: `direction`, `nodeSpacing`, `rankSpacing` and
+`scope` are required members. The defaults a host actually sees are resolved
+above this package, and these are the exact values:
+
+| Setting | Declared by the host | Default | Resolved in |
+| --- | --- | --- | --- |
+| `graph.layout.mode` | `@nodera/sdk` | `"free"` | `packages/sdk/src/graph/placement.ts` (`resolveGraphLayout`) |
+| `graph.layout.direction` | `@nodera/sdk` | `"horizontal"` | same |
+| `graph.layout.spacing` | `@nodera/sdk` | `240` (`DEFAULT_GRAPH_LAYOUT_SPACING`), the `nodeSpacing` of `arrange()` | same |
+| `graph.layout.rankSpacing` | `@nodera/sdk` | the declared `spacing` | `packages/sdk/src/builder/builder.ts` |
+| `graph.layout.strategy` | `@nodera/sdk` | `DEFAULT_STRATEGY_ID`, which is `nodera.graph-layout.layered` | `LayoutStrategyRegistry` |
+| `scope` of `arrange()` | not configurable | `"all"` | `packages/sdk/src/graph/graph-api.ts` |
+
+The add-time grid of `mode: "auto"` is not this package: it is the SDK's own
+`nextFreeSlot` over the positions the document already carries.
+
+## Diagnostics
+
+A failed `place` returns one `GraphLayoutDiagnostic` and never a partial answer.
+Codes are stable and closed:
+
+| Code | Meaning | `nodeId` |
+| --- | --- | --- |
+| `graph-layout.invalid-options` | `nodeSpacing` or `rankSpacing` is not a positive finite number, or `direction`/`scope` is outside its union | absent |
+| `graph-layout.duplicate-node` | the input declares the same node id twice | the repeated id |
+| `graph-layout.unknown-edge-node` | an edge endpoint is not in `nodes` | the unknown endpoint |
+
+`message` is human-readable and must not be used to branch. The option checks run
+first and in this order: `nodeSpacing`, `rankSpacing`, `direction`, `scope`.
+
+## Who calls this
+
+`@nodera/sdk` is the only caller today, and it calls one strategy per explicit
+`builder.graph.arrange()` call: it reads the graph as plain data, asks the
+strategy selected by `graph.layout.strategy` with the host's `direction`,
+`spacing`, `rankSpacing` and `scope: "all"`, and applies the answer through
+`@nodera/application` (`arrangeGraph`) as one history unit. A diagnostic becomes
+an `sdk.invalid-input` issue and nothing is applied.
+
+Nothing in this package knows about that: there is no planner, no scheduler and no
+observer. It computes positions and writes nothing — no document, no history, no
+event, no canvas. A host that calls `place` and drops the answer has a working
+program with no side effect.
 
 ## The strategy registry
 
@@ -78,9 +184,29 @@ registry.defaultStrategyId;                    // "nodera.graph-layout.layered"
 registry.getDefault().id;                      // the same strategy instance
 ```
 
-The layered strategy is the default (`DEFAULT_STRATEGY_ID`). A host that supplies
-its own `strategies` list replaces the built-ins entirely, and the default is then
-`defaultStrategyId` when declared, otherwise the first entry of that list.
+`LayoutStrategyRegistryOptions`:
+
+- `strategies` — the list the host makes available. Omitted, it is
+  `BUILT_IN_STRATEGIES`. Supplied, it **replaces** the built-ins entirely.
+- `defaultStrategyId` — the selected strategy. Omitted, it is the first entry of
+  the supplied list when the host supplied one, and `DEFAULT_STRATEGY_ID` (the
+  layered strategy) when it did not.
+
+Construction is fail-closed and throws, because a registry that cannot arrange is
+a composition error, not data: a duplicate id inside the supplied list, an empty
+list (`{ strategies: [] }`), or a `defaultStrategyId` no entry matches. The first
+and the third throw the registry's own `duplicate-id` / `not-found` message; the
+empty list throws its own.
+
+Two rules keep the default honest once the registry is running:
+
+- **A default never outlives its entry.** `unregister(selectedId)` removes the
+  entry and moves the selection to the first remaining strategy.
+- **An emptied registry has no default.** After unregistering everything,
+  `size` is `0` and `getDefault()` throws; there is nothing left to select.
+
+The layered strategy is the default (`DEFAULT_STRATEGY_ID`), so a host that
+declares no `graph.layout.strategy` gets ranks without writing any configuration.
 
 ## Adding your own strategy
 
@@ -91,17 +217,33 @@ adapter and to the host's own build, never to this package (odd task T2, S9).
 
 1. **Implement `GraphLayoutStrategy`.** Two members: a globally qualified `id`
    (`vendor.feature-name`, e.g. `acme.dagre`) and `place(input)`. It receives
-   plain data only and must import no React, React Flow or canvas type; it must be
-   deterministic, side-effect free, and honour `options.direction`, the two
-   spacings and `options.scope` (`unpositioned` means: answer only for the nodes
-   the document does not position yet). Return `err` with a
-   `GraphLayoutDiagnostic` when it cannot place — never partial geometry.
+   plain data only and must import no React, React Flow or canvas type. Return
+   `err` with a `GraphLayoutDiagnostic` when it cannot place — never partial
+   geometry.
 2. **Register it.** `registry.register(strategy)`; a used id is rejected instead of
    shadowing the strategy the host already selected.
 3. **Select it by id.** `new LayoutStrategyRegistry({ defaultStrategyId: "acme.dagre" })`
    or `registry.setDefault("acme.dagre")`. The id is the only thing configuration
    carries downstream, so swapping the algorithm never touches the SDK, the
    application layer or the canvas.
+
+What the adapter itself must guarantee — the port cannot check any of it:
+
+- **Determinism and no side effects.** The same node and edge set must always
+  produce the same positions, and the input must not be mutated. Order everything
+  the algorithm depends on by node or edge id before handing it over; several
+  layout libraries document no output stability across input orders.
+- **Id ordering as the tie-break.** Two nodes in the same rank or at the same
+  distance must resolve by id, never by insertion order or by hash order, or the
+  placement changes between runs and between machines.
+- **Its own size threshold.** The port passes the whole graph; the adapter decides
+  what it refuses. Above the threshold, delegate to
+  `createLayeredStrategy().place(input)` (or return a diagnostic) instead of
+  producing geometry the graph is too large for, and say so in the host's own
+  diagnostics.
+- **The declared semantics.** Honour `options.direction`, both spacings and
+  `options.scope` (`unpositioned` means: answer only for the nodes the document
+  does not position yet, and leave the others untouched).
 
 ```ts
 // Host-side sketch, NOT shipped by Nodera and not imported by this package.
@@ -161,6 +303,16 @@ above the threshold, as the sketch does.
 
 ## Stated limitations
 
-No crossing minimization and no edge bend points. The result is a ranked,
-evenly spaced grid, which is what an explicit "arrange" action needs; a quality
-bar that asks for fewer crossings belongs behind this same port.
+No crossing minimization, no edge bend points and no edge routing. The result is
+a ranked, evenly spaced grid, which is what an explicit `Arrange` action needs,
+with no knowledge of node sizes or edge geometry: it never reads a node width, a
+port position or an edge path, and it returns positions only, so nothing but the
+node ids, the edges and the declared options influences the answer. A quality bar
+that asks for fewer crossings or for routed edges belongs behind this same port.
+
+## See also
+
+- `docs/GRAPH-LAYOUT.md` — the feature page: how the modes, the `Arrange`
+  command, the SDK configuration and the example fit together.
+- `packages/sdk/README.md` — `graph.layout`, `builder.graphLayout` and
+  `builder.graph.arrange()`.

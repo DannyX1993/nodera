@@ -1,0 +1,202 @@
+# Graph layout
+
+How a Nodera graph gets its node positions, what the host declares, and how an
+explicit re-arrangement is requested. The geometry itself is documented in
+`packages/graph-layout/README.md`; the SDK surface in `packages/sdk/README.md`;
+the runnable proof in `examples/layout-switch-demo`.
+
+Two things are called "layout" in this repository and they are not the same one:
+`@nodera/layout-engine` computes the **editor shell** (panel and shell
+geometry), and `@nodera/graph-layout` computes **node positions inside the graph
+document**. This page is about the second one.
+
+## What the feature is
+
+`position` is document data and stays optional (`packages/graph-model`). The
+framework owns no placement policy: the host declares one in configuration, and
+nothing moves unless the host asks.
+
+| | Who places a node |
+| --- | --- |
+| `mode: "free"` (the default) | The host. A node added without a position keeps no position; the canvas adapter decides how to render it until the host places it. |
+| `mode: "auto"` | The builder, and only for the nodes the host left unpositioned: the first free slot of a grid anchored at the origin, at add time. A node that already carries a position is never moved. |
+| `Arrange` (explicit) | The selected strategy, for every node of the graph, when the host calls `builder.graph.arrange()`. One history unit. |
+
+Three invariants hold in every mode:
+
+- **No framework default moves a node.** There is no automatic re-layout on an
+  add, on an edge change or on a read.
+- **A position that exists is never overwritten implicitly.** `auto` places only
+  the absent ones; replacing existing positions is the explicit `Arrange`.
+- **There is no runtime toggle.** Mode, direction and spacings are configuration
+  the host writes, never a control the framework puts in front of a user. A host
+  that wants controls writes them itself, as the example does.
+
+## The layer split
+
+Placement is not a single-layer feature. Each part lives where the architecture
+puts it (AGENTS.md §4, §12; odd task S5):
+
+| Concern | Where | What it does |
+| --- | --- | --- |
+| Geometry | `@nodera/graph-layout` | The strategy port, the `free` no-op, the in-house layered strategy and the registry. Plain data in, positions or a diagnostic out. No React, no React Flow, no graph instance. |
+| Position writes | `@nodera/application` | `arrangeGraph(editor, { moves })` validates every id and position first, then writes the whole answer as one reversible history unit (`arrange-graph`). All-or-nothing: a rejected move writes nothing, pushes nothing and emits nothing. |
+| Add-time grid | `@nodera/sdk` | `resolveGraphLayout`, `placeUnpositionedNode` and `nextFreeSlot` decide a position **before** the `add-node` use case runs, so it belongs to the same history unit as the creation. |
+| Configuration and command | `@nodera/sdk` | `graph.layout`, `builder.graphLayout` and `builder.graph.arrange(request?)`. The SDK reads the graph as plain data, asks the selected strategy and applies the answer through the use case above. |
+| Rendering and affordances | `@nodera/react-flow`, `@nodera/ui-*` | The canvas renders positions **from the document**; the node-creation dialog and its "+" affordance (which is how a node enters the graph in the first place) live in `ui-react`/`ui-core`. Neither calls `arrange`, and neither ships a placement control. |
+
+Two consequences worth stating, because they are easy to break:
+
+- A ui-react effect or the React Flow node state is never a source of positions.
+  The mapper reads `node.position` from the document, renders the origin when the
+  document carries none, and writes nothing back.
+- A strategy never sees a canvas, a `Node` class or a `ReactFlowInstance`, which
+  is what makes it replaceable and testable without a DOM.
+
+## The SDK surface
+
+`graph.layout` is optional and additive. Every field and its default:
+
+| Field | Values | Default |
+| --- | --- | --- |
+| `mode` | `"free"` or `"auto"` | `"free"` |
+| `direction` | `"horizontal"` or `"vertical"` | `"horizontal"` |
+| `spacing` | positive finite number, document units: distance between adjacent automatic slots, and the in-rank distance of an `Arrange` | `240` |
+| `rankSpacing` | positive finite number, document units: distance between consecutive `Arrange` ranks | the declared `spacing` |
+| `strategy` | globally qualified strategy id | `nodera.graph-layout.layered` |
+
+```ts
+import { assertOk, assertValid, createBuilder } from "@nodera/sdk";
+import { createReactFlowAdapter } from "@nodera/react-flow";
+
+const builder = assertValid(
+  createBuilder({
+    adapter: createReactFlowAdapter(),
+    registry: { nodes: [ACME_NODE] },
+    graph: {
+      layout: {
+        mode: "auto",                            // default "free"
+        direction: "vertical",                   // default "horizontal"
+        spacing: 160,                            // default 240
+        rankSpacing: 320,                        // default: spacing
+        strategy: "nodera.graph-layout.layered", // the built-in default
+      },
+    },
+  }),
+);
+
+// Add time: only the nodes without a position, on the grid anchored at the origin.
+const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }));
+// placed.position === { x: 0, y: 0 }; with direction "vertical" the next one is
+// { x: 0, y: 160 }
+```
+
+An invalid value is a configuration problem and fails closed: `createBuilder`
+returns `err` with `sdk.invalid-input` at `graph.layout.<field>` and no builder is
+created. Nothing is guessed.
+
+### `builder.graph.arrange(request?)`
+
+The only command that re-places an existing graph. It reads the graph, asks the
+selected strategy for `scope: "all"`, and applies the answer as **one** history
+unit — so one `undo()` restores every previous position, including returning a
+formerly unpositioned node to having no position.
+
+```ts
+const moved = assertOk(builder.graph.arrange()); // returns the moved instances
+builder.graph.undo(); // one step: every previous position is back
+```
+
+A request overrides `direction`, `spacing` and `rankSpacing` for that one call and
+persists nothing: the next call without a request reads `graph.layout` again, so a
+host can switch without rebuilding the builder. A bad override is
+`sdk.invalid-input` at that field and nothing moves.
+
+Two honest no-ops: the `free` strategy returns no position, and so does an empty
+graph — neither pushes a history entry. A strategy that answers a diagnostic makes
+`arrange()` fail with `sdk.invalid-input`, keeping the geometry's own code in
+`metadata.strategyCode`, and nothing is applied.
+
+The placement rule behind the answer (longest-path ranks, the relaxation cap, the
+cycle-locked rank, in-rank order by node id, the two axes, `all` vs
+`unpositioned`) is documented once, in `packages/graph-layout/README.md`.
+
+### `builder.graphLayout`
+
+The composition point of the port:
+
+```ts
+assertValid(builder.graphLayout.register(myStrategy)); // id: "acme.dagre"
+assertValid(builder.graphLayout.setDefault("acme.dagre"));
+builder.graphLayout.active();                            // "acme.dagre"
+builder.graphLayout.all().map((strategy) => strategy.id); // built-ins + "acme.dagre"
+```
+
+The built-ins are `nodera.graph-layout.free` and
+`nodera.graph-layout.layered`. Selecting a strategy never rewrites configuration:
+`active()` is what the next `arrange()` runs, and `graph.layout.strategy` is the
+same selection declared once at composition time. A used id is `sdk.duplicate-id`,
+an unqualified one is `sdk.invalid-id`, and an unknown one is `sdk.invalid-input`
+while the selection stays where it was.
+
+## The example
+
+`examples/layout-switch-demo` is the reference host. It composes one builder over
+`@nodera/sdk` + `@nodera/react-flow` + `@nodera/ui-react`, seeds a five-node
+pipeline **without positions** with `graph.layout` declaring `mode: "auto"`,
+`direction: "horizontal"`, `spacing: 240` and `rankSpacing: 280`, and then puts
+every layout action in its own toolbar **above** the canvas:
+
+- a strategy select calling `builder.graphLayout.setDefault(id)`;
+- direction, spacing and rank-spacing fields passed per call to
+  `builder.graph.arrange({ direction, spacing, rankSpacing })`;
+- one explicit Arrange button running that call;
+- the `CreateNodeButton` from `@nodera/ui-react`, which opens the framework's
+  node-creation dialog; the host adds the chosen definition with
+  `builder.graph.addNode`, and `mode: "auto"` gives it a free slot;
+- a status line printing what moved, or the `sdk.invalid-input` diagnostic that
+  refused the call (an emptied spacing field is refused, not hidden).
+
+The toolbar is host code, not framework code. That is the point: the SDK ships
+configuration and one command, and a host that wants controls writes exactly this
+page. `examples/layout-switch-demo/README.md` lists the commands and the files.
+
+## Plugging in a strategy
+
+A third-party layouter is an adapter over the port, registered by the host and
+selected by id:
+
+```ts
+import { createLayeredStrategy, type GraphLayoutStrategy } from "@nodera/graph-layout";
+
+const myStrategy: GraphLayoutStrategy = {
+  id: "acme.dagre",
+  place: (input) => (input.nodes.length > 500 ? createLayeredStrategy().place(input) : dagrePlace(input)),
+};
+
+assertValid(builder.graphLayout.register(myStrategy));
+assertValid(builder.graphLayout.setDefault("acme.dagre"));
+```
+
+The framework ships no external layout dependency, so the adapter's own dependency
+belongs to the host's build. What the adapter must guarantee — determinism, id
+ordering as tie-break, its own size threshold, the declared `direction`, spacings
+and `scope` — and a full host-side sketch are in
+`packages/graph-layout/README.md` ("Adding your own strategy"). Diagnostic codes
+(`graph-layout.invalid-options`, `graph-layout.duplicate-node`,
+`graph-layout.unknown-edge-node`) and the registry rules are documented there
+too.
+
+## Limits
+
+Stated, not hidden:
+
+- No crossing minimization, no edge bend points, no edge routing. The layered
+  strategy produces a ranked, evenly spaced grid.
+- No node-size awareness: positions are computed from ids, edges and the declared
+  spacings, so the result does not adapt to wide or tall node renderers.
+- `Arrange` always covers the whole graph (`scope: "all"` from the SDK). A partial
+  re-arrangement is not a supported request; the port itself can express
+  `unpositioned` for a host that calls a strategy directly.
+- No framework toggle and no auto-arrange. Every re-placement is an explicit host
+  action.

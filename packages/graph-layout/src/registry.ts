@@ -39,7 +39,7 @@ export const BUILT_IN_STRATEGY_IDS: readonly string[] = [FREE_STRATEGY_ID, LAYER
 export interface LayoutStrategyRegistryOptions {
   /** Strategies the host makes available. Defaults to {@link BUILT_IN_STRATEGIES}. */
   readonly strategies?: readonly GraphLayoutStrategy[];
-  /** Strategy selected when the host names none. Defaults to the first available. */
+  /** Strategy selected when the host names none. Defaults to the first listed strategy, or to the built-in layered one. */
   readonly defaultStrategyId?: string;
 }
 

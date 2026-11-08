@@ -284,6 +284,9 @@ const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }))
 // placed.position === { x: 0, y: 0 }; the next unpositioned node lands at { x: 0, y: 240 }
 ```
 
+The whole feature — the two placement modes, the layer split, the defaults, the
+`Arrange` command and the example — is on one page: `docs/GRAPH-LAYOUT.md`.
+
 ### Arranging an existing graph
 
 `Arrange` is a command, never a side effect. Nothing arranges on an add, on an
@@ -318,7 +321,9 @@ input, plain output — and selects it by id, in configuration
 (`graph.layout.strategy`) or with `setDefault`. The framework ships no external
 layout dependency; the adapter's own dependency belongs to the host's build.
 There is no runtime toggle in any of this: a user never chooses the strategy, the
-host does.
+host does. The placement rule the layered strategy applies is documented in
+`packages/graph-layout/README.md`, and the feature as a whole in
+`docs/GRAPH-LAYOUT.md`.
 
 ### Reading a graph
 
@@ -579,6 +584,8 @@ These are honest boundaries of Phase 6, not roadmap guesses.
 ## Where to go next
 
 - `packages/sdk/README.md` — the package, its APIs and its error model.
+- `docs/GRAPH-LAYOUT.md` — node placement: `graph.layout`, `Arrange`, the
+  strategy port and `examples/layout-switch-demo`.
 - `packages/react-flow/README.md` — the React Flow integration: the canvas
   adapter (engine) and the SDK binding (composition).
 - `docs/PROJECT-STRUCTURE.md` §7.3 — the package boundaries and the executable

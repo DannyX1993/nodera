@@ -21,6 +21,7 @@ generic-graph-builder/
 │   ├── sdk/
 │   │
 │   ├── graph-model/
+│   ├── graph-layout/
 │   ├── node-registry/
 │   ├── edge-registry/
 │   ├── property-system/
@@ -273,4 +274,52 @@ Reglas de comportamiento:
 Las decisiones de la Fase 6 se documentan en `odd/tasks/fase6-sdk.md`
 (secciones `Specs`, `Non-goals`, `Decisions` D1-D25 y `Log`). El repositorio no
 dispone todavía de un mecanismo de ADR, por lo que no se creó uno.
+
+## 7.4. Colocación de nodos (`@nodera/graph-layout`)
+
+La colocación de nodos en el grafo es una capacidad propia, separada del motor
+de layout del shell (§7.2) y de la composición del SDK (§7.3). El paquete
+`@nodera/graph-layout` es privado y se consume desde el código fuente, como el
+resto del monorepo: no tiene dependencia externa y declara solo `@nodera/contracts`
+y `@nodera/graph-model`.
+
+```text
+@nodera/graph-layout   (geometría: puerto de estrategia, free, layered, registro)
+        |
+        +--> @nodera/contracts     Result, RegistryStore, RegistryError
+        +--> @nodera/graph-model   NodePosition
+
+@nodera/sdk  --> @nodera/graph-layout   (selecciona la estrategia y le pasa datos planos)
+@nodera/application <-- @nodera/sdk     (arrangeGraph aplica la respuesta como una unidad de historial)
+```
+
+Reglas de frontera:
+
+- El paquete no importa React, React DOM, React Flow, `@nodera/application`,
+  `@nodera/sdk` ni el adaptador de canvas: recibe ids, posiciones y edges, y
+  devuelve posiciones o un diagnóstico estructurado. Su `package.json` declara
+  únicamente `@nodera/contracts` y `@nodera/graph-model`, y esas son las dos
+  únicas importaciones de sus fuentes. `pnpm check:architecture` todavía no
+  verifica esta frontera: sus seis reglas cubren la capa de presentación y el SDK
+  (§7.2, §7.3).
+- Escribir posiciones no es responsabilidad de este paquete: el SDK aplica la
+  respuesta a través del caso de uso `arrangeGraph` de `@nodera/application`, que
+  valida todo antes de escribir y lo hace como una única unidad reversible.
+- El paquete no decide cuándo se coloca nada. La colocación en el alta de un nodo
+  (`graph.layout.mode: "auto"`) es geometría del SDK; volver a colocar un grafo
+  existente es el comando explícito `builder.graph.arrange()`.
+- La estrategia se elige como dato: el registro
+  (`LayoutStrategyRegistry`) aplica las mismas reglas que el resto de registros
+  (`duplicate-id` para un id en uso, `not-found` para uno desconocido) y el host
+  puede registrar un adaptador propio (por ejemplo `@dagrejs/dagre`) sin cambiar
+  el SDK, la aplicación ni el canvas. El framework no envía ninguna dependencia
+  de layout externa.
+- Ningún componente de UI coloca nodos: `ui-react`, `ui-core` y el adaptador de
+  canvas renderizan las posiciones del documento y no llaman a `arrange()`.
+
+La referencia completa del paquete (exportaciones, reglas exactas de colocación,
+valores por defecto, códigos de diagnóstico y limitaciones) está en
+`packages/graph-layout/README.md`; la página de la capacidad, con la superficie
+del SDK y el ejemplo, en `docs/GRAPH-LAYOUT.md`; el ejemplo ejecutable en
+`examples/layout-switch-demo`.
 
