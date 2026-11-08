@@ -5,3 +5,5 @@ export * from "./tool-definition.js";
 export * from "./tool-registry.js";
 export * from "./ui-state.js";
 export * from "./drag-protocol.js";
+export * from "./defaults/default-panels.js";
+export * from "./defaults/default-tools.js";

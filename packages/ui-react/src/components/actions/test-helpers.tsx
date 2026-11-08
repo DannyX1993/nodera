@@ -8,7 +8,7 @@ import type { NodeDefinition } from "@nodera/node-registry";
 import { DEFAULT_THEME_ID } from "@nodera/theme-engine";
 import { ToolRegistry, UiStateStore, type ToolDefinition } from "@nodera/ui-core";
 
-import { createDefaultPanelRegistry } from "../../defaults/default-panels.js";
+import { createDefaultPanelRegistry } from "@nodera/ui-core";
 import { NoderaUiProvider } from "../../providers/ui-provider.js";
 import {
   createComponentRenderers,

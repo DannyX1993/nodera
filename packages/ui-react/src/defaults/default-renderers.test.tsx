@@ -8,7 +8,7 @@ import { createShellStore } from "../components/shell/test-helpers.js";
 import { createComponentRenderers } from "../registries/component-registry.js";
 import { createTestEditor } from "../test/fixtures.js";
 import { NoderaUiProvider } from "../providers/ui-provider.js";
-import { DEFAULT_PANELS } from "./default-panels.js";
+import { DEFAULT_PANELS } from "@nodera/ui-core";
 import { defaultPropertyRenderer } from "../components/inspector/property-renderers/defaults.js";
 import { createDefaultComponentRenderers } from "./default-renderers.js";
 

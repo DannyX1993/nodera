@@ -1,9 +1,9 @@
-import {
-  ToolRegistry,
-  type ToolAvailability,
-  type ToolCommand,
-  type ToolDefinition,
-} from "@nodera/ui-core";
+import { ToolRegistry } from "../tool-registry.js";
+import type {
+  ToolAvailability,
+  ToolCommand,
+  ToolDefinition,
+} from "../tool-definition.js";
 
 /** Options a preset tool may declare on top of its command. */
 interface ToolOptions {

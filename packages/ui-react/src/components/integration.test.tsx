@@ -29,7 +29,7 @@ import { panelIdForRegion } from "./shell/shell-sizes.js";
 import { Toolbar } from "./actions/toolbar.js";
 import { ContextMenu, DEFAULT_MENU_RENDERER_ID } from "./actions/context-menu.js";
 import { createDefaultComponentRenderers } from "../defaults/default-renderers.js";
-import { createDefaultPanelRegistry } from "../defaults/default-panels.js";
+import { createDefaultPanelRegistry } from "@nodera/ui-core";
 import { NoderaUiProvider } from "../providers/ui-provider.js";
 import {
   type ComponentRenderers,

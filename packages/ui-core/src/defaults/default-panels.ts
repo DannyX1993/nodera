@@ -1,4 +1,6 @@
-import { PanelRegistry, type PanelDefinition, type PanelRegion } from "@nodera/ui-core";
+import { PanelRegistry } from "../panel-registry.js";
+import type { PanelDefinition } from "../panel-definition.js";
+import type { PanelRegion } from "../layout.js";
 
 /** Options a preset panel may declare on top of its identity and region. */
 interface PanelOptions {

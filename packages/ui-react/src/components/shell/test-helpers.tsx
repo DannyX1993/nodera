@@ -5,7 +5,7 @@ import { EDITOR_LAYOUT, createLayoutState } from "@nodera/layout-engine";
 import { DEFAULT_THEME_ID } from "@nodera/theme-engine";
 import { UiStateStore, type PanelRegistry } from "@nodera/ui-core";
 
-import { createDefaultPanelRegistry } from "../../defaults/default-panels.js";
+import { createDefaultPanelRegistry } from "@nodera/ui-core";
 import { NoderaUiProvider } from "../../providers/ui-provider.js";
 import {
   createComponentRenderers,

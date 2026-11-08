@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ToolDefinition } from "@nodera/ui-core";
 
-import { DEFAULT_TOOLS } from "../../defaults/default-tools.js";
+import { DEFAULT_TOOLS } from "@nodera/ui-core";
 import {
   createComponentRenderers,
   type ToolbarRendererProps,

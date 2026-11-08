@@ -17,9 +17,9 @@ import {
   type UiState,
 } from "@nodera/ui-core";
 
-import { createDefaultPanelRegistry } from "../defaults/default-panels.js";
+import { createDefaultPanelRegistry } from "@nodera/ui-core";
 import { createDefaultComponentRenderers } from "../defaults/default-renderers.js";
-import { createDefaultToolRegistry } from "../defaults/default-tools.js";
+import { createDefaultToolRegistry } from "@nodera/ui-core";
 import type { ComponentRenderers } from "../registries/component-registry.js";
 import { themeStyle } from "../theme-style.js";
 

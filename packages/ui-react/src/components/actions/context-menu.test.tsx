@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { EditorEngine } from "@nodera/application";
 import type { MenuTargetKind, ToolDefinition, UiStateStore } from "@nodera/ui-core";
 
-import { DEFAULT_TOOLS } from "../../defaults/default-tools.js";
+import { DEFAULT_TOOLS } from "@nodera/ui-core";
 import {
   createComponentRenderers,
   type ComponentRenderers,

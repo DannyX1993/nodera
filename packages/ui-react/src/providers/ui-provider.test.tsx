@@ -7,7 +7,7 @@ import { DARK_THEME_ID, DEFAULT_THEME_ID, ThemeRegistry } from "@nodera/theme-en
 import { UiStateStore } from "@nodera/ui-core";
 import { PROPERTY_TYPES } from "@nodera/property-system";
 
-import { createDefaultPanelRegistry } from "../defaults/default-panels.js";
+import { createDefaultPanelRegistry } from "@nodera/ui-core";
 import { PanelHost } from "../components/shell/panel-host.js";
 import { createTestEditor } from "../test/fixtures.js";
 import {

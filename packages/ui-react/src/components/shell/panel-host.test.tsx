@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { EditorEngine } from "@nodera/application";
 import type { PanelDefinition } from "@nodera/ui-core";
 
-import { createDefaultPanelRegistry } from "../../defaults/default-panels.js";
+import { createDefaultPanelRegistry } from "@nodera/ui-core";
 import { createDefaultComponentRenderers } from "../../defaults/default-renderers.js";
 import { NoderaUiProvider } from "../../providers/ui-provider.js";
 import {

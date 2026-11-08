@@ -10,9 +10,15 @@
 
 export * from "./theme-style.js";
 export * from "./registries/component-registry.js";
-export * from "./defaults/default-panels.js";
 export * from "./defaults/default-renderers.js";
-export * from "./defaults/default-tools.js";
+// Panel and tool presets are declarative data owned by `@nodera/ui-core`; the
+// React layer re-exports them so Phase 5 hosts keep one import path.
+export {
+  DEFAULT_PANELS,
+  DEFAULT_TOOLS,
+  createDefaultPanelRegistry,
+  createDefaultToolRegistry,
+} from "@nodera/ui-core";
 export * from "./components/shell/shell-sizes.js";
 export * from "./components/shell/editor-shell.js";
 export * from "./components/shell/canvas-container.js";
