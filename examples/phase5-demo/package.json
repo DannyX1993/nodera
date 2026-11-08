@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@nodera/application": "workspace:*",
-    "@nodera/canvas-react-flow": "workspace:*",
+    "@nodera/react-flow": "workspace:*",
     "@nodera/domain": "workspace:*",
     "@nodera/graph-model": "workspace:*",
     "@nodera/layout-engine": "workspace:*",

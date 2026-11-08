@@ -1,7 +1,7 @@
 /**
  * Vitest setup file for the jsdom environment.
  *
- * Two things are needed here, and only two:
+ * Three things are needed here, and only three:
  *
  * 1. React's act environment flag, because `@testing-library/react` runs
  *    without a test-runner-provided global.
@@ -9,11 +9,10 @@
  *    would create a plain `Event` and drop the coordinates the shell maths
  *    reads. `MouseEvent` already carries `clientX`/`clientY`.
  * 3. The browser APIs the graph engine relies on and jsdom does not implement.
- *    `@nodera/sdk-react` reaches the engine only through
- *    `@nodera/canvas-react-flow`, and the editor renders a real canvas, so the
- *    polyfills that package's own setup declares are required here too. They
- *    are test infrastructure, not a source dependency: no product module
- *    touches them.
+ *    The SDK binding of this package reaches the engine through the canvas
+ *    layer next door, and the editor renders a real canvas, so the polyfills the
+ *    canvas layer needs are required here too. They are test infrastructure, not
+ *    a source dependency: no product module touches them.
  */
 
 declare global {

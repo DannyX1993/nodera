@@ -32,7 +32,7 @@ generic-graph-builder/
 │   │
 │   ├── ui-core/
 │   ├── ui-react/
-│   ├── canvas-react-flow/
+│   ├── react-flow/
 │   ├── theme-engine/
 │   ├── layout-engine/
 │   │
@@ -85,7 +85,8 @@ Infrastructure    ---> Application / Domain contracts
 Plugins           ---> Public SDK contracts
 Host Application  ---> Public SDK
 Public SDK        ---> Domain / Application / Document contracts
-SDK React binding ---> Public SDK
+React Flow integration (binding layer) ---> Public SDK
+React Flow integration (canvas layer)  ---> Application / Domain / Graph model
 ```
 
 Nunca debe ocurrir:
@@ -114,16 +115,16 @@ canvas, con límites explícitos:
 @nodera/theme-engine  --> @nodera/contracts
 @nodera/ui-core       --> @nodera/contracts
 
-@nodera/canvas-react-flow   (adaptador de canvas, único paquete que importa @xyflow/react)
-        ^
+@nodera/react-flow   (capa de canvas: único paquete que importa @xyflow/react;
+        ^             el mismo paquete aloja el binding del SDK, ver §7.3)
         |  hermano, NO dependencia de ui-react
         |
-  aplicación host  --- compone ui-react (paneles, providers) y canvas-react-flow
+  aplicación host  --- compone ui-react (paneles, providers) y la capa de canvas
 ```
 
-`@nodera/ui-react` y `@nodera/canvas-react-flow` son adaptadores hermanos: el
-host compone ambos. `ui-react` nunca importa `@xyflow/react` ni depende de
-`canvas-react-flow`.
+`@nodera/ui-react` y la capa de canvas de `@nodera/react-flow` son adaptadores
+hermanos: el host compone ambos. `ui-react` nunca importa `@xyflow/react` ni
+depende de `@nodera/react-flow`.
 
 Reglas de frontera, verificadas de forma ejecutable con `pnpm check:architecture`
 (`scripts/check-architecture.mjs`, sin dependencias añadidas):
@@ -132,10 +133,10 @@ Reglas de frontera, verificadas de forma ejecutable con `pnpm check:architecture
   React, React DOM, herramientas solo-DOM, React Flow ni `@nodera/application` /
   `@nodera/domain`; solo contratos, datos y funciones puras.
 - `@nodera/ui-react` ni en su código ni en su `package.json` menciona
-  `@xyflow`, y no declara `@nodera/canvas-react-flow`: el canvas queda en el
+  `@xyflow`, y no importa ni declara `@nodera/react-flow`: el canvas queda en el
   adaptador. El minimapa de composición es un SVG propio, no el `MiniMap` de
   React Flow.
-- Ningún paquete fuera de `packages/canvas-react-flow` importa `@xyflow/react`.
+- Ningún paquete fuera de `packages/react-flow` importa `@xyflow/react`.
 
 El script imprime una línea de estado por regla y termina con código distinto de
 cero listando los archivos que las incumplen.
@@ -165,15 +166,25 @@ mecanismo de ADR, por lo que no se creó uno.
 
 ## 7.3. Capa SDK implementada (Fase 6)
 
-El SDK se implementa en dos paquetes nuevos, y esa separación es la idea central
-de la fase: uno agnóstico de framework y de motor, y uno que selecciona ambos.
+El SDK se implementa en dos paquetes, y esa separación es la idea central de la
+fase: `@nodera/sdk` es agnóstico de framework y de motor, y `@nodera/react-flow`
+selecciona ambos. El segundo aloja a su vez dos capas, porque el binding está
+escrito contra los tipos del adaptador de canvas y solo tiene sentido con él
+(D25):
 
 ```text
-@nodera/sdk-react   (binding React + primer adaptador de motor)
+@nodera/react-flow   (integración de React Flow; un motor distinto es otro paquete)
+        |
+        |  dos capas dentro del paquete:
+        |    binding  adapter/, providers/, editor/, vocabulary.ts,
+        |             renderers/renderer-set.ts      -> compone un Builder
+        |    canvas   canvas/, map/, registries/, renderers/
+        |             -> traduce el grafo portable al motor
         |
         +--> @nodera/sdk                API pública, composición, puerto de motor
         +--> @nodera/ui-react           componentes, providers, registros de UI
-        +--> @nodera/canvas-react-flow  adaptador de canvas (único que importa @xyflow/react)
+        +--> @nodera/application        casos de uso que la capa de canvas invoca
+        +--> @xyflow/react              el motor (solo la capa de canvas)
 
 @nodera/sdk  --> contratos del core: domain, contracts, graph-model,
                  node-registry, edge-registry, property-system, validation,
@@ -181,10 +192,13 @@ de la fase: uno agnóstico de framework y de motor, y uno que selecciona ambos.
                  history, ui-core, theme-engine, layout-engine
 ```
 
-La dirección de dependencias es `sdk-react → sdk` y `sdk → solo paquetes del
-core`. `sdk-react` depende de `ui-react` y de `canvas-react-flow`; `sdk` no puede
-depender de ninguno de los dos, ni de React ni de `@xyflow/react`. Un host que
-solo consume `@nodera/sdk` no necesita React Flow (AGENTS.md §4.1 y §8).
+La dirección de dependencias es `react-flow → sdk` en la capa de binding y
+`sdk → solo paquetes del core`. `react-flow` depende de `ui-react`, de
+`application` (para la capa de canvas) y de `@xyflow/react`; `sdk` no puede
+depender de este paquete, ni de React ni de `@xyflow/react`. Un host que solo
+consume `@nodera/sdk` no necesita React Flow (AGENTS.md §4.1 y §8). El paquete
+`ui-react` sigue siendo el único paquete React agnóstico de motor: nunca importa
+`@nodera/react-flow`.
 
 Reglas de frontera, verificadas de forma ejecutable con `pnpm check:architecture`
 (`scripts/check-architecture.mjs`, sin dependencias añadidas). El script imprime
@@ -195,16 +209,19 @@ reglas son:
   React, módulos solo-DOM, React Flow, `application` ni `domain`.
 - `ui-react-ignores-react-flow` — `ui-react` ni en su código ni en su
   `package.json` menciona `@xyflow`.
-- `ui-react-owns-no-adapter` — `ui-react` no declara
-  `@nodera/canvas-react-flow`.
+- `ui-react-owns-no-adapter` — `ui-react` no importa ni declara
+  `@nodera/react-flow`.
 - `react-flow-adapter-only` — ningún paquete fuera de
-  `packages/canvas-react-flow` importa `@xyflow/react`.
+  `packages/react-flow` importa `@xyflow/react`.
 - `sdk-framework-free` — `packages/sdk` no importa React, React DOM,
-  `@nodera/ui-react`, `@nodera/canvas-react-flow` ni `@xyflow`, y su manifiesto no
-  los declara en ninguna sección de dependencias.
-- `sdk-react-declares-the-adapter` — `packages/sdk-react` depende de
-  `@nodera/canvas-react-flow` y nunca de `@xyflow/react`: un binding selecciona un
-  motor, no lo reimplementa.
+  `@nodera/ui-react`, `@nodera/react-flow` ni `@xyflow`, y su manifiesto no los
+  declara en ninguna sección de dependencias.
+- `react-flow-consumes-the-sdk` — `packages/react-flow` declara
+  `@nodera/sdk` y su capa de binding compone el builder a través del SDK: esa
+  capa nunca importa `@nodera/domain`, `@nodera/application` ni
+  `@nodera/document`. La composición tiene una sola superficie y es el SDK; la
+  capa de canvas sí puede usar `application` y los paquetes del modelo, porque su
+  trabajo es traducir entre ambos.
 
 Reglas de comportamiento:
 
@@ -246,6 +263,6 @@ Reglas de comportamiento:
   `builder.theme.setDefault()` no llegarían nunca a la UI.
 
 Las decisiones de la Fase 6 se documentan en `odd/tasks/fase6-sdk.md`
-(secciones `Specs`, `Non-goals`, `Decisions` D1-D21 y `Log`). El repositorio no
+(secciones `Specs`, `Non-goals`, `Decisions` D1-D25 y `Log`). El repositorio no
 dispone todavía de un mecanismo de ADR, por lo que no se creó uno.
 

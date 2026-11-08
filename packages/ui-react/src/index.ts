@@ -4,7 +4,7 @@
  * The React presentation layer binds the framework-agnostic contracts
  * (`@nodera/ui-core`, `@nodera/theme-engine`, `@nodera/layout-engine`) and the
  * application layer (`@nodera/application`) to React. It never imports the
- * React Flow adapter: `packages/canvas-react-flow` stays the only consumer of
+ * React Flow adapter: `packages/react-flow` stays the only consumer of
  * that dependency (AGENTS.md §4.1).
  */
 

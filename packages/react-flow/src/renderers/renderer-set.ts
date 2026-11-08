@@ -21,8 +21,8 @@ import {
   EdgeRendererRegistry,
   NodeRendererRegistry,
   PortRendererRegistry,
-  type NoderaPortRendererProps,
-} from "@nodera/canvas-react-flow";
+} from "../registries/renderer-registries.js";
+import type { NoderaPortRendererProps } from "./node-renderer-props.js";
 import { RENDERER_KINDS, type RendererBindings } from "@nodera/sdk";
 import {
   ComponentRegistry,

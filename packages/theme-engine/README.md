@@ -51,7 +51,7 @@ The `canvas` group describes the surface the canvas paints behind the graph:
 | Token | CSS variable | Consumer |
 | --- | --- | --- |
 | `canvas.background` | `--ndr-canvas-background` | `CanvasContainer` (`@nodera/ui-react`) paints the surface colour |
-| `canvas.backgroundDot` | `--ndr-canvas-background-dot` | `canvasBackgroundOptions()` in `@nodera/canvas-react-flow` colours the dot pattern |
+| `canvas.backgroundDot` | `--ndr-canvas-background-dot` | `canvasBackgroundOptions()` in `@nodera/react-flow` colours the dot pattern |
 | `canvas.backgroundDotSize` | `--ndr-canvas-background-dot-size` | the dot gap, as a numeric string (`"16"` = 16px) |
 
 `canvas.background` and `canvas.backgroundDot` reach the canvas as CSS variable

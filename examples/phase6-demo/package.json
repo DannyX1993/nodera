@@ -11,8 +11,8 @@
     "test": "node src/imports.test.ts"
   },
   "dependencies": {
+    "@nodera/react-flow": "workspace:*",
     "@nodera/sdk": "workspace:*",
-    "@nodera/sdk-react": "workspace:*",
     "@xyflow/react": "^12.12.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

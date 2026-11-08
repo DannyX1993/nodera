@@ -10,8 +10,10 @@
  * whatever engine the host declared, as data only.
  *
  * Selecting React Flow therefore needs a package that is allowed to depend on
- * React and on `@nodera/canvas-react-flow`, and that package is this one. A
- * future graph engine (or a Vue/Angular binding) is another binding package
+ * React and on `@xyflow/react`, and that package is this one: it also owns the
+ * canvas adapter this declaration describes (`../canvas`, `../map`,
+ * `../registries`, `../renderers`), which is why both layers ship together. A
+ * future graph engine (or a Vue/Angular binding) is a *different* package
  * exporting its own `create<Engine>Adapter` plus its own provider/editor; the
  * SDK, its public types and every host that only uses the SDK stay untouched.
  * That is the whole point of the `BuilderAdapter` port: the engine is chosen by

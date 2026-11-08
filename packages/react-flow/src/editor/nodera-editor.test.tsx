@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ReactElement } from "react";
 
 import { assertOk, createBuilder, type Builder, type NodeDefinitionInput } from "@nodera/sdk";
-import { NODE_DEFINITION_MIME_TYPE } from "@nodera/canvas-react-flow";
+import { NODE_DEFINITION_MIME_TYPE } from "../canvas/definition-drop.js";
 import type { LayoutDefinition } from "@nodera/ui-core";
 
 import { NoderaEditor, type NoderaEditorProps } from "./nodera-editor.js";

@@ -134,8 +134,8 @@ Implementar:
   `serialization-json`, `serialization-yaml`).
 - **Fase 3. Application Core** — implementada (`packages/application`,
   `packages/history`).
-- **Fase 4. React Canvas Adapter** — implementada (`packages/canvas-react-flow`,
-  ejemplo `examples/phase4-demo`).
+- **Fase 4. React Canvas Adapter** — implementada (la capa de canvas de
+  `packages/react-flow`, ejemplo `examples/phase4-demo`).
 - **Fase 5. UI Composition** — implementada (`packages/ui-core`, `ui-react`,
   `theme-engine`, `layout-engine`, más las extensiones del adaptador para
   renderizadores de puertos y drop desde la paleta; ejemplo `examples/phase5-demo`).
@@ -144,11 +144,13 @@ Implementar:
   interfaz es configurable y personalizable en los tres niveles descritos en
   `docs/PRODUCT-DESCRIPTION.md` (tema, sustitución de renderizadores y composición
   propia por parte del host).
-- **Fase 6. SDK** — implementada (`packages/sdk`, `packages/sdk-react`, ejemplo
+- **Fase 6. SDK** — implementada (`packages/sdk`, `packages/react-flow`, ejemplo
   `examples/phase6-demo`). El SDK agnóstico de framework y de motor expone
   `createBuilder`, el vocabulario de autoría de nodos, edges y propiedades, las
   APIs de documento, registro, evento, plugin, tema y layout, y el puerto
-  `BuilderAdapter`; el binding React aporta `NoderaBuilderProvider`,
-  `<NoderaEditor>` y `createReactFlowAdapter()`. La fase está terminada cuando un
-  host compone, edita, valida, exporta e instala un plugin importando solo
-  `@nodera/sdk` y `@nodera/sdk-react`, sin acceder a ningún módulo interno.
+  `BuilderAdapter`; `@nodera/react-flow` aporta el binding React
+  (`NoderaBuilderProvider`, `<NoderaEditor>`, `createReactFlowAdapter()`) sobre el
+  adaptador de canvas que el mismo paquete ya contenía desde la Fase 4. La fase
+  está terminada cuando un host compone, edita, valida, exporta e instala un
+  plugin importando solo `@nodera/sdk` y `@nodera/react-flow`, sin acceder a
+  ningún módulo interno.

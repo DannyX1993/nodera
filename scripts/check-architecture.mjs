@@ -11,16 +11,18 @@
  *    application/domain packages. They hold contracts, data and pure functions.
  * 2. `packages/ui-react/src` and its `package.json` never mention
  *    `@xyflow`. React Flow stays inside the canvas adapter.
- * 3. `packages/ui-react/package.json` never depends on
- *    `@nodera/canvas-react-flow`: the React UI layer composes the adapter from
- *    the host's side, it does not own it.
- * 4. No package outside `packages/canvas-react-flow` imports `@xyflow/react`.
+ * 3. `packages/ui-react` never references `@nodera/react-flow` — neither in its
+ *    sources nor in its `package.json`: the React UI layer composes the adapter
+ *    from the host's side, it does not own it.
+ * 4. No package outside `packages/react-flow` imports `@xyflow/react`.
  * 5. `packages/sdk` is framework- and engine-free: its sources never import
- *    React, React DOM, `@nodera/ui-react`, `@nodera/canvas-react-flow` or
- *    `@xyflow`, and its manifest never declares them. The public SDK composes
- *    the framework-free core only; presentation arrives through the adapter.
- * 6. `packages/sdk-react` depends on `@nodera/canvas-react-flow` and never on
- *    `@xyflow/react`: a binding selects an engine, it does not reimplement one.
+ *    React, React DOM, `@nodera/ui-react`, `@nodera/react-flow` or `@xyflow`,
+ *    and its manifest never declares them. The public SDK composes the
+ *    framework-free core only; presentation arrives through a binding.
+ * 6. `packages/react-flow` declares `@nodera/sdk` and its SDK binding layer
+ *    composes a builder through it: the binding never imports
+ *    `@nodera/domain`, `@nodera/application` or `@nodera/document` directly.
+ *    Builder composition has one surface, and it is the public SDK.
  *
  * Plain Node ESM, builtins only: the check must be runnable without installing
  * anything and without a bundler (`node scripts/check-architecture.mjs`).
@@ -35,7 +37,8 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PACKAGES_ROOT = join(REPO_ROOT, "packages");
-const CANVAS_ADAPTER = "canvas-react-flow";
+/** The React Flow integration: canvas adapter plus SDK binding in one package. */
+const REACT_FLOW_PACKAGE = "react-flow";
 
 /** Source extensions the check reads. */
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
@@ -55,20 +58,21 @@ const CORE_FORBIDDEN_MODULES = [
   { pattern: /^react-dom(\/|$)/, reason: "DOM-only module; the core has no DOM" },
   { pattern: /^@testing-library\//, reason: "DOM-only test tooling; the core tests run headless" },
   { pattern: /^(jsdom|happy-dom|global-jsdom)$/, reason: "DOM-only module; the core has no DOM" },
-  { pattern: /^@xyflow(\/|$)/, reason: "React Flow lives in packages/canvas-react-flow" },
+  { pattern: /^@xyflow(\/|$)/, reason: "React Flow lives in packages/react-flow" },
   {
     pattern: /^@nodera\/(application|domain)(\/|$)/,
     reason: "the core sits below application/domain and cannot depend on them",
   },
   {
-    pattern: /^@nodera\/canvas-react-flow(\/|$)/,
-    reason: "the canvas adapter is a presentation sibling, never a core dependency",
+    pattern: /^@nodera\/react-flow(\/|$)/,
+    reason: "the React Flow integration is a presentation sibling, never a core dependency",
   },
 ];
 
 const REACT_FLOW_SPECIFIER = /^@xyflow(\/|$)/;
 const XYFLOW_SUBSTRING = "@xyflow";
-const CANVAS_ADAPTER_SPECIFIER = "@nodera/canvas-react-flow";
+const REACT_FLOW_SPECIFIER_NAME = "@nodera/react-flow";
+const SDK_SPECIFIER_NAME = "@nodera/sdk";
 
 /** Import forms the check understands (`from` imports, side effects, dynamic, require). */
 const SPECIFIER_PATTERNS = [
@@ -185,7 +189,7 @@ async function checkUiReactIgnoresReactFlow() {
         violation(
           file,
           lineAt(text, index),
-          `packages/ui-react mentions "${XYFLOW_SUBSTRING}" — React Flow stays in packages/${CANVAS_ADAPTER}`,
+          `packages/ui-react mentions "${XYFLOW_SUBSTRING}" — React Flow stays in packages/${REACT_FLOW_PACKAGE}`,
         ),
       );
     }
@@ -206,29 +210,50 @@ async function checkUiReactIgnoresReactFlow() {
   return violations;
 }
 
-/** Rule 3: ui-react does not depend on the canvas adapter. */
+/**
+ * Rule 3: ui-react neither imports nor depends on the React Flow integration.
+ *
+ * Both halves matter: `ui-react` is the only engine-agnostic React package, so a
+ * source import would bind it to React Flow just as hard as a manifest entry.
+ */
 async function checkUiReactDoesNotOwnTheAdapter() {
+  const violations = [];
+  const { files } = await packageSources("ui-react");
+  for (const file of files) {
+    const text = await readFile(file, "utf8");
+    const index = text.indexOf(REACT_FLOW_SPECIFIER_NAME);
+    if (index !== -1) {
+      violations.push(
+        violation(
+          file,
+          lineAt(text, index),
+          `packages/ui-react imports "${REACT_FLOW_SPECIFIER_NAME}" — the React Flow integration is a presentation sibling, not a ui-react dependency`,
+        ),
+      );
+    }
+  }
+
   const manifest = join(PACKAGES_ROOT, "ui-react", "package.json");
   const text = await readFile(manifest, "utf8");
-  const index = text.indexOf(CANVAS_ADAPTER_SPECIFIER);
-  if (index === -1) {
-    return [];
+  const index = text.indexOf(REACT_FLOW_SPECIFIER_NAME);
+  if (index !== -1) {
+    violations.push(
+      violation(
+        manifest,
+        lineAt(text, index),
+        `packages/ui-react/package.json declares "${REACT_FLOW_SPECIFIER_NAME}" — the React Flow integration is a presentation sibling, not a ui-react dependency`,
+      ),
+    );
   }
-  return [
-    violation(
-      manifest,
-      lineAt(text, index),
-      `packages/ui-react/package.json declares "${CANVAS_ADAPTER_SPECIFIER}" — the adapter is a presentation sibling, not a ui-react dependency`,
-    ),
-  ];
+  return violations;
 }
 
-/** Rule 4: React Flow is imported by the canvas adapter only. */
+/** Rule 4: React Flow is imported by the React Flow integration only. */
 async function checkReactFlowIsAdapterOnly() {
   const entries = await readdir(PACKAGES_ROOT, { withFileTypes: true });
   const violations = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === CANVAS_ADAPTER) {
+    if (!entry.isDirectory() || entry.name === REACT_FLOW_PACKAGE) {
       continue;
     }
     const { files } = await packageSources(entry.name);
@@ -240,7 +265,7 @@ async function checkReactFlowIsAdapterOnly() {
             violation(
               file,
               line,
-              `packages/${entry.name} imports "${specifier}" — only packages/${CANVAS_ADAPTER} may`,
+              `packages/${entry.name} imports "${specifier}" — only packages/${REACT_FLOW_PACKAGE} may`,
             ),
           );
         }
@@ -255,7 +280,7 @@ async function checkReactFlowIsAdapterOnly() {
         violation(
           manifest,
           lineAt(manifestText, index),
-          `packages/${entry.name}/package.json declares "${XYFLOW_SUBSTRING}" — only packages/${CANVAS_ADAPTER} may`,
+          `packages/${entry.name}/package.json declares "${XYFLOW_SUBSTRING}" — only packages/${REACT_FLOW_PACKAGE} may`,
         ),
       );
     }
@@ -265,8 +290,6 @@ async function checkReactFlowIsAdapterOnly() {
 
 /** The framework-free public SDK. */
 const SDK_PACKAGE = "sdk";
-/** The React binding of the SDK. */
-const SDK_REACT_PACKAGE = "sdk-react";
 
 /**
  * Modules `packages/sdk` may never import.
@@ -275,15 +298,15 @@ const SDK_REACT_PACKAGE = "sdk-react";
  * text: adapter ids such as `nodera.react-flow` are data and must stay legal.
  */
 const SDK_FORBIDDEN_MODULES = [
-  { pattern: /^react$/, reason: "React belongs to @nodera/sdk-react" },
-  { pattern: /^react\//, reason: "React belongs to @nodera/sdk-react" },
+  { pattern: /^react$/, reason: "React belongs to @nodera/react-flow" },
+  { pattern: /^react\//, reason: "React belongs to @nodera/react-flow" },
   { pattern: /^react-dom(\/|$)/, reason: "the SDK runs headless, with no DOM" },
   { pattern: /^@nodera\/ui-react(\/|$)/, reason: "the SDK is framework-free; presentation belongs to a binding" },
   {
-    pattern: /^@nodera\/canvas-react-flow(\/|$)/,
-    reason: "the SDK is engine-free; the canvas adapter belongs to a binding",
+    pattern: /^@nodera\/react-flow(\/|$)/,
+    reason: "the SDK is engine-free; the React Flow integration belongs to a binding",
   },
-  { pattern: /^@xyflow(\/|$)/, reason: "React Flow lives in packages/canvas-react-flow" },
+  { pattern: /^@xyflow(\/|$)/, reason: "React Flow lives in packages/react-flow" },
 ];
 
 /** Manifest dependency fields the SDK rule inspects. */
@@ -339,36 +362,98 @@ async function checkSdkIsFrameworkFree() {
   return violations;
 }
 
-/** Rule 6: the React binding selects an engine instead of reimplementing one. */
-async function checkSdkReactDeclaresTheAdapter() {
-  const manifest = await readManifest(SDK_REACT_PACKAGE);
+/**
+ * The SDK binding layer of `packages/react-flow`.
+ *
+ * The package has two layers (docs/PROJECT-STRUCTURE.md §7.3): the canvas
+ * adapter (`src/canvas`, `src/map`, `src/registries`, `src/renderers`) may use
+ * `@nodera/application` and the model packages, because it translates the
+ * portable graph into the engine and the engine into use cases. The binding
+ * (`src/adapter`, `src/providers`, `src/editor`, `src/vocabulary.ts` and
+ * `src/renderers/renderer-set.ts`) only composes a `Builder`.
+ */
+const REACT_FLOW_BINDING_LAYER = [
+  "src/adapter",
+  "src/providers",
+  "src/editor",
+  "src/renderers/renderer-set.ts",
+  "src/vocabulary.ts",
+];
+
+/**
+ * Modules the binding layer may never import.
+ *
+ * Builder composition is the SDK's job. If the binding reached into the domain,
+ * the application use cases or the document packages itself, the public SDK
+ * could drift from what the binding actually does and `builder.*` would stop
+ * being the single composition surface — the invariant §7.3 describes.
+ */
+const BINDING_FORBIDDEN_MODULES = [
+  { pattern: /^@nodera\/domain(\/|$)/, reason: "compose a builder through @nodera/sdk" },
+  { pattern: /^@nodera\/application(\/|$)/, reason: "compose a builder through @nodera/sdk" },
+  { pattern: /^@nodera\/document(\/|$)/, reason: "compose a builder through @nodera/sdk" },
+];
+
+/** Rule 6: the React Flow integration composes builders through the SDK. */
+async function checkReactFlowConsumesTheSdk() {
+  const manifest = await readManifest(REACT_FLOW_PACKAGE);
   if (manifest === undefined) {
-    return [];
+    return [
+      violation(
+        join(PACKAGES_ROOT, REACT_FLOW_PACKAGE),
+        1,
+        `packages/${REACT_FLOW_PACKAGE} is missing, so its SDK contract cannot be checked`,
+      ),
+    ];
   }
+
+  const violations = [];
   const declared = {
     ...(manifest.json.dependencies ?? {}),
     ...(manifest.json.peerDependencies ?? {}),
   };
-  const violations = [];
-  if (!(CANVAS_ADAPTER_SPECIFIER in declared)) {
+  if (!(SDK_SPECIFIER_NAME in declared)) {
     violations.push(
       violation(
         manifest.path,
         1,
-        `packages/${SDK_REACT_PACKAGE} must depend on "${CANVAS_ADAPTER_SPECIFIER}": a binding selects an engine, it does not reimplement one`,
+        `packages/${REACT_FLOW_PACKAGE} must declare "${SDK_SPECIFIER_NAME}": its binding layer composes a builder through the SDK`,
       ),
     );
   }
-  for (const name of Object.keys({ ...declared, ...(manifest.json.devDependencies ?? {}) })) {
-    if (REACT_FLOW_SPECIFIER.test(name)) {
-      violations.push(
-        violation(
-          manifest.path,
-          lineAt(manifest.text, Math.max(manifest.text.indexOf(`"${name}"`), 0)),
-          `packages/${SDK_REACT_PACKAGE}/package.json declares "${name}" — the binding goes through "${CANVAS_ADAPTER_SPECIFIER}"`,
-        ),
-      );
+
+  const packageRoot = join(PACKAGES_ROOT, REACT_FLOW_PACKAGE);
+  const { files } = await packageSources(REACT_FLOW_PACKAGE);
+  let importsTheSdk = false;
+  for (const file of files) {
+    const inside = relative(packageRoot, file).replaceAll("\\", "/");
+    const inBindingLayer = REACT_FLOW_BINDING_LAYER.some(
+      (entry) => inside === entry || inside.startsWith(`${entry}/`),
+    );
+    if (!inBindingLayer) {
+      continue;
     }
+    const text = await readFile(file, "utf8");
+    for (const { specifier, line } of moduleSpecifiers(text)) {
+      if (specifier === SDK_SPECIFIER_NAME) {
+        importsTheSdk = true;
+      }
+      const forbidden = BINDING_FORBIDDEN_MODULES.find((entry) => entry.pattern.test(specifier));
+      if (forbidden !== undefined) {
+        violations.push(
+          violation(file, line, `the binding layer imports "${specifier}" — ${forbidden.reason}`),
+        );
+      }
+    }
+  }
+  if (!importsTheSdk) {
+    violations.push(
+      violation(
+        join(packageRoot, "src"),
+        1,
+        `no binding-layer source imports "${SDK_SPECIFIER_NAME}": builder composition must go through the SDK`,
+      ),
+    );
   }
   return violations;
 }
@@ -388,23 +473,23 @@ const RULES = [
   },
   {
     id: "ui-react-owns-no-adapter",
-    label: "ui-react does not depend on @nodera/canvas-react-flow",
+    label: "ui-react neither imports nor depends on @nodera/react-flow",
     run: checkUiReactDoesNotOwnTheAdapter,
   },
   {
     id: "react-flow-adapter-only",
-    label: "no package outside packages/canvas-react-flow imports @xyflow/react",
+    label: "no package outside packages/react-flow imports @xyflow/react",
     run: checkReactFlowIsAdapterOnly,
   },
   {
     id: "sdk-framework-free",
-    label: "packages/sdk imports no React, React Flow, ui-react or canvas adapter",
+    label: "packages/sdk imports no React, React Flow, ui-react or @nodera/react-flow",
     run: checkSdkIsFrameworkFree,
   },
   {
-    id: "sdk-react-declares-the-adapter",
-    label: "packages/sdk-react depends on the canvas adapter and never on @xyflow/react",
-    run: checkSdkReactDeclaresTheAdapter,
+    id: "react-flow-consumes-the-sdk",
+    label: "packages/react-flow declares @nodera/sdk and its binding composes through it",
+    run: checkReactFlowConsumesTheSdk,
   },
 ];
 

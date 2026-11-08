@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@nodera/application": "workspace:*",
-    "@nodera/canvas-react-flow": "workspace:*",
+    "@nodera/react-flow": "workspace:*",
     "@nodera/domain": "workspace:*",
     "@nodera/edge-registry": "workspace:*",
     "@nodera/node-registry": "workspace:*",

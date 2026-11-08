@@ -8,7 +8,7 @@
  * Two rules:
  *
  * - a specifier of an internal `@nodera/*` package is allowed only for
- *   `@nodera/sdk` and `@nodera/sdk-react`;
+ *   `@nodera/sdk` and `@nodera/react-flow`;
  * - an `@xyflow/react` import is allowed only for its stylesheet, because the
  *   engine is a host concern the React binding owns (D21).
  *
@@ -26,7 +26,7 @@ import ts from "typescript";
 const WORKSPACE_PREFIX = "@nodera/";
 
 /** The only internal packages a host application may import. */
-const ALLOWED_WORKSPACE_PACKAGES: readonly string[] = ["@nodera/sdk", "@nodera/sdk-react"];
+const ALLOWED_WORKSPACE_PACKAGES: readonly string[] = ["@nodera/sdk", "@nodera/react-flow"];
 
 /** Prefix of the canvas engine packages. */
 const ENGINE_PREFIX = "@xyflow/";
@@ -98,7 +98,7 @@ const ALLOWED_FIXTURE = `
 // import "@nodera/domain" — a comment is not an import.
 const quoted = 'import "@nodera/application" in a string';
 import { assertValid } from "@nodera/sdk";
-import { NoderaEditor } from "@nodera/sdk-react";
+import { NoderaEditor } from "@nodera/react-flow";
 import "@xyflow/react/dist/style.css";
 `;
 

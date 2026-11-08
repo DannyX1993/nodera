@@ -23,8 +23,9 @@ It does not do the following:
 - own plugin manifests, dependency resolution or an activation lifecycle — the
   Phase 6 plugin contract is authoring plus synchronous installation.
 
-A host that wants React and the React Flow canvas adds `@nodera/sdk-react`, the
-React binding and the first engine adapter.
+A host that wants React and the React Flow canvas adds `@nodera/react-flow`, the
+React binding and the first engine adapter — the same package that owns the
+React Flow canvas adapter underneath.
 
 ## Install
 
@@ -81,7 +82,7 @@ export function createDemoBuilder(): Builder {
 ```
 
 (`examples/phase6-demo/src/builder.ts`. `createReactFlowAdapter()` comes from
-`@nodera/sdk-react`; the `adapter` field accepts any `BuilderAdapterInput`, see
+`@nodera/react-flow`; the `adapter` field accepts any `BuilderAdapterInput`, see
 [Engine adapter port](#engine-adapter-port).)
 
 Every configuration field is optional. `BuilderConfiguration` groups them by
@@ -357,8 +358,8 @@ const gaps = capabilityGaps(adapter, requirementsFrom({ nodes, edges }));
 
 **A new graph engine is a new binding package, never an SDK change.** The SDK
 declares the port and validates against it; mounting a canvas is framework code
-and belongs to a package like `@nodera/sdk-react`, which ships
-`createReactFlowAdapter()` and `<NoderaEditor>`.
+and belongs to a binding package like `@nodera/react-flow`, which ships the React
+Flow adapter, the canvas layer, `createReactFlowAdapter()` and `<NoderaEditor>`.
 
 ## APIs
 

@@ -12,7 +12,7 @@
 import { useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 
 import { addNode, type EditorEngine } from "@nodera/application";
-import { GraphCanvas } from "@nodera/canvas-react-flow";
+import { GraphCanvas } from "@nodera/react-flow";
 import {
   CANVAS_ONLY_LAYOUT_ID,
   createMemoryLayoutPreferenceStore,

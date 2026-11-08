@@ -19,10 +19,6 @@
 import { useEffect, type ReactNode } from "react";
 
 import type { Builder, ResolvedFeatures } from "@nodera/sdk";
-import {
-  GraphCanvas,
-  NoderaCanvasProvider,
-} from "@nodera/canvas-react-flow";
 import type { DockRegion, LayoutState, PanelRegion, PanelRegistry } from "@nodera/ui-core";
 import {
   CanvasContainer,
@@ -39,6 +35,8 @@ import {
   type EditorShellSlots,
 } from "@nodera/ui-react";
 
+import { GraphCanvas } from "../canvas/graph-canvas.js";
+import { NoderaCanvasProvider } from "../canvas/nodera-canvas-provider.js";
 import {
   NoderaBuilderProvider,
   useBuilderRenderers,

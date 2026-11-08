@@ -71,9 +71,6 @@ importers:
       '@nodera/application':
         specifier: workspace:*
         version: link:../../packages/application
-      '@nodera/canvas-react-flow':
-        specifier: workspace:*
-        version: link:../../packages/canvas-react-flow
       '@nodera/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -83,6 +80,9 @@ importers:
       '@nodera/node-registry':
         specifier: workspace:*
         version: link:../../packages/node-registry
+      '@nodera/react-flow':
+        specifier: workspace:*
+        version: link:../../packages/react-flow
       '@xyflow/react':
         specifier: ^12.12.1
         version: 12.12.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -111,9 +111,6 @@ importers:
       '@nodera/application':
         specifier: workspace:*
         version: link:../../packages/application
-      '@nodera/canvas-react-flow':
-        specifier: workspace:*
-        version: link:../../packages/canvas-react-flow
       '@nodera/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -129,6 +126,9 @@ importers:
       '@nodera/property-system':
         specifier: workspace:*
         version: link:../../packages/property-system
+      '@nodera/react-flow':
+        specifier: workspace:*
+        version: link:../../packages/react-flow
       '@nodera/theme-engine':
         specifier: workspace:*
         version: link:../../packages/theme-engine
@@ -163,12 +163,12 @@ importers:
 
   examples/phase6-demo:
     dependencies:
+      '@nodera/react-flow':
+        specifier: workspace:*
+        version: link:../../packages/react-flow
       '@nodera/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      '@nodera/sdk-react':
-        specifier: workspace:*
-        version: link:../../packages/sdk-react
       '@xyflow/react':
         specifier: ^12.12.1
         version: 12.12.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -235,61 +235,6 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
-      vitest:
-        specifier: ^3.0.5
-        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
-
-  packages/canvas-react-flow:
-    dependencies:
-      '@nodera/application':
-        specifier: workspace:*
-        version: link:../application
-      '@nodera/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@nodera/domain':
-        specifier: workspace:*
-        version: link:../domain
-      '@nodera/edge-registry':
-        specifier: workspace:*
-        version: link:../edge-registry
-      '@nodera/graph-model':
-        specifier: workspace:*
-        version: link:../graph-model
-      '@nodera/node-registry':
-        specifier: workspace:*
-        version: link:../node-registry
-      '@nodera/property-system':
-        specifier: workspace:*
-        version: link:../property-system
-      '@nodera/ui-core':
-        specifier: workspace:*
-        version: link:../ui-core
-      '@xyflow/react':
-        specifier: ^12.12.1
-        version: 12.12.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      react:
-        specifier: ^19.3.1
-        version: 19.3.1
-      react-dom:
-        specifier: ^19.3.1
-        version: 19.3.1(react@19.3.1)
-    devDependencies:
-      '@testing-library/react':
-        specifier: ^16.3.3
-        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@types/react':
-        specifier: ^19.3.0
-        version: 19.3.0
-      '@types/react-dom':
-        specifier: ^19.3.0
-        version: 19.3.0(@types/react@19.3.0)
-      jsdom:
-        specifier: ^26.1.0
-        version: 26.1.0
-      vite:
-        specifier: ^7.1.0
-        version: 7.3.7(yaml@2.9.1)
       vitest:
         specifier: ^3.0.5
         version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
@@ -439,6 +384,64 @@ importers:
         specifier: ^3.0.5
         version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
+  packages/react-flow:
+    dependencies:
+      '@nodera/application':
+        specifier: workspace:*
+        version: link:../application
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@nodera/edge-registry':
+        specifier: workspace:*
+        version: link:../edge-registry
+      '@nodera/graph-model':
+        specifier: workspace:*
+        version: link:../graph-model
+      '@nodera/node-registry':
+        specifier: workspace:*
+        version: link:../node-registry
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      '@nodera/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
+      '@nodera/ui-react':
+        specifier: workspace:*
+        version: link:../ui-react
+      '@xyflow/react':
+        specifier: ^12.12.1
+        version: 12.12.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
+    devDependencies:
+      '@testing-library/react':
+        specifier: ^16.3.3
+        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      jsdom:
+        specifier: ^26.1.0
+        version: 26.1.0
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vite:
+        specifier: ^7.1.0
+        version: 7.3.7(yaml@2.9.1)
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
+
   packages/sdk:
     dependencies:
       '@nodera/application':
@@ -490,64 +493,6 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
-      vitest:
-        specifier: ^3.0.5
-        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
-
-  packages/sdk-react:
-    dependencies:
-      '@nodera/application':
-        specifier: workspace:*
-        version: link:../application
-      '@nodera/canvas-react-flow':
-        specifier: workspace:*
-        version: link:../canvas-react-flow
-      '@nodera/domain':
-        specifier: workspace:*
-        version: link:../domain
-      '@nodera/graph-model':
-        specifier: workspace:*
-        version: link:../graph-model
-      '@nodera/layout-engine':
-        specifier: workspace:*
-        version: link:../layout-engine
-      '@nodera/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-      '@nodera/theme-engine':
-        specifier: workspace:*
-        version: link:../theme-engine
-      '@nodera/ui-core':
-        specifier: workspace:*
-        version: link:../ui-core
-      '@nodera/ui-react':
-        specifier: workspace:*
-        version: link:../ui-react
-      react:
-        specifier: ^19.3.1
-        version: 19.3.1
-      react-dom:
-        specifier: ^19.3.1
-        version: 19.3.1(react@19.3.1)
-    devDependencies:
-      '@testing-library/react':
-        specifier: ^16.3.3
-        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@types/react':
-        specifier: ^19.3.0
-        version: 19.3.0
-      '@types/react-dom':
-        specifier: ^19.3.0
-        version: 19.3.0(@types/react@19.3.0)
-      jsdom:
-        specifier: ^26.1.0
-        version: 26.1.0
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-      vite:
-        specifier: ^7.1.0
-        version: 7.3.7(yaml@2.9.1)
       vitest:
         specifier: ^3.0.5
         version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)

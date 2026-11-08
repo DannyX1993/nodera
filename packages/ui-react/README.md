@@ -2,7 +2,7 @@
 
 The React UI composition layer of Nodera: the components and bindings a host
 application uses to build its own editor interface around
-`@nodera/canvas-react-flow`.
+`@nodera/react-flow`.
 
 The framework offers functional components; it never imposes a layout. The host
 decides which components it uses, where it places them and how they look.
@@ -179,7 +179,7 @@ the shared command dispatcher and closes the menu) and `onClose` (closes only).
 ## Boundaries
 
 - This package must never import `@xyflow/react`: React Flow stays inside
-  `@nodera/canvas-react-flow`, and the `MinimapPanel` is deliberately a plain SVG
+  `@nodera/react-flow`, and the `MinimapPanel` is deliberately a plain SVG
   overview.
 - Domain and document state are never written from here; `UiStateStore` holds
   presentation state only and is never serialized into the portable document.
