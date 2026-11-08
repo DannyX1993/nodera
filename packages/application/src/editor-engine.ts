@@ -28,6 +28,14 @@ export interface EditorEngineOptions {
   readonly graphId?: string;
   /** Structural settings of the initial graph (self-loop/multi-edge/cycle policies). */
   readonly graphSettings?: GraphSettings;
+  /**
+   * Domain facade to compose with. Defaults to a fresh {@link NoderaDomain}.
+   *
+   * Supplying it lets a composition root (the SDK builder) own the definition
+   * registries and share them with every editing session it creates, instead
+   * of every engine holding a private, unpopulated copy.
+   */
+  readonly domain?: NoderaDomain;
 }
 
 /** Command factory type used by use cases to describe reversible changes. */
@@ -56,7 +64,7 @@ export class EditorEngine {
   private clipboard: ClipboardBuffer = [];
 
   constructor(options: EditorEngineOptions = {}) {
-    this.domain = new NoderaDomain();
+    this.domain = options.domain ?? new NoderaDomain();
     this.events = new EventBus();
     this.history = new HistoryEngine<EditorState>();
     this.state = {
