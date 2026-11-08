@@ -262,6 +262,28 @@ deviation from the illustrative contract in `docs/FASE6-DEFINITION.md`:
    the definition and the SDK binds it under the definition `type`. There is no
    second id to keep in sync.
 
+### Who owns node placement
+
+`position` is document data and stays optional. `graph.layout.mode` defaults to
+`"free"`: the framework places nothing and `NodeInstanceView.position` stays
+absent until the host sets it. `mode: "auto"` assigns a position only to the
+nodes the host left unpositioned, on a grid anchored at the origin, honouring
+`direction` (`"horizontal" | "vertical"`) and `spacing` (default 240). No mode
+moves a node that already carries a position, and no mode re-lays out an
+existing graph on add or on read: that is an explicit `Arrange` action.
+
+```ts
+const builder = assertValid(
+  createBuilder({
+    registry: { nodes: [ACME_NODE] },
+    graph: { layout: { mode: "auto", direction: "vertical" } },
+  }),
+);
+
+const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }));
+// placed.position === { x: 0, y: 0 }; the next unpositioned node lands at { x: 0, y: 240 }
+```
+
 ### Reading a graph
 
 A host that only displays state never has to touch `builder.editor`: the graph

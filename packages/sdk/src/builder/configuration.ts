@@ -48,10 +48,27 @@ export interface BuilderUiConfiguration {
   readonly layout?: string;
 }
 
+/**
+ * How the builder places the nodes a host left unpositioned.
+ *
+ * Configuration only, never a behaviour on its own: the placement is read when
+ * a node is added without a position, and it never moves a node a host already
+ * positioned. `"free"` keeps the host in charge of every position.
+ */
+export interface GraphLayoutConfiguration {
+  /** `"free"` (default): the host positions every node. `"auto"`: the builder places the ones left unpositioned. */
+  readonly mode?: "free" | "auto";
+  /** Direction the automatic placement grows in. Defaults to `"horizontal"`. */
+  readonly direction?: "horizontal" | "vertical";
+  /** Distance between adjacent automatic slots, in document units. Defaults to 240. */
+  readonly spacing?: number;
+}
+
 /** Initial graph of the builder's own editing session. */
 export interface BuilderGraphConfiguration {
   readonly graphId?: string;
   readonly settings?: GraphSettings;
+  readonly layout?: GraphLayoutConfiguration;
 }
 
 /** Everything a host may configure on the builder. */

@@ -45,6 +45,7 @@ import {
 } from "../errors.js";
 import { toEdgeInstanceView, toNodeInstanceView } from "../view/instances.js";
 import type { EdgeInstanceView, NodeInstanceView } from "../view/instances.js";
+import { occupiedPositions, placeUnpositionedNode, type ResolvedGraphLayout } from "./placement.js";
 
 /** One node to add, in the public `type` vocabulary of the SDK. */
 export interface AddNodeRequest {
@@ -279,6 +280,10 @@ function missingNodeIssue(nodeId: string): SdkIssue {
  *
  * The editor owns the graph, the history and the events; this API owns only
  * the translation between the public vocabulary and the use case contracts.
+ * Placement is decided before the use case runs: the API assigns a position
+ * only when the host configured `graph.layout.mode: "auto"` and the request
+ * carries none, so the position lands inside the same history unit as the
+ * creation and an undo removes it with the node.
  * `isDisposed` is the builder's own lifecycle flag: a disposed builder refuses
  * every mutation with `sdk.disposed` and keeps every read working, because the
  * state the host already received must stay renderable.
@@ -286,6 +291,7 @@ function missingNodeIssue(nodeId: string): SdkIssue {
 export function createGraphApi(
   editor: EditorEngine,
   isDisposed: () => boolean,
+  graphLayout: ResolvedGraphLayout,
 ): BuilderGraphApi {
   return {
     addNode(request: AddNodeRequest): Result<NodeInstanceView, SdkIssues> {
@@ -306,11 +312,14 @@ export function createGraphApi(
       if (invalid !== undefined) {
         return err(invalid);
       }
+      const position =
+        request.position ??
+        placeUnpositionedNode(occupiedPositions(editor.graph.getNodes()), graphLayout);
       const added = addNode(editor, {
         definitionId: request.type,
         ...(request.nodeId === undefined ? {} : { nodeId: request.nodeId }),
         ...(request.properties === undefined ? {} : { properties: request.properties }),
-        ...(request.position === undefined ? {} : { position: request.position }),
+        ...(position === undefined ? {} : { position }),
       });
       return added.ok ? ok(toNodeInstanceView(added.value)) : err([useCaseIssue(added.error)]);
     },

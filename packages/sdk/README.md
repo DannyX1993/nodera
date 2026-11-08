@@ -90,7 +90,9 @@ Every configuration field is optional. `BuilderConfiguration` groups them by
 concern — `id`, `adapter`, `registry`, `features`, `document`, `ui`, `graph`,
 `plugins` — and defaults to the framework presets (`nodera.builder` as id, the
 three supported features enabled, GGD format, the default theme and editor
-layout, no plugins).
+layout, no plugins). `graph.layout` defaults to `{ mode: "free" }`: the
+framework places nothing unless the host asks (see
+[Graph layout mode](#graph-layout-mode--graphlayout)).
 
 ### `assertOk` and `assertValid`
 
@@ -463,6 +465,40 @@ for (const edge of builder.graph.edges()) {
   route(edge.source, edge.sourcePort, edge.target, edge.targetPort, edge.type);
 }
 ```
+
+### Graph layout mode — `graph.layout`
+
+Who owns node placement is host configuration, never a behaviour the framework
+invents. `"free"` (the default) is exactly the previous behaviour: a node added
+without a position stays unpositioned, and the canvas adapter decides how to
+render it until the host places it. `"auto"` places **only the nodes the host
+left unpositioned**, on a grid anchored at the origin; a node that already
+carries a position is never moved.
+
+```ts
+createBuilder({
+  registry: { nodes: [ACME_NODE] },
+  graph: {
+    layout: { mode: "auto", direction: "vertical", spacing: 180 },
+  },
+});
+```
+
+Members: `mode` (`"free" | "auto"`, default `"free"`), `direction`
+(`"horizontal" | "vertical"`, default `"horizontal"`; horizontal fills
+row-major, vertical column-major) and `spacing` (distance between adjacent
+slots in document units, default `240`).
+
+The assigned position belongs to the same history unit as the creation: `undo()`
+removes the node, `redo()` restores it where it was. A value outside these
+unions, or a spacing that is not a positive finite number, is a configuration
+problem reported as `sdk.invalid-input` with path `graph.layout.<field>`, and the
+builder is not created: nothing is guessed and no geometry is invented.
+
+Re-laying out an existing graph is **not** part of this configuration. Adding an
+edge or a node never recalculates the whole graph; that is an explicit `Arrange`
+action, requested by the host, and it will be its own command over a layout
+strategy port.
 
 ### Document — `builder.document`
 

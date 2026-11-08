@@ -53,6 +53,7 @@ import {
 import { toEdgeDefinition, type EdgeDefinitionInput } from "../authoring/edges.js";
 import { createDocumentApi, type BuilderDocumentApi } from "../document/document-api.js";
 import { createGraphApi, type BuilderGraphApi } from "../graph/graph-api.js";
+import { resolveGraphLayout, type ResolvedGraphLayout } from "../graph/placement.js";
 import { toNodeDefinition, type NodeDefinitionInput } from "../authoring/nodes.js";
 import { toPropertyDefinition, type PropertyInput } from "../authoring/properties.js";
 import type { RendererBinding } from "../authoring/renderer-binding.js";
@@ -334,6 +335,56 @@ function registerTheme(
  * unknown ids — so the SDK checks the boundary of what a host hands in and
  * lets the registry decide conflicts.
  */
+/**
+ * Structural checks of the graph layout configuration.
+ *
+ * The host declares who owns placement; a value outside the declared unions, or
+ * a spacing that is not a positive finite number, is a configuration problem the
+ * builder reports instead of guessing a geometry.
+ */
+function graphLayoutIssues(layout: unknown, path: readonly string[]): SdkIssue[] {
+  if (!isPlainObject(layout)) {
+    return [
+      shapeIssue(
+        "Builder graph layout must be an object declaring a placement mode",
+        layout,
+        path,
+      ),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  const mode: unknown = Reflect.get(layout, "mode");
+  if (mode !== undefined && mode !== "free" && mode !== "auto") {
+    issues.push(
+      shapeIssue('Builder graph layout mode must be "free" or "auto"', mode, [...path, "mode"]),
+    );
+  }
+  const direction: unknown = Reflect.get(layout, "direction");
+  if (direction !== undefined && direction !== "horizontal" && direction !== "vertical") {
+    issues.push(
+      shapeIssue(
+        'Builder graph layout direction must be "horizontal" or "vertical"',
+        direction,
+        [...path, "direction"],
+      ),
+    );
+  }
+  const spacing: unknown = Reflect.get(layout, "spacing");
+  if (
+    spacing !== undefined &&
+    !(typeof spacing === "number" && Number.isFinite(spacing) && spacing > 0)
+  ) {
+    issues.push(
+      shapeIssue(
+        "Builder graph layout spacing must be a positive finite number",
+        spacing,
+        [...path, "spacing"],
+      ),
+    );
+  }
+  return issues;
+}
+
 function layoutIssues(layout: LayoutDefinition, path: readonly string[]): SdkIssue[] {
   if (!isPlainObject(layout)) {
     return [
@@ -712,6 +763,7 @@ interface BuilderAssemblerOptions {
   readonly documentFormat: BuilderDocumentFormat;
   readonly domain: NoderaDomain;
   readonly editor: EditorEngine;
+  readonly graphLayout: ResolvedGraphLayout;
 }
 
 /** Concrete builder. Hosts only ever see the {@link Builder} contract. */
@@ -760,7 +812,7 @@ class SdkBuilder implements Builder {
       panels: options.registries.panels,
       tools: options.registries.tools,
     };
-    this.graph = createGraphApi(this.editor, () => this.disposedFlag);
+    this.graph = createGraphApi(this.editor, () => this.disposedFlag, options.graphLayout);
     this.document = createDocumentApi(this.editor, this.documentFormat, () => this.disposedFlag);
     this.events = createBuilderEvents(this.editor.events);
     this.theme = {
@@ -1046,6 +1098,11 @@ export function createBuilder(
     );
   }
 
+  const declaredGraphLayout = configuration.graph?.layout;
+  if (declaredGraphLayout !== undefined) {
+    issues.push(...graphLayoutIssues(declaredGraphLayout, ["graph", "layout"]));
+  }
+
   if (configuration.plugins !== undefined && !Array.isArray(configuration.plugins)) {
     issues.push(
       shapeIssue("Builder plugins must be an array of plugin definitions", configuration.plugins, [
@@ -1172,6 +1229,7 @@ export function createBuilder(
   });
 
   const graph = configuration.graph;
+  const graphLayout = resolveGraphLayout(declaredGraphLayout);
   const editorOptions: EditorEngineOptions = {
     ...(graph?.graphId === undefined ? {} : { graphId: graph.graphId }),
     ...(graph?.settings === undefined ? {} : { graphSettings: graph.settings }),
@@ -1198,6 +1256,7 @@ export function createBuilder(
     documentFormat: documentFormat.value,
     domain,
     editor: new EditorEngine(editorOptions),
+    graphLayout,
   });
 
   // Configured plugins run last, once every declarative registry is populated,
