@@ -9,7 +9,7 @@
 
 import type { GraphSettings } from "@nodera/graph-model";
 import type { CreateThemeInput } from "@nodera/theme-engine";
-import type { LayoutDefinition } from "@nodera/ui-core";
+import type { DialogDefinition, LayoutDefinition } from "@nodera/ui-core";
 import type { BuilderAdapterInput } from "../adapter/adapter.js";
 import type { EdgeDefinitionInput } from "../authoring/edges.js";
 import type { NodeDefinitionInput } from "../authoring/nodes.js";
@@ -24,6 +24,18 @@ export interface BuilderRegistryConfiguration {
   readonly properties?: readonly PropertyInput[];
   readonly themes?: readonly CreateThemeInput[];
   readonly layouts?: readonly LayoutDefinition[];
+  /**
+   * Dialogs the UI state may open, e.g. the node-creation dialog behind a “+”
+   * affordance.
+   *
+   * The list *replaces* the framework's built-in dialogs — `DialogRegistry`'s
+   * own seeding rule, the same one layouts follow — so a host that wants its own
+   * dialog set passes exactly those definitions. Without the field the built-ins
+   * are seeded, which is what makes the framework's “+” affordances work out of
+   * the box. A duplicate id or a malformed definition refuses the builder with
+   * its path; nothing is half-registered.
+   */
+  readonly dialogs?: readonly DialogDefinition[];
 }
 
 /** Portable document format the builder produces and consumes. */

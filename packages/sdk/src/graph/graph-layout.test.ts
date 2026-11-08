@@ -377,6 +377,70 @@ describe("graph layout: anchored placement", () => {
   });
 });
 
+describe("graph layout: arranging an existing graph", () => {
+  function connected(builder: Builder, source: string, target: string): void {
+    const result = builder.graph.connect({ source, target });
+    if (!result.ok) {
+      throw new Error(
+        `unexpected connect failure: ${result.error.map((issue) => issue.code).join(", ")}`,
+      );
+    }
+  }
+
+  /** Positions of every node, keyed by instance id, as the host reads them. */
+  function positions(
+    builder: Builder,
+  ): Record<string, { readonly x: number; readonly y: number } | undefined> {
+    return Object.fromEntries(builder.graph.nodes().map((node) => [node.id, node.position]));
+  }
+
+  it("ranks a node with no edge after the last resolved rank, for both directions", () => {
+    // The demo graph that reported the defect: a chain plus nodes the host added
+    // without connecting them. The chain is ranked, the isolated nodes follow it
+    // in one id-ordered rank, and neither lands at the origin.
+    const builder = builderWith({ mode: "auto" });
+    placed(builder.graph.addNode({ type: STEP, nodeId: "start" }));
+    placed(builder.graph.addNode({ type: STEP, nodeId: "work" }));
+    placed(builder.graph.addNode({ type: STEP, nodeId: "zeta" }));
+    placed(builder.graph.addNode({ type: STEP, nodeId: "alpha" }));
+    connected(builder, "start", "work");
+
+    const horizontal = builder.graph.arrange({
+      direction: "horizontal",
+      spacing: 40,
+      rankSpacing: 100,
+    });
+    if (!horizontal.ok) {
+      throw new Error(
+        `unexpected arrange failure: ${horizontal.error.map((issue) => issue.code).join(", ")}`,
+      );
+    }
+    expect(positions(builder)).toEqual({
+      start: { x: 0, y: 0 },
+      work: { x: 100, y: 0 },
+      alpha: { x: 200, y: 0 },
+      zeta: { x: 200, y: 40 },
+    });
+
+    const vertical = builder.graph.arrange({
+      direction: "vertical",
+      spacing: 40,
+      rankSpacing: 100,
+    });
+    if (!vertical.ok) {
+      throw new Error(
+        `unexpected arrange failure: ${vertical.error.map((issue) => issue.code).join(", ")}`,
+      );
+    }
+    expect(positions(builder)).toEqual({
+      start: { x: 0, y: 0 },
+      work: { x: 0, y: 100 },
+      alpha: { x: 0, y: 200 },
+      zeta: { x: 40, y: 200 },
+    });
+  });
+});
+
 describe("graph layout: configuration diagnostics", () => {
   it("refuses an unknown mode", () => {
     const issues = buildFailure({ mode: "dynamic" });

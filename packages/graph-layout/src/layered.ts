@@ -21,7 +21,9 @@ const SCOPES: readonly string[] = ["all", "unpositioned"];
  * In-house layered placement (odd task T2, S9/S10).
  *
  * Every node is ranked by longest path from the source nodes (nodes with no
- * incoming edge), then each rank is laid out in node-id order. There is no
+ * incoming edge and at least one outgoing edge), then each rank is laid out in
+ * node-id order; a node with no edge at all joins the cycle-locked bucket after
+ * every resolved rank, so it never lands at the origin. There is no
  * crossing minimization and there are no edge bend points: a ranked, evenly
  * spaced grid is what the `Arrange` scope needs, and a dependency that hands the
  * same obligations back is not worth adding (S9).
@@ -118,6 +120,12 @@ function compareIds(left: string, right: string): number {
  * Assigns every node a rank: the length of the longest path that reaches it from
  * a source node.
  *
+ * A source is a node with no incoming edge **and** at least one outgoing edge.
+ * A node with neither incoming nor outgoing edge is isolated: it belongs to no
+ * path at all, so it takes the rank after every resolved rank — the bucket the
+ * cycle-locked nodes already use — ordered by node id, instead of the rank `0`
+ * a node nobody depends on would otherwise get.
+ *
  * The relaxation runs over the edges in canonical order and is capped at the node
  * count, so it always terminates. A node locked in a cycle never reaches a
  * finite longest path; a node no source can reach is exactly such a node, so
@@ -137,13 +145,17 @@ function rankNodes(
   for (const node of orderedNodes) {
     incomingCount.set(node.id, 0);
   }
+  // Every node any edge touches, which is exactly "not isolated".
+  const connected = new Set<NodeId>();
   for (const edge of orderedEdges) {
     incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1);
+    connected.add(edge.source);
+    connected.add(edge.target);
   }
 
   const rankByNode = new Map<NodeId, number>();
   for (const node of orderedNodes) {
-    if ((incomingCount.get(node.id) ?? 0) === 0) {
+    if ((incomingCount.get(node.id) ?? 0) === 0 && connected.has(node.id)) {
       rankByNode.set(node.id, 0);
     }
   }

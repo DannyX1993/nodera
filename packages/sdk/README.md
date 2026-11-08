@@ -131,7 +131,10 @@ not a boolean is `sdk.invalid-input` at `features.<name>`.
 wants it says so. Turning it on is the framework default (`NoderaEditor` renders
 the button and the dialog stays the registered `DialogDefinition`); replacing
 what the control looks like is `NoderaEditor.renderEdgeInsert`, and replacing the
-text or size of the dialog is the registered definition. Location and
+text or size of the dialog is the registered definition. The SDK composes the
+dialog registry and seeds the built-in node-creation dialog, so the store opens
+that dialog out of the box and the "+" is never silent (see
+[Dialogs](#dialogs--builderdialogs)). Location and
 customization are documented in `packages/ui-react/README.md`, the flow itself in
 `docs/GRAPH-LAYOUT.md`.
 
@@ -923,6 +926,51 @@ assertValid(
 assertValid(builder.layout.setDefault("acme.pipeline"));
 ```
 
+### Dialogs — `builder.dialogs`
+
+`register(dialog)` takes a `DialogDefinition` — data, never a component — and
+registers it in the dialog registry the builder's UI state resolves ids from.
+`all()` returns every registered dialog in registration order. There is no
+`active()`: the open id is presentation state and lives in `builder.store`
+(`openDialog(id)` / `closeDialog()`), and the store refuses an id no registered
+definition matches, so a dialog nobody registered can never appear.
+
+The builder composes that registry at construction and seeds the framework's
+built-in node-creation dialog (`nodera.dialog.create-node`), which is what makes
+the "+" affordances work out of the box:
+
+```ts
+const builder = assertValid(createBuilder({}));
+builder.store.openDialog("nodera.dialog.create-node").ok; // true
+builder.store.getState().activeDialogId; // "nodera.dialog.create-node"
+
+assertOk(
+  builder.dialogs.register({ id: "acme.dialog.insert", title: "Insert node", size: "sm" }),
+);
+builder.store.openDialog("acme.dialog.insert").ok; // true
+```
+
+`registry.dialogs` declares the dialogs at construction and **replaces** the
+built-in list — `DialogRegistry`'s own seeding rule, the same one layouts follow
+— so a host that does not want the node-creation dialog passes exactly its own
+definitions:
+
+```ts
+const builder = assertValid(
+  createBuilder({
+    registry: { dialogs: [{ id: "acme.dialog.insert", title: "Insert node" }] },
+  }),
+);
+builder.store.openDialog("acme.dialog.insert").ok; // true
+builder.store.openDialog("nodera.dialog.create-node").ok; // false: replaced
+```
+
+A malformed declaration (no `id`, or no `title`) is `sdk.invalid-id` /
+`sdk.invalid-input` at its field path, a repeated id is `sdk.duplicate-id` at
+`registry.dialogs.<id>`, and neither creates a builder. Registering a used id
+through `builder.dialogs` is `sdk.duplicate-id` at `dialogs.<id>`, and the
+definition already registered stays.
+
 ### Renderer binding — `builder.bindRenderer` / `builder.renderers`
 
 A renderer contribution is bound to a slot; the value is never inspected.
@@ -978,6 +1026,7 @@ The closed set, exactly:
 | `bindRenderer`, `use`, `createEditor` | `builder.events.on` / `once` / `off` / `emitSdk` |
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
+| `dialogs.register` | `dialogs.all`, `builder.store` reads |
 | `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
 | `graph.undo`, `graph.redo` — no mutation runs, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |

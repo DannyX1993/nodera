@@ -118,6 +118,53 @@ describe("createLayeredStrategy", () => {
     }
   });
 
+  it("places a node with no edge after every resolved rank, in the id-ordered bucket", () => {
+    // A source (`s`, outgoing only) keeps rank 0; `alpha` and `zeta` have no
+    // incoming and no outgoing edge, so they join the bucket the cycle-locked
+    // nodes already use — after the last resolved rank, ordered by node id and
+    // never first.
+    const nodes = [node("zeta"), node("alpha"), node("c"), node("a"), node("s"), node("b")];
+    const edges = [edge("a", "b"), edge("b", "c"), edge("s", "c")];
+
+    expect(
+      placed(layered.place({ nodes, edges, options: options({ nodeSpacing: 40, rankSpacing: 100 }) })),
+    ).toEqual([
+      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "s", x: 0, y: 40 },
+      { nodeId: "b", x: 100, y: 0 },
+      { nodeId: "c", x: 200, y: 0 },
+      { nodeId: "alpha", x: 300, y: 0 },
+      { nodeId: "zeta", x: 300, y: 40 },
+    ]);
+
+    expect(
+      placed(layered.place({ nodes, edges, options: options({ direction: "vertical" }) })),
+    ).toEqual([
+      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "s", x: 40, y: 0 },
+      { nodeId: "b", x: 0, y: 100 },
+      { nodeId: "c", x: 0, y: 200 },
+      { nodeId: "alpha", x: 0, y: 300 },
+      { nodeId: "zeta", x: 40, y: 300 },
+    ]);
+  });
+
+  it("keeps every node of an edgeless graph in one rank ordered by node id", () => {
+    expect(
+      placed(
+        layered.place({
+          nodes: [node("c"), node("a"), node("b")],
+          edges: [],
+          options: options(),
+        }),
+      ),
+    ).toEqual([
+      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "b", x: 0, y: 40 },
+      { nodeId: "c", x: 0, y: 80 },
+    ]);
+  });
+
   it("returns every node for scope all and only the unpositioned nodes for scope unpositioned", () => {
     const input = {
       nodes: [node("a", { x: 700, y: 900 }), node("b"), node("c")],

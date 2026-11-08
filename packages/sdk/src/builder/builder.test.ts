@@ -9,6 +9,8 @@ import {
 } from "@nodera/theme-engine";
 import {
   DEFAULT_PANELS,
+  NODERA_CREATE_NODE_DIALOG_ID,
+  type DialogDefinition,
   type LayoutDefinition,
   type PanelDefinition,
   type ToolDefinition,
@@ -919,6 +921,104 @@ describe("layout API", () => {
       EDITOR_LAYOUT_ID,
       CANVAS_ONLY_LAYOUT_ID,
       "nodera.layout.ide",
+    ]);
+  });
+});
+
+describe("dialog registry", () => {
+  const HOST_DIALOG: DialogDefinition = {
+    id: "acme.dialog.insert",
+    title: "Insert node",
+    size: "sm",
+  };
+
+  it("composes the built-in dialogs, so the composed store opens the node-creation dialog", () => {
+    const builder = create();
+
+    const opened = builder.store.openDialog(NODERA_CREATE_NODE_DIALOG_ID);
+
+    expect(opened.ok).toBe(true);
+    if (!opened.ok) return;
+    expect(opened.value.id).toBe(NODERA_CREATE_NODE_DIALOG_ID);
+    expect(builder.store.getState().activeDialogId).toBe(NODERA_CREATE_NODE_DIALOG_ID);
+    expect(builder.dialogs.all().map((dialog) => dialog.id)).toEqual([
+      NODERA_CREATE_NODE_DIALOG_ID,
+    ]);
+  });
+
+  it("registers a configured host dialog and replaces the built-in list with it", () => {
+    const builder = create({ registry: { dialogs: [HOST_DIALOG] } });
+
+    expect(builder.dialogs.all()).toEqual([HOST_DIALOG]);
+    expect(builder.store.openDialog("acme.dialog.insert").ok).toBe(true);
+    expect(builder.store.getState().activeDialogId).toBe("acme.dialog.insert");
+    // The declared list replaces the built-ins, `DialogRegistry`'s own rule.
+    expect(builder.store.openDialog(NODERA_CREATE_NODE_DIALOG_ID).ok).toBe(false);
+  });
+
+  it("refuses a malformed dialog declaration at its registry path", () => {
+    const issues = fail({
+      registry: { dialogs: [{ id: "acme.dialog.bad", title: "" } as DialogDefinition] },
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      severity: "error",
+      path: ["registry", "dialogs", "title"],
+    });
+  });
+
+  it("reports a repeated dialog id as a duplicate at its registry path", () => {
+    const issues = fail({ registry: { dialogs: [HOST_DIALOG, HOST_DIALOG] } });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      code: "sdk.duplicate-id",
+      path: ["registry", "dialogs", "acme.dialog.insert"],
+    });
+  });
+
+  it("registers a dialog at runtime and refuses a duplicate", () => {
+    const builder = create();
+
+    const registered = builder.dialogs.register(HOST_DIALOG);
+
+    expect(registered.ok).toBe(true);
+    if (!registered.ok) return;
+    expect(registered.value).toBe(HOST_DIALOG);
+    expect(builder.dialogs.all().map((dialog) => dialog.id)).toEqual([
+      NODERA_CREATE_NODE_DIALOG_ID,
+      "acme.dialog.insert",
+    ]);
+    expect(builder.store.openDialog("acme.dialog.insert").ok).toBe(true);
+
+    const duplicate = builder.dialogs.register(HOST_DIALOG);
+
+    expect(duplicate.ok).toBe(false);
+    if (duplicate.ok) return;
+    expect(duplicate.error[0]).toMatchObject({
+      code: "sdk.duplicate-id",
+      severity: "error",
+      path: ["dialogs", "acme.dialog.insert"],
+    });
+    expect(builder.dialogs.all()).toHaveLength(2);
+  });
+
+  it("refuses a dialog registration on a disposed builder", () => {
+    const builder = create();
+    builder.dispose();
+
+    const registered = builder.dialogs.register(HOST_DIALOG);
+
+    expect(registered.ok).toBe(false);
+    if (registered.ok) return;
+    expect(registered.error[0]).toMatchObject({
+      code: "sdk.disposed",
+      metadata: { operation: "dialogs.register" },
+    });
+    expect(builder.dialogs.all().map((dialog) => dialog.id)).toEqual([
+      NODERA_CREATE_NODE_DIALOG_ID,
     ]);
   });
 });

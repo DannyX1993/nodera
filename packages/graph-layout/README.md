@@ -84,7 +84,7 @@ nodes that are answered.
 | Factory | Id | Behaviour |
 | --- | --- | --- |
 | `createFreeStrategy()` | `nodera.graph-layout.free` | places nothing (`positions: []`); every position stays in the host's hands |
-| `createLayeredStrategy()` | `nodera.graph-layout.layered` | ranks by longest path from the source nodes and lays the ranks out in node-id order |
+| `createLayeredStrategy()` | `nodera.graph-layout.layered` | ranks by longest path from the source nodes, places the isolated and cycle-locked nodes after every resolved rank, and lays the ranks out in node-id order |
 
 The free strategy never inspects its input, so it ignores the options and cannot
 fail: an empty placement answer is the honest one, and the caller applies no write
@@ -103,13 +103,19 @@ at all.
    the ranks, and sorts every rank by id afterwards, so the answer depends on the
    *set* of nodes and edges and never on the order the caller listed them in.
 4. **Ranks by longest path from the sources.** A source is a node with no incoming
-   edge and starts at rank `0`. Ranks are relaxed edge by edge, repeating over the
-   sorted edge list; the number of passes is capped at the node count, so the
-   relaxation always terminates even with a cycle in the graph.
-5. **Places the cycle-locked nodes.** A node no source can reach — every node of a
-   cycle, and every node that only depends on one — never gets a rank from the
-   relaxation. All of them are placed in one extra rank, `highest resolved rank +
-   1`, ordered by node id.
+   edge **and** at least one outgoing edge, and starts at rank `0`. Ranks are
+   relaxed edge by edge, repeating over the sorted edge list; the number of
+   passes is capped at the node count, so the relaxation always terminates even
+   with a cycle in the graph.
+5. **Places the nodes no rank can describe.** Two kinds of node never reach a
+   resolved rank, and both land in one extra rank, `highest resolved rank + 1`,
+   ordered by node id:
+   - a node no source can reach — every node of a cycle, and every node that
+     only depends on one — which the relaxation never ranks;
+   - a node with **no incoming and no outgoing edge**. It belongs to no path at
+     all, so it is not a source either; without this rule it would keep rank `0`
+     and any recalculation would drop it at the origin (the hole the demo
+     reported when a node added from the palette landed top-left).
 6. **Orders each rank by node id** and then applies the axes:
    `horizontal` puts the rank on `x` (`rank × rankSpacing`) and the in-rank index
    on `y` (`index × nodeSpacing`); `vertical` swaps them.

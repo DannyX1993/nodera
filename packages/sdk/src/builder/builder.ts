@@ -29,9 +29,12 @@ import { DEFAULT_THEME_ID, ThemeRegistry, createTheme } from "@nodera/theme-engi
 import type { CreateThemeInput, ThemeDefinition } from "@nodera/theme-engine";
 import { EDITOR_LAYOUT_ID, LayoutRegistry, createLayoutState } from "@nodera/layout-engine";
 import {
+  DEFAULT_DIALOGS,
+  DialogRegistry,
   UiStateStore,
   createDefaultPanelRegistry,
   createDefaultToolRegistry,
+  type DialogDefinition,
   type DragPolicy,
   type LayoutDefinition,
   type LayoutPanelPlacement,
@@ -141,6 +144,7 @@ interface BuilderRegistrySources {
   readonly layouts: LayoutRegistry;
   readonly panels: PanelRegistry;
   readonly tools: ToolRegistry;
+  readonly dialogs: DialogRegistry;
 }
 
 /** Theme surface of the builder: the theme registry plus the active selection. */
@@ -212,6 +216,22 @@ export interface BuilderGraphLayoutApi {
   setDragPolicy(policy: DragPolicy): Result<DragPolicy, SdkIssues>;
 }
 
+/**
+ * Dialog surface of the builder: the registry the UI state resolves dialog ids
+ * from.
+ *
+ * A dialog is opened through the store (`builder.store.openDialog(id)`), which
+ * refuses an id no registered definition matches, so “the open dialog is always
+ * a registered one” holds by construction. The open id itself is presentation
+ * state and lives in the store, not here.
+ */
+export interface BuilderDialogApi {
+  /** Registers one declarative dialog; a used id is `sdk.duplicate-id`. */
+  register(dialog: DialogDefinition): Result<DialogDefinition, SdkIssues>;
+  /** Every registered dialog, in registration order. */
+  all(): readonly DialogDefinition[];
+}
+
 /** The assembled builder: the only object a host needs after configuration. */
 export interface Builder {
   /** Globally qualified builder id. */
@@ -257,6 +277,14 @@ export interface Builder {
   readonly theme: BuilderThemeApi;
   /** Layout contributions, bound to the builder's UI state store. */
   readonly layout: BuilderLayoutApi;
+  /**
+   * Dialog contributions, resolved by the builder's UI state store.
+   *
+   * The store is composed with these definitions, so `builder.store.openDialog`
+   * works for the built-in node-creation dialog out of the box and for every
+   * dialog the host declares or registers here.
+   */
+  readonly dialogs: BuilderDialogApi;
   /**
    * Placement strategies, and the one an explicit `graph.arrange()` runs.
    *
@@ -704,6 +732,79 @@ function registerLayout(
 }
 
 /**
+ * Structural checks of one dialog definition.
+ *
+ * `DialogRegistry` owns duplicate and unknown ids only, so the SDK checks the
+ * two fields a dialog cannot do without: the id it is opened by, and the title
+ * the renderer uses as its accessible name.
+ */
+function dialogIssues(dialog: unknown, path: readonly string[]): SdkIssue[] {
+  if (!isPlainObject(dialog)) {
+    return [
+      shapeIssue("A dialog must be an object declaring an id and a title", dialog, path),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  const id: unknown = Reflect.get(dialog, "id");
+  if (typeof id !== "string" || id.trim().length === 0) {
+    issues.push(identifierFieldIssue("Dialog", "id", id, [...path, "id"]));
+  }
+  const title: unknown = Reflect.get(dialog, "title");
+  if (typeof title !== "string" || title.trim().length === 0) {
+    issues.push(stringFieldIssue("Dialog", "title", title, [...path, "title"]));
+  }
+  return issues;
+}
+
+/** Registers one dialog definition after checking its structure. */
+function registerDialog(
+  dialogs: DialogRegistry,
+  dialog: unknown,
+  path: readonly string[],
+): Result<DialogDefinition, SdkIssues> {
+  const issues = dialogIssues(dialog, path);
+  if (issues.length > 0) {
+    return err(issues);
+  }
+  const registered = dialogs.register(dialog as DialogDefinition);
+  if (!registered.ok) {
+    return err([registryIssue(registered.error, [...path, registered.error.id])]);
+  }
+  return ok(registered.value);
+}
+
+/**
+ * Composes the dialog registry the UI state resolves ids from.
+ *
+ * A declared list replaces the framework's built-in dialogs (`DialogRegistry`'s
+ * own seeding rule). Either source is registered through {@link registerDialog},
+ * so a duplicate id or a malformed definition becomes an `sdk.duplicate-id` /
+ * `sdk.invalid-input` issue with its path instead of the throw the registry
+ * constructor would raise — and the builder is consequently never created.
+ */
+function dialogRegistryFrom(declared: unknown, issues: SdkIssue[]): DialogRegistry {
+  if (declared !== undefined && !Array.isArray(declared)) {
+    issues.push(
+      shapeIssue(
+        'Builder registry "dialogs" must be an array of dialog definitions',
+        declared,
+        ["registry", "dialogs"],
+      ),
+    );
+    return new DialogRegistry({ dialogs: [] });
+  }
+  const seeds: readonly unknown[] = declared ?? DEFAULT_DIALOGS;
+  const dialogs = new DialogRegistry({ dialogs: [] });
+  for (const seed of seeds) {
+    const registered = registerDialog(dialogs, seed, ["registry", "dialogs"]);
+    if (!registered.ok) {
+      issues.push(...registered.error);
+    }
+  }
+  return dialogs;
+}
+
+/**
  * Adds a batch of renderers to a binding snapshot.
  *
  * A batch is applied to a local copy so a rejected binding never half-applies:
@@ -953,11 +1054,13 @@ class SdkBuilder implements Builder {
   readonly events: BuilderEventApi;
   readonly theme: BuilderThemeApi;
   readonly layout: BuilderLayoutApi;
+  readonly dialogs: BuilderDialogApi;
   readonly graphLayout: BuilderGraphLayoutApi;
 
   private readonly domain: NoderaDomain;
   private readonly nodeRegistry: NodeRegistry;
   private readonly edgeRegistry: EdgeRegistry;
+  private readonly dialogRegistry: DialogRegistry;
   private readonly strategyRegistry: LayoutStrategyRegistry;
   private bindings: RendererBindings;
   private disposedFlag = false;
@@ -974,6 +1077,7 @@ class SdkBuilder implements Builder {
     this.domain = options.domain;
     this.nodeRegistry = options.registries.nodes;
     this.edgeRegistry = options.registries.edges;
+    this.dialogRegistry = options.registries.dialogs;
     this.bindings = options.renderers;
     this.strategyRegistry = options.strategies;
     // One adapter object per builder, so a host can hold on to it across reads.
@@ -1011,6 +1115,10 @@ class SdkBuilder implements Builder {
       all: () => this.strategyRegistry.all(),
       dragPolicy: () => this.store.getState().dragPolicy,
       setDragPolicy: (policy) => this.selectDragPolicy(policy),
+    };
+    this.dialogs = {
+      register: (dialog) => this.addDialog(dialog),
+      all: () => this.dialogRegistry.all(),
     };
   }
 
@@ -1134,8 +1242,8 @@ class SdkBuilder implements Builder {
    * Disposing is idempotent and closes every operation that would mutate the
    * graph or extend the composition: `register*`, `bindRenderer`, `use`,
    * `createEditor`, `theme.register`/`setDefault`,
-   * `layout.register`/`setDefault`, `graphLayout.register`/`setDefault`/
-   * `setDragPolicy`,
+   * `layout.register`/`setDefault`, `dialogs.register`,
+   * `graphLayout.register`/`setDefault`/`setDragPolicy`,
    * `registries.nodes.unregister`,
    * `registries.edges.unregister`, every mutating `graph.*` call and
    * `document.import` fail with `sdk.disposed`. Reads keep working — `graph`
@@ -1182,6 +1290,21 @@ class SdkBuilder implements Builder {
       return err([disposedIssue("layout.register")]);
     }
     return registerLayout(this.registries.layouts, layout, ["layouts"]);
+  }
+
+  /**
+   * Registers one dialog the UI state may open.
+   *
+   * The registry is the one the store resolves ids from, so a definition
+   * registered here is openable at once; a duplicate id stays a
+   * `sdk.duplicate-id` instead of replacing the definition another surface
+   * already opened.
+   */
+  private addDialog(dialog: DialogDefinition): Result<DialogDefinition, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("dialogs.register")]);
+    }
+    return registerDialog(this.dialogRegistry, dialog, ["dialogs"]);
   }
 
   /**
@@ -1395,6 +1518,9 @@ export function createBuilder(
   const layouts = new LayoutRegistry();
   const panels = createDefaultPanelRegistry();
   const tools = createDefaultToolRegistry();
+  // Seeded here, before the store exists, so every dialog id the UI state can
+  // open is a registered one by construction.
+  const dialogs = dialogRegistryFrom(registry?.dialogs, issues);
   const properties = new RegistryStore<PropertyDefinition>("sdk.properties");
   const domain = new NoderaDomain(nodes, edges, validators);
 
@@ -1477,6 +1603,7 @@ export function createBuilder(
     themeId,
     layoutId,
     layout: createLayoutState(layoutDefinition, { panels: panels.all() }),
+    dialogRegistry: dialogs,
     dragPolicy: resolveDragPolicy(declaredGraphLayout),
   });
 
@@ -1511,6 +1638,7 @@ export function createBuilder(
       layouts,
       panels,
       tools,
+      dialogs,
     },
     properties,
     renderers,

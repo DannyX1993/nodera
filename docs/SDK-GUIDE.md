@@ -383,6 +383,26 @@ Two things that surprise a host coming from the serialized format:
 - **Absent means absent.** `position` and `version` are omitted when the domain
   does not have them; nothing is defaulted to `{ x: 0, y: 0 }`.
 
+### Who owns the open dialog
+
+A dialog is a `DialogDefinition` — data, never a component — and the builder
+composes the registry the UI state resolves ids from. It seeds the framework's
+node-creation dialog, so the "+" affordances of the canvas work out of the box:
+
+```ts
+builder.store.openDialog("nodera.dialog.create-node"); // registered by the SDK
+builder.store.getState().activeDialogId; // "nodera.dialog.create-node"
+```
+
+`registry.dialogs` declares a dialog set at construction and **replaces** the
+built-in list (`DialogRegistry`'s seeding rule, the same one layouts follow);
+`builder.dialogs.register(dialog)` adds one at runtime and `builder.dialogs.all()`
+reads them back. A duplicate id is `sdk.duplicate-id`, a malformed definition is
+`sdk.invalid-input` / `sdk.invalid-id`, both at their path, and the builder is not
+created when the declaration is refused. The open id is presentation state: it
+lives in `builder.store` (`openDialog` / `closeDialog`), never in the portable
+document, and the store refuses an id no registered definition matches.
+
 ## Errors are data
 
 Every operation that can fail returns a `Result`. The SDK never throws for input
@@ -468,6 +488,7 @@ below are the complete lists:
 | `bindRenderer`, `use`, `createEditor` | `builder.events.on` / `once` / `off` / `emitSdk` |
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
+| `dialogs.register` | `dialogs.all`, `builder.store` reads |
 | `graphLayout.register`, `graphLayout.setDefault` | `graphLayout.active`, `graphLayout.all` |
 | `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
 | `graph.undo`, `graph.redo` — nothing is undone, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |

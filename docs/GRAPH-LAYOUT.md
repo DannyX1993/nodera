@@ -186,8 +186,9 @@ graph — neither pushes a history entry. A strategy that answers a diagnostic m
 `metadata.strategyCode`, and nothing is applied.
 
 The placement rule behind the answer (longest-path ranks, the relaxation cap, the
-cycle-locked rank, in-rank order by node id, the two axes, `all` vs
-`unpositioned`) is documented once, in `packages/graph-layout/README.md`.
+rank of the isolated and cycle-locked nodes, in-rank order by node id, the two
+axes, `all` vs `unpositioned`) is documented once, in
+`packages/graph-layout/README.md`.
 
 ### `builder.graph.insertNode(request)`
 
