@@ -22,6 +22,16 @@
         margin: 0;
       }
 
+      /*
+       * The provider between `#root` and this page's own `.demo-host` is a real
+       * element (the theme root), so the height chain has to cross it or the
+       * host's page collapses to its content height and the editor's canvas
+       * region never gets any space.
+       */
+      #root > [data-nodera-theme] {
+        height: 100%;
+      }
+
       body {
         background: #0b1220;
         color: #e5e9f0;
