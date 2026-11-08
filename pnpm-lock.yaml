@@ -313,6 +313,19 @@ importers:
         specifier: ^3.0.5
         version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
+  packages/graph-layout:
+    dependencies:
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@nodera/graph-model':
+        specifier: workspace:*
+        version: link:../graph-model
+    devDependencies:
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
+
   packages/graph-model:
     dependencies:
       '@nodera/contracts':
