@@ -29,7 +29,7 @@ the `@nodera/*` dependencies resolve through the workspace protocol.
 | --- | --- |
 | `src/main.tsx` | Bootstrap: builds the editor session (`createDemoEditor()` — engine, three node definitions, one edge definition, two seeded nodes and one seeded edge), builds the registries, applies the initial theme (`nodera.light`) and layout (`nodera.layout.editor`), makes the external `metadata` panel non-hideable (the host owns that decision too), mounts the app. |
 | `src/definitions.ts` | Host vocabulary: three node definitions in three categories, one edge definition, the seeded graph and a **host-declared layout** (`demo.layout.workspace`). |
-| `src/brand.tsx` | Host-authored renderers: a brand palette panel, a brand `string` property field, a host-composed validation panel and a custom port renderer. |
+| `src/brand.tsx` | Host-authored renderers: a brand palette panel, a brand `string` property field, a brand context-menu renderer, a host-composed validation panel and a custom port renderer. |
 | `src/demo.tsx` | `DemoApp`: wires the host registries into `NoderaUiProvider`. |
 | `src/app.tsx` | `Workspace`: the actual composition — slots, toolbar, theme/layout/mode controls, context menu, floating search, the external metadata column, persistence. |
 | `index.html` | Page chrome only (plus the demo's own control styles). Every editor surface is styled by `@nodera/ui-react` through `var(--ndr-*)` tokens. |
@@ -49,10 +49,12 @@ the `@nodera/*` dependencies resolve through the workspace protocol.
 | **Mode: select / pan** button | S5 "Modo de interacción" wired end to end: `useUiStateActions().setInteractionMode` writes the mode to the UI store, the host passes `ui.interactionMode` to `GraphCanvas.interactionMode`, and the adapter maps it to React Flow's drag props (`select` = left drag draws a selection box, middle/right pan; `pan` = any drag pans). |
 | **Graph metadata column** (right, outside the shell) | S4 "paneles externos al canvas": the built-in `metadata` panel declares `region: "external"`, so no layout places it and the shell gives it no geometry. The host mounts `<PanelHost panelId="metadata" />` in its own column next to `EditorShell` — the panel keeps its registry, renderer and chrome, it just is not part of the shell. |
 | **Renderers: default / brand** button | S3 Level 2 "component replacement": `renderers.panels.replace("nodera.panel.palette", BrandPalette)` and `renderers.properties.replace("string", BrandStringField)`. The palette becomes the host's own catalogue (with its own `+ Add` buttons) and every `string` property becomes the host's own field, while the panel keeps its ordering, grouping, visibility and validation. |
+| **Menu: built-in / brand** button | S3 Level 2 menu renderer: `renderers.menus.replace(DEFAULT_MENU_RENDERER_ID, BrandMenu)` swaps the whole menu presentation, and `renderers.menus.unregister(DEFAULT_MENU_RENDERER_ID)` goes back to the built-in menu (the `menus` registry starts empty, so the built-in path is the default). `BrandMenu` draws a header row, its own item buttons and a close button; the framework keeps the positioned root, the Escape/outside-click closing and the command dispatch. **Menu content still comes from the tool registry and the UI store**: the renderer receives the target-shaped `items`, the open menu `kind`/`targetKind`/`position` and the live `availability` context, never a list it invented. |
+| **Open menu** button | Opens a context menu at a fixed position through `useUiStateActions().openMenu`, so the menu (built-in or brand) can be inspected without right-clicking the canvas. The store owns the open menu; the `ContextMenu` of the composition only renders it. |
 | Custom port renderer | S3 Level 2 "Port Renderer": the CSV source output port declares `visual.renderer = "demo.port.badge"`; the host registers that id in a `PortRendererRegistry` and draws its own handle. Ports that declare nothing keep the framework handle. |
 | **Break the graph** (in the validation panel) | S8 application data in a report surface: the button adds a sink node whose required `table` property is unset, and the auto-validating `ValidationPanel` shows the resulting error. Clicking the issue's element selects it. The panel is a host composition (`ValidationPanel autoValidate` plus the host's own action). |
 | Palette drag → canvas drop | S4/S2 "paneles externos al canvas" + D7: dragging a palette item writes the stable `application/nodera-node-definition` payload and the canvas adapter reports the flow position through `onDropNodeDefinition`; the host creates the node through `addNode`. Clicking a palette item is the keyboard/touch fallback. |
-| Right-click on the canvas or on a node | Context menu from the UI store: the host opens it (`useUiStateActions().openMenu`) with the target kind, the menu renders the registered tools, dispatch runs through the same command dispatcher as the toolbar, and the menu closes itself. |
+| Right-click on the canvas or on a node | Context menu from the UI store: the host opens it (`useUiStateActions().openMenu`) with the target kind, the menu renders the registered tools, dispatch runs through the same command dispatcher as the toolbar, and the menu closes itself. The presentation is replaceable (see the **Menu** control below); the content is not. |
 | Toolbar (undo/redo/copy/cut/paste/validate/fit view) | Declarative `ToolDefinition`s from the `ToolRegistry`, translated into application use cases. The demo filters the registry (`delete` is left out) to show that the host picks its own toolbar. `fit view` is bridged to the canvas controls the adapter renders, because the adapter keeps its React Flow instance private. |
 | Status line (bottom-left of the canvas) | Reporting surface for what the composition did: link validation from `onLinkValidate`, drop results, layout persistence, renderer swaps. It is host chrome, not a framework component. |
 
@@ -79,7 +81,9 @@ completamente diferentes" means in practice.
   because a port is a canvas connection point by definition.
 - Definitions are data. Renderers are referenced by id, so both the framework
   and the host can resolve an id to a component (`ComponentRegistry.replace`
-  never touches data).
+  never touches data). Menus follow the same rule: the tool list is data from
+  the `ToolRegistry` plus the open-menu state of `UiStateStore`, and only the
+  presentation is replaced (`DEFAULT_MENU_RENDERER_ID`).
 - Presentation state (theme, layout, preferences, open menus, search query)
   lives in `UiStateStore`; selection, history and clipboard stay in the
   application layer; viewport and node measurements stay in the canvas adapter.

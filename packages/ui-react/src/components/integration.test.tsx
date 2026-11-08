@@ -27,11 +27,13 @@ import { Header } from "./shell/header.js";
 import { PanelHost } from "./shell/panel-host.js";
 import { panelIdForRegion } from "./shell/shell-sizes.js";
 import { Toolbar } from "./actions/toolbar.js";
+import { ContextMenu, DEFAULT_MENU_RENDERER_ID } from "./actions/context-menu.js";
 import { createDefaultComponentRenderers } from "../defaults/default-renderers.js";
 import { createDefaultPanelRegistry } from "../defaults/default-panels.js";
 import { NoderaUiProvider } from "../providers/ui-provider.js";
 import {
   type ComponentRenderers,
+  type MenuRendererProps,
   type PanelRendererProps,
   type PropertyRendererProps,
 } from "../registries/component-registry.js";
@@ -200,6 +202,26 @@ function required<T extends Element>(container: HTMLElement, selector: string): 
 
 function panelState(store: UiStateStore, panelId: string) {
   return store.getState().layout?.panels.find((panel) => panel.panelId === panelId);
+}
+
+/**
+ * Composed editor plus the menu surface, placed by the host next to the shell.
+ *
+ * `ContextMenu` is mounted directly — no `PanelHost`, no panel registry entry —
+ * which is how a host adds an overlay: the component reads the UI store itself
+ * and renders whatever the store says.
+ */
+function renderWorkspaceWithMenu(options: WorkspaceOptions = {}) {
+  const store = options.store ?? createIntegrationStore();
+  const editor = options.editor ?? createIntegrationEditor();
+  const renderers = options.renderers ?? createDefaultComponentRenderers();
+  const result = render(
+    <NoderaUiProvider store={store} editor={editor} renderers={renderers}>
+      <Workspace store={store} />
+      <ContextMenu />
+    </NoderaUiProvider>,
+  );
+  return { ...result, store, editor };
 }
 
 function historyEntries(container: HTMLElement, state: "undoable" | "redoable"): readonly Element[] {
@@ -558,6 +580,97 @@ describe("8. presentation state never reaches the portable document", () => {
     expect(exported.value).toContain("node-source");
     expect(exported.value).toContain("node-sink");
     expect(exported.value).toContain("https://source.test");
+  });
+});
+
+describe("9. menu presentation replacement", () => {
+  it("renders the host menu of the composed editor and dispatches its command", () => {
+    const renderers = createDefaultComponentRenderers();
+    renderers.menus.replace(
+      DEFAULT_MENU_RENDERER_ID,
+      function HostMenu(props: MenuRendererProps) {
+        return (
+          <div
+            data-testid="host-menu"
+            data-target-kind={props.targetKind}
+            data-items={props.items.map((tool) => tool.id).join(",")}
+          >
+            {props.items.map((tool) => (
+              <button
+                key={tool.id}
+                type="button"
+                data-host-menu-item={tool.id}
+                onClick={() => {
+                  props.onCommand(tool.command);
+                }}
+              >
+                {tool.label}
+              </button>
+            ))}
+          </div>
+        );
+      },
+    );
+
+    const { container, editor, store } = renderWorkspaceWithMenu({ renderers });
+    act(() => {
+      selectNode(editor, { nodeId: "node-source" });
+    });
+    act(() => {
+      store.openMenu({
+        kind: "context",
+        targetKind: "node",
+        targetId: "node-source",
+        position: { x: 320, y: 180 },
+      });
+    });
+
+    // The positioned root is still the framework's; only its children are host markup.
+    const root = required<HTMLElement>(container, "[data-nodera-context-menu]");
+    expect(root.getAttribute("data-nodera-context-target")).toBe("node");
+    expect(root.style.position).toBe("fixed");
+    expect(root.style.left).toBe("320px");
+    expect(root.style.top).toBe("180px");
+    expect(container.querySelectorAll("[data-nodera-menu-item]")).toHaveLength(0);
+
+    const menu = required(container, '[data-testid="host-menu"]');
+    expect(menu.getAttribute("data-target-kind")).toBe("node");
+    expect(menu.getAttribute("data-items")).toBe(
+      "tool.delete,tool.copy,tool.cut,tool.validate,tool.fit-view",
+    );
+    expect(container.querySelectorAll("[data-nodera-navigator-node]")).toHaveLength(2);
+
+    fireEvent.click(required(container, '[data-host-menu-item="tool.delete"]'));
+
+    // The command ran through the same dispatcher as the toolbar, and the menu closed.
+    expect(editor.getNode("node-source")).toBeUndefined();
+    expect(container.querySelectorAll("[data-nodera-navigator-node]")).toHaveLength(1);
+    expect(store.getState().menu).toBeUndefined();
+    expect(container.querySelector("[data-nodera-context-menu]")).toBeNull();
+  });
+
+  it("keeps the built-in menu path of the composed editor when no renderer is registered", () => {
+    const renderers = createDefaultComponentRenderers();
+    const { container, store } = renderWorkspaceWithMenu({ renderers });
+
+    act(() => {
+      store.openMenu({
+        kind: "context",
+        targetKind: "pane",
+        targetId: "",
+        position: { x: 10, y: 20 },
+      });
+    });
+
+    expect(
+      [...container.querySelectorAll("[data-nodera-menu-item]")].map((element) =>
+        element.getAttribute("data-nodera-menu-item"),
+      ),
+    ).toEqual(["tool.validate", "tool.fit-view"]);
+    expect(container.querySelector('[data-testid="host-menu"]')).toBeNull();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(store.getState().menu).toBeUndefined();
   });
 });
 

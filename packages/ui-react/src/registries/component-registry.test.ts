@@ -6,10 +6,21 @@ import {
   DuplicateComponentError,
   MissingComponentError,
   createComponentRenderers,
+  type MenuRendererProps,
 } from "./component-registry.js";
 
 interface MarkerProps {
   readonly label: string;
+}
+
+/** Marker menu renderer: proves the slot is typed and replaceable. */
+function BrandMenu(_props: MenuRendererProps) {
+  return null;
+}
+
+/** Second marker menu renderer, used to prove `replace` swaps the component. */
+function OtherMenu(_props: MenuRendererProps) {
+  return null;
 }
 
 function createMarker(label: string): ComponentType<MarkerProps> {
@@ -83,20 +94,48 @@ describe("ComponentRegistry", () => {
 });
 
 describe("createComponentRenderers", () => {
-  it("creates three independent empty renderer registries", () => {
+  it("creates four independent empty renderer registries", () => {
     const renderers = createComponentRenderers();
 
     expect(renderers.panels.size).toBe(0);
     expect(renderers.properties.size).toBe(0);
     expect(renderers.toolbars.size).toBe(0);
+    expect(renderers.menus.size).toBe(0);
 
     const first = createComponentRenderers();
     first.panels.register("acme.panel", function Panel() {
       return null;
     });
+    first.menus.register("acme.menu", BrandMenu);
 
     expect(first.panels.size).toBe(1);
+    expect(first.menus.size).toBe(1);
     expect(renderers.panels.size).toBe(0);
+    expect(renderers.menus.size).toBe(0);
+  });
+
+  it("keeps the documented registry semantics on the menus slot", () => {
+    const registry = createComponentRenderers().menus;
+
+    registry.register("acme.menu.brand", BrandMenu);
+    expect(registry.has("acme.menu.brand")).toBe(true);
+    expect(registry.get("acme.menu.brand")).toBe(BrandMenu);
+    expect(registry.listIds()).toEqual(["acme.menu.brand"]);
+
+    // Duplicates and unknown ids stay explicit errors, like every registry.
+    expect(() => registry.register("acme.menu.brand", OtherMenu)).toThrow(
+      "Duplicate component registration for id 'acme.menu.brand'",
+    );
+    expect(() => registry.get("acme.menu.missing")).toThrow(
+      "No component registered for id 'acme.menu.missing'",
+    );
+
+    registry.replace("acme.menu.brand", OtherMenu);
+    expect(registry.get("acme.menu.brand")).toBe(OtherMenu);
+    expect(registry.listIds()).toEqual(["acme.menu.brand"]);
+
+    registry.unregister("acme.menu.brand");
+    expect(registry.has("acme.menu.brand")).toBe(false);
   });
 });
 

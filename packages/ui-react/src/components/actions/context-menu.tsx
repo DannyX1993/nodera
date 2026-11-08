@@ -12,9 +12,11 @@ import { useToolAvailability } from "../../bindings/editor-snapshot.js";
 import type { CanvasCommandHandlers } from "../../bindings/editor-commands.js";
 import { useUiStateActions } from "../../bindings/ui-state-actions.js";
 import {
+  useComponentRenderers,
   useToolRegistry,
   useUiState,
 } from "../../providers/ui-provider.js";
+import type { MenuRendererProps } from "../../registries/component-registry.js";
 import {
   BUTTON_STYLE,
   MUTED_TEXT_STYLE,
@@ -26,6 +28,9 @@ import {
 import { useCommandBinding } from "./command-binding.js";
 import { useCommandDispatcher } from "./command-dispatch.js";
 
+/** Renderer id a host replaces to swap the whole menu presentation (Level 2). */
+export const DEFAULT_MENU_RENDERER_ID = "nodera.menu.default";
+
 /** Props accepted by {@link ContextMenu}. */
 export interface ContextMenuProps {
   /** Items to offer. Defaults to the registry tools the target kind accepts. */
@@ -35,6 +40,8 @@ export interface ContextMenuProps {
   readonly onCommand?: (command: ToolCommand) => void;
   /** Host capabilities the canvas-backed commands need. */
   readonly handlers?: CanvasCommandHandlers;
+  /** Renderer id resolved in the menu renderer registry. */
+  readonly rendererId?: string;
 }
 
 /** Class the built-in items put on destructive tools. */
@@ -109,16 +116,25 @@ function offersTarget(tool: ToolDefinition, target: MenuTargetKind): boolean {
  * document), so any host surface can open it and this component only renders
  * what the store says. Escape and a pointerdown outside close it through the
  * same store action every other closer uses.
+ *
+ * The *content* is always declarative: the target-shaped tools of the
+ * `ToolRegistry`, evaluated against live editor facts. Only the presentation is
+ * replaceable — a host swaps it by registering a component under
+ * {@link DEFAULT_MENU_RENDERER_ID} (S3 Level 2), and that renderer is mounted
+ * inside the same positioned root, so the menu keeps its place on screen and
+ * its closing behaviour either way.
  */
 export function ContextMenu(props: ContextMenuProps): ReactNode {
   const state = useUiState();
   const registry = useToolRegistry();
+  const menus = useComponentRenderers().menus;
   const actions = useUiStateActions();
   const { engine } = useCommandBinding();
   const availability = useToolAvailability(engine);
   const dispatch = useCommandDispatcher(props.handlers, props.onCommand);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menu = state.menu;
+  const Renderer = menus.tryGet(props.rendererId ?? DEFAULT_MENU_RENDERER_ID);
 
   useEffect(() => {
     if (menu === undefined) {
@@ -162,6 +178,20 @@ export function ContextMenu(props: ContextMenuProps): ReactNode {
   }
 
   const tools = props.items ?? registry.all().filter((tool) => offersTarget(tool, menu.targetKind));
+  const menuProps: MenuRendererProps = {
+    items: tools,
+    kind: menu.kind,
+    targetKind: menu.targetKind,
+    position: menu.position,
+    availability,
+    onCommand: (command) => {
+      dispatch(command);
+      actions.closeMenu();
+    },
+    onClose: () => {
+      actions.closeMenu();
+    },
+  };
 
   return (
     <div
@@ -177,22 +207,26 @@ export function ContextMenu(props: ContextMenuProps): ReactNode {
         top: menu.position.y,
       }}
     >
-      {tools.length === 0 ? (
-        <p data-nodera-context-menu-empty="" style={EMPTY_STYLE}>
-          No actions
-        </p>
+      {Renderer === undefined ? (
+        tools.length === 0 ? (
+          <p data-nodera-context-menu-empty="" style={EMPTY_STYLE}>
+            No actions
+          </p>
+        ) : (
+          tools.map((tool) => (
+            <MenuButton
+              key={tool.id}
+              tool={tool}
+              availability={availability}
+              onActivate={() => {
+                dispatch(tool.command);
+                actions.closeMenu();
+              }}
+            />
+          ))
+        )
       ) : (
-        tools.map((tool) => (
-          <MenuButton
-            key={tool.id}
-            tool={tool}
-            availability={availability}
-            onActivate={() => {
-              dispatch(tool.command);
-              actions.closeMenu();
-            }}
-          />
-        ))
+        <Renderer {...menuProps} />
       )}
     </div>
   );

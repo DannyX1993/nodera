@@ -1,11 +1,17 @@
 import { act, cleanup, fireEvent } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { EditorEngine } from "@nodera/application";
 import type { MenuTargetKind, ToolDefinition, UiStateStore } from "@nodera/ui-core";
 
 import { DEFAULT_TOOLS } from "../../defaults/default-tools.js";
-import { ContextMenu } from "./context-menu.js";
+import {
+  createComponentRenderers,
+  type ComponentRenderers,
+  type MenuRendererProps,
+} from "../../registries/component-registry.js";
+import { ContextMenu, DEFAULT_MENU_RENDERER_ID } from "./context-menu.js";
 import {
   addActionNode,
   createActionEditor,
@@ -53,6 +59,7 @@ interface RenderMenuOptions {
   readonly store?: UiStateStore;
   readonly tools?: readonly ToolDefinition[];
   readonly items?: readonly ToolDefinition[];
+  readonly renderers?: ComponentRenderers;
 }
 
 function renderMenu(options: RenderMenuOptions) {
@@ -65,6 +72,7 @@ function renderMenu(options: RenderMenuOptions) {
       ...(options.tools === undefined
         ? {}
         : { toolRegistry: createToolRegistry(options.tools) }),
+      ...(options.renderers === undefined ? {} : { renderers: options.renderers }),
     },
   );
   act(() => {
@@ -100,6 +108,42 @@ function menuItem(container: HTMLElement, toolId: string): HTMLButtonElement {
     throw new Error(`missing menu item: ${toolId}`);
   }
   return element;
+}
+
+/**
+ * Host-authored menu renderer of this suite.
+ *
+ * It renders the props of `MenuRendererProps` as data attributes so the tests
+ * can assert the complete contract, and exposes one button per action it needs:
+ * a real command and a plain close.
+ */
+function BrandMenu(props: MenuRendererProps): ReactNode {
+  return (
+    <div
+      data-testid="brand-menu"
+      data-items={props.items.map((tool) => tool.id).join(",")}
+      data-kind={props.kind}
+      data-target-kind={props.targetKind}
+      data-position={`${props.position.x},${props.position.y}`}
+      data-can-undo={String(props.availability.canUndo)}
+      data-selected-nodes={String(props.availability.selectedNodeCount)}
+      data-selected-edges={String(props.availability.selectedEdgeCount)}
+      data-clipboard={String(props.availability.clipboardSize)}
+    >
+      <button
+        type="button"
+        data-testid="brand-undo"
+        onClick={() => {
+          props.onCommand({ kind: "undo" });
+        }}
+      >
+        Undo
+      </button>
+      <button type="button" data-testid="brand-close" onClick={props.onClose}>
+        Close
+      </button>
+    </div>
+  );
 }
 
 describe("ContextMenu", () => {
@@ -282,5 +326,165 @@ describe("ContextMenu", () => {
     });
 
     expect(itemIds(container)).toEqual(["acme.paste"]);
+  });
+});
+
+describe("ContextMenu menu renderer replacement", () => {
+  it("keeps the built-in item list while no menu renderer is registered", () => {
+    const renderers = createComponentRenderers();
+    expect(renderers.menus.size).toBe(0);
+
+    const { container } = renderMenu({ targetKind: "node", tools: TARGET_TOOLS, renderers });
+
+    expect(itemIds(container)).toEqual(["acme.always", "acme.selection", "acme.node-only"]);
+    expect(required(container, '[role="menu"]').getAttribute("data-nodera-context-target")).toBe(
+      "node",
+    );
+    expect(menuItem(container, "acme.always").getAttribute("role")).toBe("menuitem");
+  });
+
+  it("renders the registered menu renderer inside the positioned menu root", () => {
+    const renderers = createComponentRenderers();
+    renderers.menus.replace(DEFAULT_MENU_RENDERER_ID, BrandMenu);
+
+    const { container } = renderMenu({
+      targetKind: "node",
+      targetId: "node-1",
+      tools: TARGET_TOOLS,
+      renderers,
+    });
+
+    const custom = required(container, '[data-testid="brand-menu"]');
+    expect(itemIds(container)).toEqual([]);
+    const root = required<HTMLElement>(container, "[data-nodera-context-menu]");
+    expect(root.contains(custom)).toBe(true);
+    expect(root.getAttribute("role")).toBe("menu");
+    expect(root.getAttribute("data-nodera-context-target")).toBe("node");
+    expect(root.getAttribute("data-nodera-context-id")).toBe("node-1");
+    expect(root.style.position).toBe("fixed");
+    expect(root.style.left).toBe("12px");
+    expect(root.style.top).toBe("34px");
+  });
+
+  it("hands the custom renderer the target-shaped items and the live menu state", () => {
+    const editor = createActionEditor();
+    addActionNode(editor, { nodeId: "node-1" });
+    selectActionNode(editor, "node-1");
+    const renderers = createComponentRenderers();
+    renderers.menus.register(DEFAULT_MENU_RENDERER_ID, BrandMenu);
+
+    const node = renderMenu({
+      targetKind: "node",
+      targetId: "node-1",
+      tools: TARGET_TOOLS,
+      editor,
+      renderers,
+    });
+    const menu = required(node.container, '[data-testid="brand-menu"]');
+    expect(menu.getAttribute("data-items")).toBe("acme.always,acme.selection,acme.node-only");
+    expect(menu.getAttribute("data-kind")).toBe("context");
+    expect(menu.getAttribute("data-target-kind")).toBe("node");
+    expect(menu.getAttribute("data-position")).toBe("12,34");
+    expect(menu.getAttribute("data-can-undo")).toBe("true");
+    expect(menu.getAttribute("data-selected-nodes")).toBe("1");
+    expect(menu.getAttribute("data-selected-edges")).toBe("0");
+    expect(menu.getAttribute("data-clipboard")).toBe("0");
+    cleanup();
+
+    const edge = renderMenu({ targetKind: "edge", tools: TARGET_TOOLS, renderers });
+    expect(
+      required(edge.container, '[data-testid="brand-menu"]').getAttribute("data-items"),
+    ).toBe("acme.always,acme.selection,acme.edge-only");
+    expect(
+      required(edge.container, '[data-testid="brand-menu"]').getAttribute("data-target-kind"),
+    ).toBe("edge");
+    cleanup();
+
+    // The `items` option keeps overriding the registry tools on the custom path.
+    const hostItems = renderMenu({
+      targetKind: "pane",
+      items: [{ id: "acme.host-item", label: "Host item", command: { kind: "validate" } }],
+      renderers,
+    });
+    expect(
+      required(hostItems.container, '[data-testid="brand-menu"]').getAttribute("data-items"),
+    ).toBe("acme.host-item");
+  });
+
+  it("runs the command the custom renderer dispatches and closes the menu", () => {
+    const editor = createActionEditor();
+    addActionNode(editor, { nodeId: "node-1" });
+    addActionNode(editor, { nodeId: "node-2" });
+    const renderers = createComponentRenderers();
+    renderers.menus.register(DEFAULT_MENU_RENDERER_ID, BrandMenu);
+
+    const { container, store } = renderMenu({ targetKind: "pane", editor, renderers });
+    expect(editor.graph.nodeCount).toBe(2);
+
+    fireEvent.click(required(container, '[data-testid="brand-undo"]'));
+
+    expect(editor.graph.getNodes().map((node) => node.id)).toEqual(["node-1"]);
+    expect(store.getState().menu).toBeUndefined();
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("closes without touching the editor when the custom renderer calls onClose", () => {
+    const editor = createActionEditor();
+    addActionNode(editor, { nodeId: "node-1" });
+    const renderers = createComponentRenderers();
+    renderers.menus.register(DEFAULT_MENU_RENDERER_ID, BrandMenu);
+
+    const { container, store } = renderMenu({ targetKind: "pane", editor, renderers });
+    const historySize = editor.history.size();
+
+    fireEvent.click(required(container, '[data-testid="brand-close"]'));
+
+    expect(store.getState().menu).toBeUndefined();
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+    expect(editor.graph.nodeCount).toBe(1);
+    expect(editor.history.size()).toBe(historySize);
+  });
+
+  it("closes on Escape and on an outside pointerdown with a custom renderer mounted", () => {
+    const renderers = createComponentRenderers();
+    renderers.menus.register(DEFAULT_MENU_RENDERER_ID, BrandMenu);
+
+    const escape = renderMenu({ targetKind: "pane", renderers });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(escape.store.getState().menu).toBeUndefined();
+    expect(escape.container.querySelector('[role="menu"]')).toBeNull();
+    cleanup();
+
+    const pointer = renderMenu({ targetKind: "pane", renderers });
+    fireEvent.pointerDown(required(pointer.container, '[data-testid="brand-menu"]'));
+    expect(pointer.store.getState().menu).not.toBeUndefined();
+    fireEvent.pointerDown(document.body);
+    expect(pointer.store.getState().menu).toBeUndefined();
+  });
+
+  it("honours the rendererId prop of the surface", () => {
+    const renderers = createComponentRenderers();
+    renderers.menus.register(DEFAULT_MENU_RENDERER_ID, BrandMenu);
+    renderers.menus.register("acme.menu.other", function OtherMenu(): ReactNode {
+      return <div data-testid="other-menu" />;
+    });
+    const store = createActionStore();
+
+    const { container } = renderWithUi(<ContextMenu rendererId="acme.menu.other" />, {
+      store,
+      editor: createActionEditor(),
+      renderers,
+    });
+    act(() => {
+      store.openMenu({
+        kind: "context",
+        targetKind: "pane",
+        targetId: "",
+        position: { x: 1, y: 2 },
+      });
+    });
+
+    expect(required(container, '[data-testid="other-menu"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="brand-menu"]')).toBeNull();
   });
 });

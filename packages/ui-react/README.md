@@ -66,7 +66,7 @@ decides which components it uses, where it places them and how they look.
 | `InspectorPanel` | read-only structural view: ids, definition, position, ports, raw properties |
 | `MetadataPanel` | graph metadata editor (`name`, `description`, `tags`) |
 | `Toolbar` | registry-driven actions with availability gating and toolbar renderer replacement |
-| `ContextMenu` | store-driven menu at the pointer position, target-aware items, Escape/outside-click close |
+| `ContextMenu` | store-driven menu at the pointer position, target-aware items, Escape/outside-click close, menu renderer replacement |
 | `ValidationPanel` | severity counts, validate action, issue list with element links, optional auto-validate |
 | `HistoryPanel` | undo/redo labels with a current marker and click-to-walk |
 
@@ -107,20 +107,74 @@ come from the core packages, and no component re-implements them.
 
 ## Component replacement (Level 2)
 
-`ComponentRenderers` holds three `ComponentRegistry` instances: `panels`,
-`properties`, `toolbars`.
+Nodera's three customization levels apply to this package as a whole: themes
+change the tokens (Level 1), the registries below replace whole renderers
+(Level 2), and any component can be composed freely by the host instead of the
+prebuilt arrangement (Level 3).
+
+`ComponentRenderers` holds four `ComponentRegistry` instances: `panels`,
+`properties`, `toolbars` and `menus`.
 
 ```ts
 renderers.panels.replace("nodera.panel.palette", BrandPalette);
 renderers.properties.replace("string", BrandStringField);
+renderers.toolbars.replace("acme.toolbar", BrandToolbar);
+renderers.menus.replace(DEFAULT_MENU_RENDERER_ID, BrandMenu);
 ```
 
 `register` keeps protecting new contributions from duplicate ids;
-`replace(id, component)` is the documented swap path for a built-in id.
+`replace(id, component)` is the documented swap path for a built-in id and
+`unregister(id)` restores the built-in path of a slot.
 `createDefaultComponentRenderers()` registers the built-in panel renderers
-(`nodera.panel.<panel id>`) and the built-in property renderers; `toolbars` stays
-empty on purpose so the built-in toolbar path is the default until a host
-registers its own renderer id.
+(`nodera.panel.<panel id>`) and the built-in property renderers; `toolbars` and
+`menus` stay empty on purpose so the built-in toolbar and menu paths are the
+default until a host registers its own renderer id.
+
+### Menus
+
+Menus are replaceable at Level 2, styled by tokens at Level 1 and composable at
+Level 3. The menu *content* — which tools apply to the open target and whether
+each one is enabled — is **not** replaceable and is not part of the contract:
+it always comes from the `ToolRegistry` plus the `UiStateStore`, so a renderer
+cannot silently change what the editor offers.
+
+`ContextMenu` resolves `rendererId` (default `DEFAULT_MENU_RENDERER_ID`,
+`"nodera.menu.default"`) in `renderers.menus` and mounts the component it finds
+inside the same positioned root, so `data-nodera-context-menu`,
+`data-nodera-context-target`, the fixed `left`/`top` and the Escape/outside-click
+closing keep working on both paths.
+
+```tsx
+import { isToolAvailable } from "@nodera/ui-core";
+import type { MenuRendererProps } from "@nodera/ui-react";
+
+function BrandMenu(props: MenuRendererProps) {
+  return (
+    <div data-brand-menu="">
+      <span>{props.targetKind}</span>
+      {props.items.map((tool) => (
+        <button
+          key={tool.id}
+          type="button"
+          role="menuitem"
+          disabled={!isToolAvailable(tool, props.availability)}
+          onClick={() => props.onCommand(tool.command)}
+        >
+          {tool.label}
+        </button>
+      ))}
+      <button type="button" onClick={props.onClose}>Close</button>
+    </div>
+  );
+}
+
+renderers.menus.replace(DEFAULT_MENU_RENDERER_ID, BrandMenu);
+```
+
+`MenuRendererProps` carries `items` (the target-shaped `ToolDefinition[]` the
+built-in path would render), `kind` (`context` | `panel`), `targetKind`,
+`position`, `availability` (live editor facts), `onCommand` (dispatches through
+the shared command dispatcher and closes the menu) and `onClose` (closes only).
 
 ## Boundaries
 

@@ -58,10 +58,14 @@ const BUILT_IN_PANEL_RENDERERS: readonly PanelRenderer[] = [
  * ships, so composing a `NoderaUiProvider` is enough to see a working editor;
  * replacing any of them is still a single `unregister` plus `register` on the
  * matching registry (S3 Level 2). Registrations never overwrite: an id that is
- * already taken keeps its owner, and the `toolbars` registry is left empty
- * because the built-in toolbar is the default path — a host replaces it by
- * registering a component under a renderer id of its own and passing it to
- * `Toolbar.rendererId`.
+ * already taken keeps its owner.
+ *
+ * The `toolbars` registry is left empty because the built-in toolbar is the
+ * default path — a host replaces it by registering a component under a renderer
+ * id of its own and passing it to `Toolbar.rendererId`. `menus` is left empty
+ * for the same reason: the built-in menu is the default, and a host swaps the
+ * menu presentation by registering or replacing a component under
+ * `DEFAULT_MENU_RENDERER_ID` (`nodera.menu.default`).
  */
 export function createDefaultComponentRenderers(): ComponentRenderers {
   const renderers = createComponentRenderers();

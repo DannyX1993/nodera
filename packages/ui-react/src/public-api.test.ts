@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import * as uiReact from "./index.js";
+import type { MenuRendererProps } from "./index.js";
 
 /**
  * Names the package must export.
@@ -58,6 +59,8 @@ const REGISTRIES_AND_FACTORIES = [
 
 const SHELL_HELPERS = ["computeShellSizes", "panelIdForRegion"] as const;
 
+const RENDERER_IDS = ["DEFAULT_MENU_RENDERER_ID"] as const;
+
 function exportedEntries(): Readonly<Record<string, unknown>> {
   return uiReact as unknown as Readonly<Record<string, unknown>>;
 }
@@ -97,5 +100,25 @@ describe("@nodera/ui-react public surface", () => {
 
     expect(typeof uiReact.computeShellSizes).toBe("function");
     expect(typeof uiReact.panelIdForRegion).toBe("function");
+  });
+
+  it("exports the menu renderer contract and its default renderer id", () => {
+    expectExported(RENDERER_IDS);
+
+    // The annotation below is the contract proof: `MenuRendererProps` has to be
+    // importable from the entry point with the documented shape.
+    const BrandMenu = (props: MenuRendererProps): null => {
+      void props.items;
+      void props.kind;
+      void props.targetKind;
+      void props.position;
+      void props.availability;
+      void props.onCommand;
+      void props.onClose;
+      return null;
+    };
+
+    expect(typeof BrandMenu).toBe("function");
+    expect(uiReact.DEFAULT_MENU_RENDERER_ID).toBe("nodera.menu.default");
   });
 });

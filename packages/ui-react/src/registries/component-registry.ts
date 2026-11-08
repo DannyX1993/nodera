@@ -3,6 +3,7 @@ import type { ComponentType } from "react";
 import type { ValidationIssue } from "@nodera/contracts";
 import type { PropertyDefinition } from "@nodera/property-system";
 import type {
+  MenuTargetKind,
   PanelDefinition,
   ToolAvailabilityContext,
   ToolCommand,
@@ -44,6 +45,32 @@ export interface ToolbarRendererProps {
   readonly tools: readonly ToolDefinition[];
   readonly availability: ToolAvailabilityContext;
   readonly onCommand: (command: ToolCommand) => void;
+}
+
+/**
+ * Props of a menu renderer (Level 2 replacement of the menu presentation).
+ *
+ * The menu *content* is not part of this contract: `items` is the target-shaped
+ * tool list the built-in path would render, resolved from the `ToolRegistry`
+ * and the open-menu state of the `UiStateStore`. A renderer therefore replaces
+ * the presentation only — it decides how the offered tools look and how they
+ * are activated, never which tools the editor offers or what a command does.
+ */
+export interface MenuRendererProps {
+  /** Tools offered for the open menu, already shaped by the target kind. */
+  readonly items: readonly ToolDefinition[];
+  /** Kind of menu the UI state opened. */
+  readonly kind: "context" | "panel";
+  /** Element the menu was opened for. */
+  readonly targetKind: MenuTargetKind;
+  /** Pointer position, in host coordinates. */
+  readonly position: { readonly x: number; readonly y: number };
+  /** Live editor facts a renderer evaluates availability against. */
+  readonly availability: ToolAvailabilityContext;
+  /** Runs a declarative command and closes the menu. */
+  readonly onCommand: (command: ToolCommand) => void;
+  /** Closes the menu without running anything. */
+  readonly onClose: () => void;
 }
 
 /**
@@ -117,11 +144,19 @@ export class ComponentRegistry<TProps> {
   }
 }
 
-/** The three replacement levels of the presentation layer (D3, S3). */
+/**
+ * The four replacement slots of the presentation layer (D3, S3).
+ *
+ * Each slot is an independent registry, so a host swaps one surface without
+ * touching the others: `panels` (Panel Renderer), `properties` (Property
+ * Renderer), `toolbars` (Toolbar Renderer) and `menus` (the menu presentation
+ * behind `ContextMenu`).
+ */
 export interface ComponentRenderers {
   readonly panels: ComponentRegistry<PanelRendererProps>;
   readonly properties: ComponentRegistry<PropertyRendererProps>;
   readonly toolbars: ComponentRegistry<ToolbarRendererProps>;
+  readonly menus: ComponentRegistry<MenuRendererProps>;
 }
 
 /**
@@ -136,5 +171,6 @@ export function createComponentRenderers(): ComponentRenderers {
     panels: new ComponentRegistry<PanelRendererProps>(),
     properties: new ComponentRegistry<PropertyRendererProps>(),
     toolbars: new ComponentRegistry<ToolbarRendererProps>(),
+    menus: new ComponentRegistry<MenuRendererProps>(),
   };
 }

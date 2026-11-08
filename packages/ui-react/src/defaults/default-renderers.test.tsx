@@ -50,6 +50,14 @@ describe("createDefaultComponentRenderers", () => {
     expect(renderers.toolbars.size).toBe(0);
   });
 
+  it("keeps the menus registry empty so the built-in menu stays the default", () => {
+    const renderers = createDefaultComponentRenderers();
+
+    // A host registers or replaces `nodera.menu.default` to swap the menu presentation.
+    expect(renderers.menus.size).toBe(0);
+    expect(renderers.menus.listIds()).toEqual([]);
+  });
+
   it("merges the built-in property renderers for every property type", () => {
     const renderers = createDefaultComponentRenderers();
 

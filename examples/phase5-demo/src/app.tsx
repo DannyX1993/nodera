@@ -21,6 +21,7 @@ import type { DockRegion, LayoutState, ToolDefinition } from "@nodera/ui-core";
 import {
   CanvasContainer,
   ContextMenu,
+  DEFAULT_MENU_RENDERER_ID,
   EditorShell,
   Header,
   PanelHost,
@@ -39,6 +40,7 @@ import {
 } from "@nodera/ui-react";
 
 import {
+  BrandMenu,
   BrandPalette,
   BrandStringField,
   DefaultPalettePanel,
@@ -92,6 +94,7 @@ export function Workspace(props: { readonly editor: EditorEngine }): ReactNode {
   const preferences = useMemo(() => createMemoryLayoutPreferenceStore(), []);
   const [status, setStatus] = useState("Ready — Phase 5 host composition");
   const [brand, setBrand] = useState(false);
+  const [brandMenu, setBrandMenu] = useState(false);
 
   const tools = useMemo<readonly ToolDefinition[]>(() => {
     const registered = toolRegistry.all();
@@ -243,6 +246,52 @@ export function Workspace(props: { readonly editor: EditorEngine }): ReactNode {
     });
   };
 
+  /**
+   * Swaps the menu presentation at runtime.
+   *
+   * The built-in menu is the default, so "back to built-in" is an `unregister`
+   * of the renderer id rather than a second registration: `menus` starts empty
+   * in `createDefaultComponentRenderers()`. The registry is the object the
+   * provider holds, so the `ContextMenu` of this composition resolves the new
+   * component on the next render — no remount, no second provider.
+   */
+  const toggleMenuRenderer = (): void => {
+    const next = !brandMenu;
+    if (next) {
+      renderers.menus.replace(DEFAULT_MENU_RENDERER_ID, BrandMenu);
+    } else {
+      renderers.menus.unregister(DEFAULT_MENU_RENDERER_ID);
+    }
+    setBrandMenu(next);
+    setStatus(
+      next
+        ? "Menu renderer: BrandMenu draws the open menu (items still come from the tool registry)"
+        : "Menu renderer: back to the built-in menu",
+    );
+  };
+
+  /**
+   * Opens the context menu without a right-click.
+   *
+   * Only the *position* is fixed; the content is the store's: a node menu when
+   * something is selected (the node and selection tools apply), a pane menu
+   * otherwise (only the unconditional tools do).
+   */
+  const openFixedMenu = (): void => {
+    const selected = editor.getSelectedNodes()[0];
+    uiActions.openMenu({
+      kind: "context",
+      targetKind: selected === undefined ? "pane" : "node",
+      targetId: selected ?? "",
+      position: { x: 280, y: 200 },
+    });
+    setStatus(
+      selected === undefined
+        ? "Opened a pane menu at a fixed position — select a node for the node tools"
+        : `Opened a node menu for '${selected}' at a fixed position`,
+    );
+  };
+
   return (
     <div
       data-demo-app=""
@@ -366,6 +415,26 @@ export function Workspace(props: { readonly editor: EditorEngine }): ReactNode {
                       onClick={toggleBrand}
                     >
                       {brand ? "Renderers: brand" : "Renderers: default"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="demo-button"
+                      data-demo-control="menu-renderer"
+                      data-active={brandMenu}
+                      aria-pressed={brandMenu}
+                      onClick={toggleMenuRenderer}
+                    >
+                      {brandMenu ? "Menu: brand" : "Menu: built-in"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="demo-button"
+                      data-demo-control="open-menu"
+                      onClick={openFixedMenu}
+                    >
+                      Open menu
                     </button>
                   </div>
                 }

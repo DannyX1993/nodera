@@ -1,11 +1,11 @@
 /**
  * Host-authored renderers of the Phase 5 demo (S3 Level 2).
  *
- * Nothing here is framework code: the demo host replaces a panel renderer and a
- * property renderer with its own markup, and contributes a custom port renderer
- * to the canvas adapter's registry. That is exactly the customization contract —
- * the definitions keep their stable renderer ids, and the host decides which
- * component an id resolves to.
+ * Nothing here is framework code: the demo host replaces a panel renderer, a
+ * property renderer and the menu presentation with its own markup, and
+ * contributes a custom port renderer to the canvas adapter's registry. That is
+ * exactly the customization contract — the definitions keep their stable
+ * renderer ids, and the host decides which component an id resolves to.
  */
 
 import type { ReactNode } from "react";
@@ -23,10 +23,12 @@ import {
 // React Flow `Handle`. The adapter re-exports its own registries and prop
 // contracts, but not React Flow itself (AGENTS.md §4.1).
 import { Handle, Position } from "@xyflow/react";
+import { isToolAvailable } from "@nodera/ui-core";
 import {
   NodePalette,
   ValidationPanel,
   useEditorEngine,
+  type MenuRendererProps,
   type PanelRendererProps,
   type PropertyRendererProps,
 } from "@nodera/ui-react";
@@ -92,6 +94,122 @@ export function BrandPalette(_props: PanelRendererProps): ReactNode {
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Level 2: menu renderer replacement                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Brand menu.
+ *
+ * The menu *content* is still the framework's: `items` is the tool list the
+ * registry produced for the open target, and `availability` is the live editor
+ * facts the built-in path evaluates. Only the presentation is the host's — a
+ * header row, its own item markup and a close button — which is exactly what
+ * replacing a renderer means (S3 Level 2). Commands keep flowing through the
+ * framework dispatcher, so undo, delete or panel placement exist once.
+ *
+ * Styles are inline and token-driven (`var(--ndr-*, fallback)`) like every other
+ * Nodera surface, so the menu follows the active theme with no stylesheet.
+ */
+export function BrandMenu(props: MenuRendererProps): ReactNode {
+  return (
+    <div
+      data-demo-brand-menu=""
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--ndr-spacing-xs, 2px)",
+        minWidth: 180,
+      }}
+    >
+      <div
+        data-demo-brand-menu-header=""
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "var(--ndr-spacing-sm, 4px)",
+          padding: "0 var(--ndr-spacing-xs, 2px) var(--ndr-spacing-xs, 2px)",
+          borderBottom: "var(--ndr-borders-width, 1px) solid var(--ndr-colors-border, #d8dee9)",
+          color: "var(--ndr-colors-text-muted, #5b6472)",
+          fontSize: "var(--ndr-typography-font-size-sm, 11px)",
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+        }}
+      >
+        <span>
+          {props.kind === "context" ? "Context" : "Panel"} · {props.targetKind}
+        </span>
+        <button
+          type="button"
+          data-demo-brand-menu-close=""
+          aria-label="Close menu"
+          title="Close menu"
+          onClick={props.onClose}
+          style={{
+            all: "unset",
+            cursor: "pointer",
+            padding: "0 var(--ndr-spacing-xs, 2px)",
+            color: "var(--ndr-colors-text-muted, #5b6472)",
+          }}
+        >
+          ✕
+        </button>
+      </div>
+      {props.items.length === 0 ? (
+        <p
+          data-demo-brand-menu-empty=""
+          style={{
+            margin: 0,
+            padding: "var(--ndr-spacing-sm, 4px)",
+            color: "var(--ndr-colors-text-muted, #5b6472)",
+            fontSize: "var(--ndr-typography-font-size-sm, 11px)",
+          }}
+        >
+          No actions for this target
+        </p>
+      ) : (
+        props.items.map((tool) => {
+          const enabled = isToolAvailable(tool, props.availability);
+          return (
+            <button
+              key={tool.id}
+              type="button"
+              role="menuitem"
+              data-demo-brand-menu-item={tool.id}
+              disabled={!enabled}
+              title={tool.description ?? tool.label}
+              onClick={() => {
+                props.onCommand(tool.command);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--ndr-spacing-xs, 2px)",
+                width: "100%",
+                padding: "var(--ndr-spacing-xs, 2px) var(--ndr-spacing-sm, 4px)",
+                border: "var(--ndr-borders-width, 1px) solid var(--ndr-colors-border, #d8dee9)",
+                borderRadius: "var(--ndr-borders-radius-md, 5px)",
+                background: "transparent",
+                color: enabled
+                  ? "var(--ndr-colors-text, #111827)"
+                  : "var(--ndr-colors-text-muted, #5b6472)",
+                font: "inherit",
+                textAlign: "start",
+                cursor: enabled ? "pointer" : "default",
+                opacity: enabled ? 1 : 0.6,
+              }}
+            >
+              <span aria-hidden="true">{tool.icon ?? "›"}</span>
+              <span>{tool.label}</span>
+            </button>
+          );
+        })
+      )}
     </div>
   );
 }
