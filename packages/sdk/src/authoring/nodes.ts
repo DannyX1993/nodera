@@ -9,7 +9,6 @@
  */
 
 import { err, ok, type Result } from "@nodera/contracts";
-import type { ValidationIssue } from "@nodera/contracts";
 import { validateNodeDefinition } from "@nodera/node-registry";
 import type { NodeDefinition } from "@nodera/node-registry";
 import type { PropertyDefinition } from "@nodera/property-system";
@@ -17,6 +16,7 @@ import { sdkError, isQualifiedId, type SdkIssue, type SdkIssues } from "../error
 import { toPortDeclarations, type PortGroupInput } from "./ports.js";
 import { toPropertyDefinition, type PropertyInput } from "./properties.js";
 import type { RendererBinding } from "./renderer-binding.js";
+import { fromDomainValidationIssues } from "./validation-issues.js";
 
 /** Version given to a definition that does not declare one. */
 export const DEFAULT_DEFINITION_VERSION = "1.0.0";
@@ -53,19 +53,6 @@ export interface NodeDefinitionTranslation {
   readonly renderer?: RendererBinding;
   /** Renderers of `custom` properties, derived from the node type. */
   readonly components: readonly RendererBinding[];
-}
-
-function fromValidationIssues(issues: readonly ValidationIssue[]): SdkIssue[] {
-  return issues.map((issue) => ({
-    code: "sdk.invalid-input" as const,
-    severity: issue.severity === "error" ? ("error" as const) : ("warning" as const),
-    message: issue.message,
-    ...(issue.propertyPath === undefined ? {} : { path: issue.propertyPath }),
-    metadata: {
-      domainCode: issue.code,
-      ...(issue.elementId === undefined ? {} : { elementId: issue.elementId }),
-    },
-  }));
 }
 
 /**
@@ -149,7 +136,7 @@ export function toNodeDefinition(
     ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
   };
 
-  const domainIssues = fromValidationIssues(validateNodeDefinition(definition));
+  const domainIssues = fromDomainValidationIssues(validateNodeDefinition(definition));
   if (domainIssues.length > 0) {
     return err(domainIssues);
   }
