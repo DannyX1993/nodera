@@ -24,6 +24,12 @@ nothing moves unless the host asks.
 | Edge insertion (`builder.graph.insertNode`) | The builder, in `mode: "auto"`, anchored on the edge's **source**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node and the two edges that replace the original. |
 | Phantom "+" (`addNode({ after })` + `connect`) | The builder, in `mode: "auto"`, anchored on the node the placeholder followed — exactly the `after` rule. **Two** history units: the node, then the edge, because both are separate SDK calls (see [The phantom empty state](#the-phantom-empty-state)). |
 
+A host that declares a ranked layout applies it once at boot — compose, seed, then
+`builder.graph.arrange()` — otherwise the first paint shows the add-time grid
+rather than the layout the host declared. `examples/layout-switch-demo` does
+exactly that in `createDemoBuilder`, and every later recalculation is its own
+explicit call.
+
 Three invariants hold in every mode:
 
 - **No framework default moves a node.** There is no automatic re-layout on an

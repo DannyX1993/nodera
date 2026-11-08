@@ -98,5 +98,9 @@ export function createDemoBuilder(): Builder {
   );
 
   seedGraph(builder);
+  // Boot sequence of a host that declares a ranked layout: compose, seed, then
+  // apply the layout once. Without it the first paint shows the add-time grid,
+  // which is not what a layered host wants a person to see on load.
+  assertValid(builder.graph.arrange());
   return builder;
 }
