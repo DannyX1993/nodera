@@ -42,6 +42,8 @@ import {
   type BuilderAdapter,
 } from "../adapter/adapter.js";
 import { toEdgeDefinition, type EdgeDefinitionInput } from "../authoring/edges.js";
+import { createDocumentApi, type BuilderDocumentApi } from "../document/document-api.js";
+import { createGraphApi, type BuilderGraphApi } from "../graph/graph-api.js";
 import { toNodeDefinition, type NodeDefinitionInput } from "../authoring/nodes.js";
 import { toPropertyDefinition, type PropertyInput } from "../authoring/properties.js";
 import type { RendererBinding } from "../authoring/renderer-binding.js";
@@ -100,6 +102,10 @@ export interface Builder {
   readonly store: UiStateStore;
   /** Document format and version the builder was configured with. */
   readonly documentFormat: BuilderDocumentFormat;
+  /** Graph-editing facade over the application use cases of the editing session. */
+  readonly graph: BuilderGraphApi;
+  /** Portable document facade over the phase-2 document and serializer packages. */
+  readonly document: BuilderDocumentApi;
   registerNode(input: NodeDefinitionInput): Result<NodeDefinition, SdkIssues>;
   registerEdge(input: EdgeDefinitionInput): Result<EdgeDefinition, SdkIssues>;
   registerProperty(input: PropertyInput): Result<PropertyDefinition, SdkIssues>;
@@ -335,6 +341,8 @@ class SdkBuilder implements Builder {
   readonly editor: EditorEngine;
   readonly store: UiStateStore;
   readonly documentFormat: BuilderDocumentFormat;
+  readonly graph: BuilderGraphApi;
+  readonly document: BuilderDocumentApi;
 
   private readonly domain: NoderaDomain;
   private bindings: RendererBindings;
@@ -352,6 +360,8 @@ class SdkBuilder implements Builder {
     this.documentFormat = options.documentFormat;
     this.domain = options.domain;
     this.bindings = options.renderers;
+    this.graph = createGraphApi(this.editor);
+    this.document = createDocumentApi(this.editor, this.documentFormat);
   }
 
   get renderers(): RendererBindings {
