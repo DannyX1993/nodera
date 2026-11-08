@@ -126,3 +126,21 @@ Implementar:
 
 **Resultado:** producto listo para ser consumido por aplicaciones externas.
 
+## Estado de implementación
+
+- **Fase 1. Domain Foundation** — implementada (`packages/domain`, `graph-model`,
+  `node-registry`, `edge-registry`, `property-system`, `contracts`, `validation`).
+- **Fase 2. Document Foundation** — implementada (`packages/document`,
+  `serialization-json`, `serialization-yaml`).
+- **Fase 3. Application Core** — implementada (`packages/application`,
+  `packages/history`).
+- **Fase 4. React Canvas Adapter** — implementada (`packages/canvas-react-flow`,
+  ejemplo `examples/phase4-demo`).
+- **Fase 5. UI Composition** — implementada (`packages/ui-core`, `ui-react`,
+  `theme-engine`, `layout-engine`, más las extensiones del adaptador para
+  renderizadores de puertos y drop desde la paleta; ejemplo `examples/phase5-demo`).
+  Node Palette, Properties Panel, Toolbar, Context Menu, Validation Panel,
+  Layout Engine, Theme Engine y Component Replacement quedan cubiertos, y la
+  interfaz es configurable y personalizable en los tres niveles descritos en
+  `docs/PRODUCT-DESCRIPTION.md` (tema, sustitución de renderizadores y composición
+  propia por parte del host).
