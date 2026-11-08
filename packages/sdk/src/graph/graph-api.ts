@@ -60,6 +60,23 @@ export interface AddNodeRequest {
   readonly nodeId?: string;
   readonly properties?: Readonly<Record<string, unknown>>;
   readonly position?: NodePosition;
+  /**
+   * Node instance the new node follows, when the host knows where it belongs.
+   *
+   * In `graph.layout.mode: "auto"` the new node takes the first free slot
+   * **forward** of this node's position along the declared axis, stepping by the
+   * configured `spacing`; an occupied slot is skipped forward, never backward.
+   * An anchor that carries no position places the node after the graph's extent,
+   * exactly like an absent anchor. An id the graph does not contain is refused
+   * with `sdk.invalid-input` at path `after` and nothing is created. In
+   * `"free"` mode the anchor places nothing, and an explicit `position` always
+   * wins over it.
+   *
+   * The host decides the anchor — the palette passes the single selected node or
+   * nothing, the edge "+" passes the edge source — so the SDK never reads the
+   * UI selection itself, and the placement stays a function of the graph.
+   */
+  readonly after?: string;
 }
 
 /** One edge to create between two node instances. */
@@ -415,6 +432,30 @@ function strategyDiagnosticIssue(
 }
 
 /**
+ * Issue for an anchor (`AddNodeRequest.after`) that is not in the graph.
+ *
+ * Placement never guesses where a node it cannot find sits: the add is refused
+ * at the field the caller wrote and nothing is created.
+ */
+function unknownAnchorIssue(anchorId: string): SdkIssue {
+  return {
+    ...sdkError(
+      "sdk.invalid-input",
+      `Graph has no node with id "${anchorId}" to place the new node after`,
+      {
+        path: ["after"],
+        metadata: {
+          value: anchorId,
+          useCaseCode: "node-not-found",
+          elementId: anchorId,
+        },
+      },
+    ),
+    severity: "error",
+  };
+}
+
+/**
  * Builds the graph facade of a builder over its editing session.
  *
  * The editor owns the graph, the history and the events; this API owns only
@@ -422,10 +463,12 @@ function strategyDiagnosticIssue(
  * Placement is decided before the use case runs: the API assigns a position
  * only when the host configured `graph.layout.mode: "auto"` and the request
  * carries none, so the position lands inside the same history unit as the
- * creation and an undo removes it with the node. `arrange` is the explicit
- * opposite of that: it asks the selected strategy about the whole graph and
- * applies the answer as one history unit, with the direction and spacings the
- * call overrides, if any.
+ * creation and an undo removes it with the node. Which slot is decided from the
+ * occupied positions, the settings and the position of the anchor the host named
+ * in `after` — never from a selection or a canvas, which this boundary cannot
+ * see. `arrange` is the explicit opposite of that: it asks the selected strategy
+ * about the whole graph and applies the answer as one history unit, with the
+ * direction and spacings the call overrides, if any.
  * `isDisposed` is the builder's own lifecycle flag: a disposed builder refuses
  * every mutation with `sdk.disposed` and keeps every read working, because the
  * state the host already received must stay renderable.
@@ -451,13 +494,27 @@ export function createGraphApi(
         (request.properties === undefined
           ? undefined
           : propertyMapIssues(request.properties)) ??
-        (request.position === undefined ? undefined : positionIssues(request.position));
+        (request.position === undefined ? undefined : positionIssues(request.position)) ??
+        (request.after === undefined
+          ? undefined
+          : identifierIssues("Anchor node", request.after, ["after"]));
       if (invalid !== undefined) {
         return err(invalid);
       }
+      // The anchor is resolved once, before anything is created: an id the graph
+      // does not hold is a refusal, not a placement guess, in every mode.
+      const anchor =
+        request.after === undefined ? undefined : editor.getNode(request.after);
+      if (request.after !== undefined && anchor === undefined) {
+        return err([unknownAnchorIssue(request.after)]);
+      }
       const position =
         request.position ??
-        placeUnpositionedNode(occupiedPositions(editor.graph.getNodes()), graphLayout);
+        placeUnpositionedNode(
+          occupiedPositions(editor.graph.getNodes()),
+          graphLayout,
+          anchor?.position,
+        );
       const added = addNode(editor, {
         definitionId: request.type,
         ...(request.nodeId === undefined ? {} : { nodeId: request.nodeId }),

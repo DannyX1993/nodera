@@ -472,8 +472,9 @@ Who owns node placement is host configuration, never a behaviour the framework
 invents. `"free"` (the default) is exactly the previous behaviour: a node added
 without a position stays unpositioned, and the canvas adapter decides how to
 render it until the host places it. `"auto"` places **only the nodes the host
-left unpositioned**, on a grid anchored at the origin; a node that already
-carries a position is never moved.
+left unpositioned**, at the slot that follows the anchor the host named or, with
+no anchor, the end of the graph; a node that already carries a position is never
+moved.
 
 ```ts
 createBuilder({
@@ -503,6 +504,44 @@ created: nothing is guessed and no geometry is invented.
 Re-laying out an existing graph is **not** part of the add: adding an edge or a
 node never recalculates the whole graph. That is `graph.arrange()`, the explicit
 `Arrange` command described below.
+
+#### Where `mode: "auto"` puts the new node — `AddNodeRequest.after`
+
+The slot is a pure function of three things: the positions the document already
+carries, the configured axis and `spacing`, and the **anchor** the host names in
+`after` (a node instance id).
+
+- **With an anchor that carries a position**: the first free slot **forward** of
+  the anchor along `direction`, stepping by `spacing`. An occupied slot is
+  skipped forward, never backward, so the node always lands after the node it was
+  asked to follow, even when a slot behind that node is free.
+- **With an anchor that carries no position, or with no anchor at all**: the node
+  lands after the graph's extent. The farthest occupied slot along the axis keeps
+  its own row, the candidate starts one `spacing` step past it, and the first
+  free slot from there wins.
+- **Empty graph**: the origin.
+- **An explicit `position` in the request** always wins over any anchor.
+- **`mode: "free"`** ignores the anchor for placement and invents no position.
+
+An anchor id the graph does not contain is refused with `sdk.invalid-input` at
+path `after`, and nothing is created: placement never guesses where a node it
+cannot find sits.
+
+```ts
+const anchor = assertValid(builder.graph.addNode({ type: "demo.fetch" }));
+const next = assertValid(
+  builder.graph.addNode({ type: "demo.parse", after: anchor.id }),
+);
+// next.position: one `spacing` step past the anchor along `direction`
+```
+
+**The host decides the anchor, the SDK never reads the UI selection.** A palette
+passes `after` only when exactly one node is selected, and nothing when the
+selection is empty (or wider than one); the edge "+" passes the edge source. The
+answer depends on the document alone, so it is the same whatever the node ids,
+the storage order and how often the host repeats the call for the same state. The
+chosen slot belongs to the same history unit as the creation: one `undo()`
+removes the node, `redo()` puts it back where it was.
 
 ### Graph layout strategies — `builder.graphLayout`
 

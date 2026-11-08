@@ -5,12 +5,18 @@
  * configures `graph.layout`, adds instances and reads back the position of the
  * instance views. Nothing reads internal storage, and nothing places a node the
  * host already positioned.
+ *
+ * The anchored rules read the anchor's position and the graph's positions and
+ * nothing else: the host decides which node is the anchor, so the SDK never
+ * looks at a selection itself.
  */
 
 import { describe, expect, it } from "vitest";
+import type { Result } from "@nodera/contracts";
 import type { NodeDefinitionInput } from "../authoring/nodes.js";
 import { createBuilder, type Builder } from "../builder/builder.js";
 import type { BuilderConfiguration, BuilderGraphConfiguration } from "../builder/configuration.js";
+import type { SdkIssues } from "../errors.js";
 import type { NodeInstanceView } from "../view/instances.js";
 
 const STEP = "flow.step";
@@ -62,6 +68,46 @@ function added(builder: Builder, position?: { readonly x: number; readonly y: nu
   return result.value;
 }
 
+/**
+ * The instance of a successful add, failing the test when the SDK refused it.
+ *
+ * The anchored cases need an explicit instance id and the `after` anchor, so
+ * they write the whole request instead of going through {@link added}.
+ */
+function placed(result: Result<NodeInstanceView, SdkIssues>): NodeInstanceView {
+  if (!result.ok) {
+    throw new Error(
+      `unexpected add-node failure: ${result.error.map((issue) => issue.code).join(", ")}`,
+    );
+  }
+  return result.value;
+}
+
+/**
+ * Loads nodes a host authored as a document.
+ *
+ * It is how a node **without** a position reaches an `auto` builder: `addNode`
+ * would have placed it, so the only honest way to reach that state is the
+ * import a host performs with its own document.
+ */
+function importNodes(
+  builder: Builder,
+  nodes: readonly Readonly<Record<string, unknown>>[],
+): void {
+  const imported = builder.document.import({
+    format: "ggd",
+    version: "1.1.0",
+    metadata: { id: "graph-placement" },
+    extensions: [],
+    graph: { nodes, edges: [] },
+  });
+  if (!imported.ok) {
+    throw new Error(
+      `unexpected import failure: ${imported.error.map((issue) => issue.code).join(", ")}`,
+    );
+  }
+}
+
 function buildFailure(
   layout: unknown,
 ): readonly { readonly code: string; readonly path?: readonly string[] }[] {
@@ -81,6 +127,15 @@ describe("graph layout: free mode", () => {
   it("leaves a node unpositioned when the host asks for free placement", () => {
     const builder = builderWith({ mode: "free" });
     expect(added(builder).position).toBeUndefined();
+  });
+
+  it("ignores the anchor and invents no position", () => {
+    const builder = builderWith({ mode: "free" });
+    const anchor = placed(
+      builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 0, y: 0 } }),
+    );
+
+    expect(placed(builder.graph.addNode({ type: STEP, after: anchor.id })).position).toBeUndefined();
   });
 });
 
@@ -117,12 +172,26 @@ describe("graph layout: automatic placement", () => {
     const forward = builderWith({ mode: "auto" });
     added(forward, { x: 240, y: 0 });
     added(forward, { x: 480, y: 0 });
-    expect(added(forward).position).toEqual({ x: 0, y: 0 });
+    expect(added(forward).position).toEqual({ x: 720, y: 0 });
 
     const backward = builderWith({ mode: "auto" });
     added(backward, { x: 480, y: 0 });
     added(backward, { x: 240, y: 0 });
-    expect(added(backward).position).toEqual({ x: 0, y: 0 });
+    expect(added(backward).position).toEqual({ x: 720, y: 0 });
+  });
+
+  it("lands after the graph's extent when the host declares no anchor", () => {
+    const builder = builderWith({ mode: "auto" });
+    added(builder, { x: 0, y: 0 });
+    added(builder, { x: 240, y: 0 });
+    expect(added(builder).position).toEqual({ x: 480, y: 0 });
+  });
+
+  it("keeps the farthest row and steps past the extent along the vertical axis", () => {
+    const builder = builderWith({ mode: "auto", direction: "vertical" });
+    added(builder, { x: 0, y: 0 });
+    added(builder, { x: 0, y: 240 });
+    expect(added(builder).position).toEqual({ x: 0, y: 480 });
   });
 
   it("keeps a position the host supplied itself", () => {
@@ -156,6 +225,155 @@ describe("graph layout: automatic placement", () => {
       x: 240,
       y: 0,
     });
+  });
+});
+
+describe("graph layout: anchored placement", () => {
+  it("lands the first free slot forward of the anchor along the axis", () => {
+    const builder = builderWith({ mode: "auto" });
+    const anchor = placed(
+      builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 0, y: 0 } }),
+    );
+    placed(builder.graph.addNode({ type: STEP, nodeId: "sibling", position: { x: 240, y: 0 } }));
+
+    expect(placed(builder.graph.addNode({ type: STEP, after: anchor.id })).position).toEqual({
+      x: 480,
+      y: 0,
+    });
+  });
+
+  it("skips an occupied slot forward and never backward", () => {
+    const builder = builderWith({ mode: "auto" });
+    // The slot behind the anchor stays empty: placement only ever steps ahead.
+    placed(builder.graph.addNode({ type: STEP, nodeId: "behind", position: { x: 240, y: 0 } }));
+    const anchor = placed(
+      builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 480, y: 0 } }),
+    );
+
+    expect(placed(builder.graph.addNode({ type: STEP, after: anchor.id })).position).toEqual({
+      x: 720,
+      y: 0,
+    });
+  });
+
+  it("steps forward along the vertical axis", () => {
+    const builder = builderWith({ mode: "auto", direction: "vertical" });
+    const anchor = placed(
+      builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 0, y: 240 } }),
+    );
+    placed(builder.graph.addNode({ type: STEP, nodeId: "sibling", position: { x: 0, y: 480 } }));
+
+    expect(placed(builder.graph.addNode({ type: STEP, after: anchor.id })).position).toEqual({
+      x: 0,
+      y: 720,
+    });
+  });
+
+  it("keeps the anchor's row and steps by the configured spacing", () => {
+    const builder = builderWith({ mode: "auto", spacing: 100 });
+    const anchor = placed(
+      builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 50, y: 300 } }),
+    );
+
+    expect(placed(builder.graph.addNode({ type: STEP, after: anchor.id })).position).toEqual({
+      x: 150,
+      y: 300,
+    });
+  });
+
+  it("lands after the graph's extent when the anchor carries no position", () => {
+    const builder = builderWith({ mode: "auto" });
+    importNodes(builder, [
+      { id: "placed", type: STEP, position: { x: 240, y: 0 } },
+      { id: "unplaced", type: STEP },
+    ]);
+
+    expect(placed(builder.graph.addNode({ type: STEP, after: "unplaced" })).position).toEqual({
+      x: 480,
+      y: 0,
+    });
+  });
+
+  it("lets an explicit position win over the anchor", () => {
+    const builder = builderWith({ mode: "auto" });
+    const anchor = placed(
+      builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 0, y: 0 } }),
+    );
+
+    expect(
+      placed(
+        builder.graph.addNode({ type: STEP, after: anchor.id, position: { x: 900, y: 900 } }),
+      ).position,
+    ).toEqual({ x: 900, y: 900 });
+  });
+
+  it("keeps an anchored position inside the add-node history unit", () => {
+    const builder = builderWith({ mode: "auto" });
+    const anchor = placed(
+      builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 0, y: 0 } }),
+    );
+    const child = placed(builder.graph.addNode({ type: STEP, nodeId: "child", after: anchor.id }));
+    expect(child.position).toEqual({ x: 240, y: 0 });
+
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.nodes().map((node) => node.id)).toEqual([anchor.id]);
+
+    expect(builder.graph.redo()).toBe(true);
+    expect(builder.graph.nodes().find((node) => node.id === child.id)?.position).toEqual({
+      x: 240,
+      y: 0,
+    });
+  });
+
+  it("answers the same slot for the same state whatever the ids, the order or the repetition", () => {
+    const forward = builderWith({ mode: "auto" });
+    const first = placed(
+      forward.graph.addNode({ type: STEP, nodeId: "zulu", position: { x: 0, y: 0 } }),
+    );
+    placed(forward.graph.addNode({ type: STEP, nodeId: "alpha", position: { x: 240, y: 0 } }));
+    const slot = placed(forward.graph.addNode({ type: STEP, after: first.id })).position;
+    expect(slot).toEqual({ x: 480, y: 0 });
+
+    // The same positions stored in the other order, under other ids.
+    const backward = builderWith({ mode: "auto" });
+    placed(backward.graph.addNode({ type: STEP, nodeId: "alpha", position: { x: 240, y: 0 } }));
+    const second = placed(
+      backward.graph.addNode({ type: STEP, nodeId: "zulu", position: { x: 0, y: 0 } }),
+    );
+    expect(placed(backward.graph.addNode({ type: STEP, after: second.id })).position).toEqual(slot);
+
+    // And the same state again, after undoing the anchored add.
+    forward.graph.undo();
+    expect(placed(forward.graph.addNode({ type: STEP, after: first.id })).position).toEqual(slot);
+  });
+
+  const refusedAnchors: readonly { readonly request: unknown; readonly path: readonly string[] }[] = [
+    { request: { type: STEP, after: "ghost" }, path: ["after"] },
+    { request: { type: STEP, after: "not an id" }, path: ["after"] },
+    { request: { type: STEP, after: 42 }, path: ["after"] },
+  ];
+
+  it.each(refusedAnchors)("refuses an unusable anchor at $path and creates nothing", ({
+    request,
+    path,
+  }) => {
+    const builder = builderWith({ mode: "auto" });
+    const anchor = placed(
+      builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 0, y: 0 } }),
+    );
+
+    const result = builder.graph.addNode(request as { readonly type: string });
+    if (result.ok) {
+      throw new Error("expected the unusable anchor to be refused");
+    }
+    expect(result.error[0]?.code).toBe("sdk.invalid-input");
+    expect(result.error[0]?.path).toEqual(path);
+    expect(builder.graph.nodes().map((node) => node.id)).toEqual([anchor.id]);
+
+    // The refusal is not a history entry: one undo reverts the anchor's own add.
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.nodeCount()).toBe(0);
+    expect(builder.graph.canUndo()).toBe(false);
   });
 });
 

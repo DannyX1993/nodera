@@ -19,7 +19,7 @@ nothing moves unless the host asks.
 | | Who places a node |
 | --- | --- |
 | `mode: "free"` (the default) | The host. A node added without a position keeps no position; the canvas adapter decides how to render it until the host places it. |
-| `mode: "auto"` | The builder, and only for the nodes the host left unpositioned: the first free slot of a grid anchored at the origin, at add time. A node that already carries a position is never moved. |
+| `mode: "auto"` | The builder, and only for the nodes the host left unpositioned: the first free slot **forward** of the anchor the host names (`AddNodeRequest.after`), or the slot one step past the graph's extent when there is no anchor, at add time. A node that already carries a position is never moved. |
 | `Arrange` (explicit) | The selected strategy, for every node of the graph, when the host calls `builder.graph.arrange()`. One history unit. |
 
 Three invariants hold in every mode:
@@ -32,6 +32,41 @@ Three invariants hold in every mode:
   the host writes, never a control the framework puts in front of a user. A host
   that wants controls writes them itself, as the example does.
 
+### Where an added node lands
+
+`mode: "auto"` answers one slot, from three inputs and no others: the positions
+the document already carries, the configured `direction` and `spacing`, and the
+anchor the host names in `AddNodeRequest.after` (a node instance id).
+
+| The request | The slot |
+| --- | --- |
+| `after` names a node **with** a position | The first free slot **forward** of that node along the axis, stepping by `spacing`. A taken slot pushes the candidate forward, never backward. |
+| `after` names a node **without** a position | After the graph's extent: the farthest occupied slot along the axis keeps its own row, the candidate starts one step past it, the first free slot from there wins. |
+| No `after` at all | The same extent rule: the new node lands at the end of the graph. |
+| Empty graph | The origin. |
+| An explicit `position` | Whatever the request says: it wins over any anchor. |
+| `mode: "free"` | Nothing. `after` places nothing and no position is invented. |
+
+An anchor id the graph does not contain is refused with `sdk.invalid-input` at
+path `after`, and nothing is created — placement never guesses where a node it
+cannot find sits. Ties on the axis are broken by the smaller perpendicular
+coordinate, so the slot depends only on the set of positions: node ids and
+storage order never change it.
+
+```ts
+const anchor = assertValid(builder.graph.addNode({ type: "acme.http.request" }));
+const next = assertValid(
+  builder.graph.addNode({ type: "acme.http.request", after: anchor.id }),
+);
+// next.position: one `spacing` step past the anchor along `direction`
+```
+
+**The anchor is the host's decision, never the framework's.** The palette passes
+the node when exactly one is selected and nothing when the selection is empty;
+the edge "+" passes the edge source. The SDK reads the anchor's position and the
+graph's positions and nothing else: it never looks at a selection, a canvas or an
+editor state, which is why the same document always yields the same slot.
+
 ## The layer split
 
 Placement is not a single-layer feature. Each part lives where the architecture
@@ -41,7 +76,7 @@ puts it (AGENTS.md §4, §12; odd task S5):
 | --- | --- | --- |
 | Geometry | `@nodera/graph-layout` | The strategy port, the `free` no-op, the in-house layered strategy and the registry. Plain data in, positions or a diagnostic out. No React, no React Flow, no graph instance. |
 | Position writes | `@nodera/application` | `arrangeGraph(editor, { moves })` validates every id and position first, then writes the whole answer as one reversible history unit (`arrange-graph`). All-or-nothing: a rejected move writes nothing, pushes nothing and emits nothing. |
-| Add-time grid | `@nodera/sdk` | `resolveGraphLayout`, `placeUnpositionedNode` and `nextFreeSlot` decide a position **before** the `add-node` use case runs, so it belongs to the same history unit as the creation. |
+| Add-time placement | `@nodera/sdk` | `resolveGraphLayout`, `placeUnpositionedNode` and `nextFreeSlot` decide a position **before** the `add-node` use case runs, so it belongs to the same history unit as the creation. The anchor (`AddNodeRequest.after`) is a node id the host chose; the rule reads its position and the graph's, nothing else. |
 | Configuration and command | `@nodera/sdk` | `graph.layout`, `builder.graphLayout` and `builder.graph.arrange(request?)`. The SDK reads the graph as plain data, asks the selected strategy and applies the answer through the use case above. |
 | Rendering and affordances | `@nodera/react-flow`, `@nodera/ui-*` | The canvas renders positions **from the document**; the node-creation dialog and its "+" affordance (which is how a node enters the graph in the first place) live in `ui-react`/`ui-core`. Neither calls `arrange`, and neither ships a placement control. |
 
@@ -85,10 +120,11 @@ const builder = assertValid(
   }),
 );
 
-// Add time: only the nodes without a position, on the grid anchored at the origin.
+// Add time: only the nodes without a position, in the slot the anchor or the
+// graph's extent points at.
 const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }));
 // placed.position === { x: 0, y: 0 }; with direction "vertical" the next one is
-// { x: 0, y: 160 }
+// { x: 0, y: 160 }; with `after: placed.id` it is the slot right after `placed`.
 ```
 
 An invalid value is a configuration problem and fails closed: `createBuilder`
@@ -153,7 +189,9 @@ every layout action in its own toolbar **above** the canvas:
 - one explicit Arrange button running that call;
 - the `CreateNodeButton` from `@nodera/ui-react`, which opens the framework's
   node-creation dialog; the host adds the chosen definition with
-  `builder.graph.addNode`, and `mode: "auto"` gives it a free slot;
+  `builder.graph.addNode`, passing the anchor it chose (`after`) or none, and
+  `mode: "auto"` gives it the slot that follows. The demo passes none, so a new
+  node lands at the end of the graph;
 - a status line printing what moved, or the `sdk.invalid-input` diagnostic that
   refused the call (an emptied spacing field is refused, not hidden).
 

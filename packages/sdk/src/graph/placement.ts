@@ -9,6 +9,11 @@
  * A position is never invented for a node the host positioned itself, and
  * `"free"` mode never places anything: the absence of a position means the host
  * has not placed the node yet, which is a state, not the origin.
+ *
+ * Placement reads three things and nothing else: the positions the document
+ * already carries, the resolved layout settings and the **position** of the
+ * anchor the host passed. It never sees an id, a selection or a canvas, which is
+ * what keeps the answer a function of the document alone.
  */
 
 import type { NodePosition } from "@nodera/graph-model";
@@ -77,40 +82,85 @@ export function occupiedPositions(
 /**
  * Position the add-node boundary assigns, or `undefined` when the host owns
  * placement.
+ *
+ * `anchorPosition` is the position of the node the host asked to place the new
+ * one after, when that node carries one. An anchor without a position is the
+ * same case as no anchor at all: the node lands after the graph's extent.
  */
 export function placeUnpositionedNode(
   occupied: readonly NodePosition[],
   layout: ResolvedGraphLayout,
+  anchorPosition?: NodePosition | undefined,
 ): NodePosition | undefined {
-  return layout.mode === "auto" ? nextFreeSlot(occupied, layout) : undefined;
+  return layout.mode === "auto"
+    ? nextFreeSlot(occupied, layout, anchorPosition)
+    : undefined;
 }
 
 /**
- * First free slot of a grid anchored at the origin.
+ * First free slot at or ahead of the point placement starts from.
  *
- * `horizontal` scans row-major (row 0 left to right, then row 1) and `vertical`
- * scans column-major, so a graph grows along the axis the host declared. The
- * scan is bounded by the number of occupied positions, which guarantees an
- * empty slot: a finite set of nodes cannot fill more slots than it has.
+ * With an anchor the walk starts one `spacing` step past it and keeps the
+ * anchor's own row; an occupied slot only ever pushes the candidate **forward**,
+ * never backward, so a new node always lands after the node it follows. Without
+ * an anchor the graph grows along the same rule, from the farthest slot it
+ * occupies.
+ *
+ * An empty graph — no occupied positions at all, which includes a document
+ * whose nodes carry no position yet — starts at the origin. The walk is bounded
+ * by the finite set of occupied slots, so it always terminates.
  */
 export function nextFreeSlot(
   occupied: readonly NodePosition[],
   layout: ResolvedGraphLayout,
+  anchorPosition?: NodePosition | undefined,
 ): NodePosition {
+  const start = anchorPosition ?? farthestSlot(occupied, layout);
+  if (start === undefined) {
+    return { x: 0, y: 0 };
+  }
   const taken = new Set(occupied.map(slotKey));
-  const limit = occupied.length;
   const vertical = layout.direction === "vertical";
-  for (let first = 0; first <= limit; first += 1) {
-    for (let second = 0; second <= limit; second += 1) {
-      const candidate = vertical
-        ? { x: first * layout.spacing, y: second * layout.spacing }
-        : { x: second * layout.spacing, y: first * layout.spacing };
-      if (!taken.has(slotKey(candidate))) {
-        return candidate;
-      }
+  const step = layout.spacing;
+  let candidate: NodePosition = vertical
+    ? { x: start.x, y: start.y + step }
+    : { x: start.x + step, y: start.y };
+  while (taken.has(slotKey(candidate))) {
+    candidate = vertical
+      ? { x: start.x, y: candidate.y + step }
+      : { x: candidate.x + step, y: start.y };
+  }
+  return candidate;
+}
+
+/**
+ * Farthest slot the graph occupies along the layout axis, or `undefined` when no
+ * node carries a position.
+ *
+ * The slot keeps its own perpendicular coordinate, so the next node shares the
+ * row (or column) of the end of the graph instead of jumping to a new one. Ties
+ * on the axis are broken by the smaller perpendicular coordinate, which makes
+ * the answer depend only on the set of positions: node ids and storage order
+ * never change it.
+ */
+function farthestSlot(
+  occupied: readonly NodePosition[],
+  layout: ResolvedGraphLayout,
+): NodePosition | undefined {
+  const vertical = layout.direction === "vertical";
+  let farthest: NodePosition | undefined;
+  for (const position of occupied) {
+    if (farthest === undefined) {
+      farthest = position;
+      continue;
+    }
+    const along = vertical ? position.y - farthest.y : position.x - farthest.x;
+    const across = vertical ? position.x - farthest.x : position.y - farthest.y;
+    if (along > 0 || (along === 0 && across < 0)) {
+      farthest = position;
     }
   }
-  throw new RangeError("Automatic placement found no free slot for a finite graph");
+  return farthest;
 }
 
 function slotKey(position: NodePosition): string {

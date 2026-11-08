@@ -233,6 +233,7 @@ escape hatch.
 | `id` (node instance) | identity of one node in a graph | `builder.graph.addNode` returns the instance | `NodeInstanceView.id`; generated from the definition when omitted |
 | `version` (instance) | definition version the instance was created against | the document when it pins one | `NodeInstanceView.version`, absent when the domain does not know it |
 | `position` | where the host placed the node | `AddNodeRequest.position` / `graph.moveNode` | `NodeInstanceView.position`, absent until the node is placed |
+| `after` | the node an unpositioned add follows | `AddNodeRequest.after` (a node instance id) | not read back: it decides the slot `NodeInstanceView.position` carries |
 | `label` | human-readable name of a definition | becomes `NodeDefinition.name` / `EdgeDefinition.name` | `NodeDefinitionView.label` / `EdgeDefinitionView.label` |
 | `defaultLabel` (edge definition) | label an instance may inherit | `EdgeDefinition.label` | `EdgeDefinitionView.defaultLabel` |
 | `category` | grouping of definitions in palettes and registries | required on `NodeDefinitionInput` | `NodeDefinitionView.category`; `registries.nodes.byCategory()` |
@@ -267,9 +268,15 @@ deviation from the illustrative contract in `docs/FASE6-DEFINITION.md`:
 `position` is document data and stays optional. `graph.layout.mode` defaults to
 `"free"`: the framework places nothing and `NodeInstanceView.position` stays
 absent until the host sets it. `mode: "auto"` assigns a position only to the
-nodes the host left unpositioned, on a grid anchored at the origin, honouring
-`direction` (`"horizontal" | "vertical"`) and `spacing` (default 240). No mode
-moves a node that already carries a position, and no mode re-lays out an
+nodes the host left unpositioned, honouring `direction` (`"horizontal" |
+"vertical"`) and `spacing` (default 240). The slot follows the anchor the host
+names in `AddNodeRequest.after` — the first free slot **forward** of it along the
+axis, stepping by `spacing` — and, with no anchor or an anchor that carries no
+position, the end of the graph: the farthest occupied slot keeps its own row and
+the candidate starts one step past it. An empty graph starts at the origin. An
+anchor id the graph does not contain is `sdk.invalid-input` at path `after` and
+nothing is created. No mode moves a node that already carries a position, an
+explicit `position` always wins over an anchor, and no mode re-lays out an
 existing graph on add or on read: that is an explicit `Arrange` action.
 
 ```ts
@@ -282,7 +289,18 @@ const builder = assertValid(
 
 const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }));
 // placed.position === { x: 0, y: 0 }; the next unpositioned node lands at { x: 0, y: 240 }
+
+const anchored = assertValid(
+  builder.graph.addNode({ type: "acme.http.request", after: placed.id }),
+);
+// the first free slot forward of `placed` along the axis
 ```
+
+**The host decides the anchor; the SDK never reads the UI selection.** A palette
+passes `after` when exactly one node is selected and nothing when there is no
+selection; the edge "+" passes the edge source. The SDK reads the anchor's
+position and the graph's positions and nothing else, so the answer cannot depend
+on node ids, on storage order or on how often the call is repeated.
 
 The whole feature — the two placement modes, the layer split, the defaults, the
 `Arrange` command and the example — is on one page: `docs/GRAPH-LAYOUT.md`.
