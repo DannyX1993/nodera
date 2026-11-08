@@ -54,6 +54,18 @@ used id is a `duplicate-id` error and an unknown one a `not-found` error, and
 nothing is overwritten silently. It keeps no default selection: a dialog is
 always opened by id, so an id nobody registered can never be shown.
 
+The registry seeds `DEFAULT_DIALOGS` so the framework's own "+" affordance works
+out of the box. That set currently holds one definition:
+`CREATE_NODE_DIALOG` (`nodera.dialog.create-node`, aliased by the exported
+`NODERA_CREATE_NODE_DIALOG_ID`) — title "Create node", a short description, the
+`"lg"` size token and `dismissible: true`. It is plain data: `ui-core` knows
+nothing about the palette or the command the renderer dispatches.
+
+`new DialogRegistry({ dialogs })` **replaces** the seeded list instead of
+extending it, exactly like `LayoutRegistry` treats `layouts`, so a host removes
+a built-in dialog by passing only its own definitions (`{ dialogs: [] }` for
+none). There is no second registry concept and no separate factory.
+
 ## Layout model types
 
 `DockRegion`, `PanelRegion`, `Rect`, `PanelState`, `LayoutState`,

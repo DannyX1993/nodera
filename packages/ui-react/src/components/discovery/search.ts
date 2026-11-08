@@ -82,20 +82,36 @@ export function searchGraph(
 export function groupDefinitionsByCategory(
   registry: NodeRegistry,
 ): readonly DefinitionCategoryGroup[] {
+  return groupDefinitions(registry.all());
+}
+
+/**
+ * Groups an explicit definition list for a palette.
+ *
+ * Same rules as {@link groupDefinitionsByCategory} over a list the host chose
+ * instead of a live registry (that is what lets a surface offer a narrowed
+ * palette without inventing a registry of its own). Categories are sorted
+ * alphabetically, definitions keep list order, and definitions without a
+ * category are collected last.
+ */
+export function groupDefinitions(
+  definitions: readonly NodeDefinition[],
+): readonly DefinitionCategoryGroup[] {
+  const categories = [...new Set(definitions.map((definition) => definition.category))].sort();
   const groups: DefinitionCategoryGroup[] = [];
-  for (const category of registry.categories()) {
+  for (const category of categories) {
     if (category.trim().length === 0) {
       continue;
     }
-    const definitions = registry.byCategory(category);
-    if (definitions.length > 0) {
-      groups.push({ category, definitions });
+    const ofCategory = definitions.filter((definition) => definition.category === category);
+    if (ofCategory.length > 0) {
+      groups.push({ category, definitions: ofCategory });
     }
   }
 
-  const uncategorized = registry
-    .all()
-    .filter((definition) => definition.category.trim().length === 0);
+  const uncategorized = definitions.filter(
+    (definition) => definition.category.trim().length === 0,
+  );
   if (uncategorized.length > 0) {
     groups.push({ category: UNCATEGORIZED_CATEGORY, definitions: uncategorized });
   }

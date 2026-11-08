@@ -20,6 +20,8 @@ const COMPONENTS = [
   "Toolbar",
   "ContextMenu",
   "Dialog",
+  "NodeCreationDialog",
+  "CreateNodeButton",
   "Header",
   "Footer",
   "Sidebar",

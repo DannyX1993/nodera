@@ -6,6 +6,11 @@ import {
   type DialogDefinition,
 } from "./dialog-definition.js";
 import { DialogRegistry } from "./dialog-registry.js";
+import {
+  CREATE_NODE_DIALOG,
+  DEFAULT_DIALOGS,
+  NODERA_CREATE_NODE_DIALOG_ID,
+} from "./defaults/default-dialogs.js";
 
 const createNode: DialogDefinition = {
   id: "acme.dialog.create-node",
@@ -20,9 +25,19 @@ const confirmDelete: DialogDefinition = {
   dismissible: false,
 };
 
+/**
+ * Registry without the built-in dialogs.
+ *
+ * The mechanical tests below are about registration rules, so they start from an
+ * explicitly empty list instead of depending on what the framework ships.
+ */
+function emptyRegistry(): DialogRegistry {
+  return new DialogRegistry({ dialogs: [] });
+}
+
 describe("DialogRegistry", () => {
   it("registers dialog definitions and enumerates them in registration order", () => {
-    const registry = new DialogRegistry();
+    const registry = emptyRegistry();
 
     expect(registry.register(createNode).ok).toBe(true);
     expect(registry.register(confirmDelete).ok).toBe(true);
@@ -36,7 +51,7 @@ describe("DialogRegistry", () => {
   });
 
   it("rejects a duplicate dialog id instead of overwriting it", () => {
-    const registry = new DialogRegistry();
+    const registry = emptyRegistry();
     registry.register(createNode);
 
     const result = registry.register({ ...createNode, title: "Another create node" });
@@ -50,7 +65,7 @@ describe("DialogRegistry", () => {
   });
 
   it("reports an unknown dialog id as not-found", () => {
-    const registry = new DialogRegistry();
+    const registry = emptyRegistry();
     registry.register(createNode);
 
     expect(registry.get("acme.dialog.confirm-delete")).toBeUndefined();
@@ -64,7 +79,7 @@ describe("DialogRegistry", () => {
   });
 
   it("stops listing a dialog after unregister", () => {
-    const registry = new DialogRegistry();
+    const registry = emptyRegistry();
     registry.register(createNode);
 
     const removed = registry.unregister("acme.dialog.create-node");
@@ -75,14 +90,53 @@ describe("DialogRegistry", () => {
     expect(registry.size).toBe(0);
   });
 
-  it("keeps no default dialog: an empty registry resolves nothing", () => {
-    const registry = new DialogRegistry();
+  it("keeps no default selection: a dialog is only resolved by id", () => {
+    const registry = emptyRegistry();
 
     // No dialog is ever opened implicitly (S14: a dialog is opened by id), so
     // the registry exposes no default selection to fall back to.
     expect("getDefault" in registry).toBe(false);
     expect("defaultDialogId" in registry).toBe(false);
     expect(registry.require("nodera.dialog.default").ok).toBe(false);
+  });
+});
+
+describe("Built-in dialogs", () => {
+  it("ships the create-node dialog as data with a qualified id", () => {
+    expect(NODERA_CREATE_NODE_DIALOG_ID).toBe("nodera.dialog.create-node");
+    expect(CREATE_NODE_DIALOG.id).toBe(NODERA_CREATE_NODE_DIALOG_ID);
+    expect(CREATE_NODE_DIALOG.title).toBe("Create node");
+    expect(typeof CREATE_NODE_DIALOG.description).toBe("string");
+    expect(CREATE_NODE_DIALOG.size).toBe("lg");
+    expect(CREATE_NODE_DIALOG.dismissible).toBe(true);
+  });
+
+  it("lists the create-node dialog in the default set", () => {
+    expect(DEFAULT_DIALOGS.map((dialog) => dialog.id)).toEqual([NODERA_CREATE_NODE_DIALOG_ID]);
+    expect(DEFAULT_DIALOGS).toContain(CREATE_NODE_DIALOG);
+  });
+
+  it("seeds the built-in dialogs when the host declares none", () => {
+    const registry = new DialogRegistry();
+
+    expect(registry.all()).toEqual([...DEFAULT_DIALOGS]);
+    expect(registry.has(NODERA_CREATE_NODE_DIALOG_ID)).toBe(true);
+    expect(registry.require(NODERA_CREATE_NODE_DIALOG_ID).ok).toBe(true);
+  });
+
+  it("replaces the built-in list when the host passes its own", () => {
+    const registry = new DialogRegistry({ dialogs: [confirmDelete] });
+
+    expect(registry.all()).toEqual([confirmDelete]);
+    expect(registry.has(NODERA_CREATE_NODE_DIALOG_ID)).toBe(false);
+    expect(registry.require(NODERA_CREATE_NODE_DIALOG_ID).ok).toBe(false);
+  });
+
+  it("removes every built-in dialog for an explicitly empty list", () => {
+    const registry = new DialogRegistry({ dialogs: [] });
+
+    expect(registry.all()).toEqual([]);
+    expect(registry.size).toBe(0);
   });
 });
 

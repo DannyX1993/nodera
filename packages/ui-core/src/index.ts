@@ -9,3 +9,4 @@ export * from "./ui-state.js";
 export * from "./drag-protocol.js";
 export * from "./defaults/default-panels.js";
 export * from "./defaults/default-tools.js";
+export * from "./defaults/default-dialogs.js";

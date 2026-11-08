@@ -6,6 +6,7 @@ import { NODE_DEFINITION_MIME_TYPE } from "@nodera/ui-core";
 import { NodePalette } from "./node-palette.js";
 import {
   DATASOURCE_DEFINITION_ID,
+  DISCOVERY_DEFINITIONS,
   LOOSE_DEFINITION_ID,
   SINK_DEFINITION_ID,
   TRANSFORM_DEFINITION_ID,
@@ -154,6 +155,21 @@ describe("NodePalette", () => {
 
     expect(onAddNode).toHaveBeenCalledWith(DATASOURCE_DEFINITION_ID);
     expect(editor.graph.getNodes()).toHaveLength(0);
+  });
+
+  it("offers the host definitions instead of the registry ones when supplied", () => {
+    const editor = createDiscoveryEditor();
+    const { container } = renderWithEditor(
+      <NodePalette
+        definitions={DISCOVERY_DEFINITIONS.filter(
+          (definition) => definition.id === SINK_DEFINITION_ID,
+        )}
+      />,
+      { editor },
+    );
+
+    expect(itemIds(container)).toEqual([SINK_DEFINITION_ID]);
+    expect(screen.getByPlaceholderText("Search nodes")).toBeDefined();
   });
 
   it("adds a node to the engine when the host supplies no callback", () => {

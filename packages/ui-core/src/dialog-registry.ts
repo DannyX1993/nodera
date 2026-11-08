@@ -6,6 +6,19 @@ import {
 } from "@nodera/contracts";
 
 import type { DialogDefinition } from "./dialog-definition.js";
+import { DEFAULT_DIALOGS } from "./defaults/default-dialogs.js";
+
+/**
+ * Options accepted by {@link DialogRegistry}.
+ *
+ * `dialogs` *replaces* the built-in list instead of extending it, the same rule
+ * `LayoutRegistry` applies to layouts: a host that does not want the
+ * node-creation dialog passes only its own definitions.
+ */
+export interface DialogRegistryOptions {
+  /** Dialogs available to the host. Defaults to `DEFAULT_DIALOGS`. */
+  readonly dialogs?: readonly DialogDefinition[];
+}
 
 /**
  * Registry of the dialogs an application provides.
@@ -14,9 +27,23 @@ import type { DialogDefinition } from "./dialog-definition.js";
  * and never overwrites silently. A dialog is always opened *by id*
  * (`UiStateStore.openDialog`) and resolved here, so there is no default
  * selection to fall back to: a dialog nobody registered can never appear.
+ *
+ * The constructor seeds {@link DEFAULT_DIALOGS} so the framework's own “+”
+ * affordance works out of the box; passing `dialogs` replaces that list
+ * entirely. There is deliberately no second registry concept and no separate
+ * factory: one registry, one seeding rule.
  */
 export class DialogRegistry implements DefinitionRegistry<DialogDefinition> {
   private readonly store = new RegistryStore<DialogDefinition>("dialog-registry");
+
+  constructor(options: DialogRegistryOptions = {}) {
+    for (const dialog of options.dialogs ?? DEFAULT_DIALOGS) {
+      const registered = this.store.register(dialog);
+      if (!registered.ok) {
+        throw new Error(registered.error.message);
+      }
+    }
+  }
 
   register(dialog: DialogDefinition): Result<DialogDefinition, RegistryError> {
     return this.store.register(dialog);

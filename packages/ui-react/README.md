@@ -68,6 +68,8 @@ decides which components it uses, where it places them and how they look.
 | `Toolbar` | registry-driven actions with availability gating and toolbar renderer replacement |
 | `ContextMenu` | store-driven menu at the pointer position, target-aware items, Escape/outside-click close, menu renderer replacement |
 | `Dialog` | modal surface for one `DialogDefinition`: ARIA name/description, focus move and trap, focus restore, Escape/backdrop dismissal only when the definition is dismissible |
+| `NodeCreationDialog` | the node palette inside `Dialog`: opens on the host's `open`, adds exactly one node through the `add-node` command (or the host's `onAddNode`), closes on the accepted selection |
+| `CreateNodeButton` | the "+" affordance: a native button with `aria-haspopup="dialog"` that opens `nodera.dialog.create-node` through `useDialogActions` |
 | `ValidationPanel` | severity counts, validate action, issue list with element links, optional auto-validate |
 | `HistoryPanel` | undo/redo labels with a current marker and click-to-walk |
 
@@ -113,6 +115,71 @@ hard-coded here.
 The primitive does not portal and does not lock the rest of the document: the
 trap covers the rendered panel only, and a host that needs a hard modal lock or
 a portal wraps `Dialog` in its own overlay.
+
+## Creating nodes from a dialog
+
+`CreateNodeButton` + `NodeCreationDialog` are the S2 affordance: "+" opens a
+dialog and the user picks which node to add. They are two pieces on purpose —
+the button only opens a registered dialog id, the dialog only composes the
+palette — so the host decides where both live and whether it wants one or the
+other.
+
+```tsx
+import { DialogRegistry, NODERA_CREATE_NODE_DIALOG_ID, UiStateStore } from "@nodera/ui-core";
+import {
+  CreateNodeButton,
+  NoderaUiProvider,
+  NodeCreationDialog,
+  useDialogActions,
+  useUiState,
+} from "@nodera/ui-react";
+
+// The dialog must be registered: the store refuses ids it does not know.
+const store = new UiStateStore({
+  themeId: "nodera.light",
+  layoutId: "nodera.editor",
+  dialogRegistry: new DialogRegistry(),
+});
+
+function AddNode(): ReactNode {
+  const state = useUiState();
+  const dialogs = useDialogActions();
+  return (
+    <>
+      <CreateNodeButton />
+      <NodeCreationDialog
+        open={state.activeDialogId === NODERA_CREATE_NODE_DIALOG_ID}
+        onClose={dialogs.close}
+      />
+    </>
+  );
+}
+
+<NoderaUiProvider editor={editor} store={store}>
+  <AddNode />
+</NoderaUiProvider>;
+```
+
+Props of `NodeCreationDialog`: `open`, `onClose` (required, both controlled by
+the host), and the optional `definition` (defaults to `CREATE_NODE_DIALOG`, so a
+host rewords or resizes it without touching the component), `definitions`
+(defaults to the live editor registry — the same vocabulary the palette panel
+shows), `onAddNode` (the host handler: it wins over the command and is how a host
+adds placement, defaults or confirmation) and `emptyMessage`.
+
+A selection runs the existing `{ kind: "add-node", definitionId }` command
+through the command bus, never a second creation path, and the dialog closes
+when the graph accepted the node: a refused add leaves it open. Keyboard and
+focus behaviour come from `Dialog` and `NodePalette` — focus starts in the
+palette search field, `Tab` cycles inside, and `Escape` closes the dialog because
+`CREATE_NODE_DIALOG` is dismissible.
+
+`CreateNodeButton` props: `label` (accessible name, default `Add node`),
+`children` (visible content, default `+`), `className` and `disabled`. It is a
+native `button type="button"`, so `Enter` and `Space` activate it, it has no
+autofocus, and it imposes no width, margin or position: the host owns the
+layout. It opens the dialog through the store, which means a store without a
+`DialogRegistry` opens nothing rather than rendering a dialog nobody registered.
 
 ## Providers and hooks
 

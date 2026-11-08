@@ -11,7 +11,11 @@ import {
   SURFACE_STYLE,
   TEXT_STYLE,
 } from "../shell/styles.js";
-import { groupDefinitionsByCategory, type DefinitionCategoryGroup } from "./search.js";
+import {
+  groupDefinitions,
+  groupDefinitionsByCategory,
+  type DefinitionCategoryGroup,
+} from "./search.js";
 
 /** Props accepted by {@link NodePalette}. */
 export interface NodePaletteProps {
@@ -25,6 +29,13 @@ export interface NodePaletteProps {
   readonly onAddNode?: (definitionId: string) => void;
   /** Copy shown when no definition matches. Defaults to `No node definitions`. */
   readonly emptyMessage?: string;
+  /**
+   * Definitions to offer. Defaults to the live editor registry, which is what a
+   * panel rendered by the shell wants; a surface that offers a narrowed palette
+   * (the node-creation dialog, a host-specific picker) passes its own list and
+   * still gets the same grouping, filtering and drag payload.
+   */
+  readonly definitions?: readonly NodeDefinition[];
 }
 
 const PALETTE_STYLE: CSSProperties = {
@@ -151,9 +162,14 @@ export function NodePalette(props: NodePaletteProps): ReactNode {
   const executeCommand = useEditorCommands(editor);
   const [filter, setFilter] = useState("");
 
+  const definitions = props.definitions;
   const needle = filter.trim().toLowerCase();
+  const offersDefinitions =
+    definitions === undefined ? editor.domain.nodes.size > 0 : definitions.length > 0;
   const groups = visibleGroups(
-    groupDefinitionsByCategory(editor.domain.nodes),
+    definitions === undefined
+      ? groupDefinitionsByCategory(editor.domain.nodes)
+      : groupDefinitions(definitions),
     needle,
   );
 
@@ -171,7 +187,7 @@ export function NodePalette(props: NodePaletteProps): ReactNode {
       {...(props.className === undefined ? {} : { className: props.className })}
       style={PALETTE_STYLE}
     >
-      {editor.domain.nodes.size > 0 ? (
+      {offersDefinitions ? (
         <input
           type="search"
           aria-label="Search nodes"

@@ -42,6 +42,8 @@ export * from "./components/actions/command-dispatch.js";
 export * from "./components/actions/toolbar.js";
 export * from "./components/actions/context-menu.js";
 export * from "./components/overlay/dialog.js";
+export * from "./components/overlay/node-creation-dialog.js";
+export * from "./components/overlay/create-node-button.js";
 export * from "./components/reports/validation-panel.js";
 export * from "./components/reports/history-panel.js";
 export * from "./providers/ui-provider.js";
