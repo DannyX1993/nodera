@@ -1312,7 +1312,7 @@ generic-graph-builder/
 │   │
 │   ├── ui-core/
 │   ├── ui-react/
-│   ├── canvas-react-flow/
+│   ├── react-flow/
 │   ├── theme-engine/
 │   ├── layout-engine/
 │   │
