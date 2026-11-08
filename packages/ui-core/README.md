@@ -77,8 +77,8 @@ the registry, reducers and geometry live in `layout-engine`.
 
 `UiStateStore` is the single presentation-state container: `themeId`,
 `layoutId`, `layout` (panel state), `menu` (open context/panel menu),
-`searchQuery`, `interactionMode`, `activePanelId`, `activeDialogId` and
-`dragPolicy`.
+`searchQuery`, `interactionMode`, `activePanelId`, `activeDialogId`,
+`pendingEdgeInsertId` and `dragPolicy`.
 
 - Immutable snapshots: `getState()` keeps its identity until something really
   changes, and a no-op mutation notifies nobody (that is what keeps panels from
@@ -87,7 +87,8 @@ the registry, reducers and geometry live in `layout-engine`.
   `useSyncExternalStore`.
 - Mutators: `setTheme`, `setLayout(layoutId, layout)`, `updateLayout(updater)`,
   `openMenu`, `closeMenu`, `setSearchQuery`, `setInteractionMode`,
-  `setActivePanel`, `openDialog(dialogId)`, `closeDialog`, `setDragPolicy`.
+  `setActivePanel`, `openDialog(dialogId)`, `closeDialog`, `setDragPolicy`,
+  `setPendingEdgeInsertId`.
 - Drag policy: `DragPolicy` (`"free" | "locked" | "snap-back"`) says what a
   manual drag does with the positions the layout assigned. `"free"` (the store
   default, and today's behaviour) commits the dropped position, `"locked"` makes
@@ -103,6 +104,14 @@ the registry, reducers and geometry live in `layout-engine`.
   change. A store without a `dialogRegistry` opens nothing, so the open id is
   always a registered one. The check happens at open time: a host that
   deregisters a dialog which is currently open closes it too.
+- Pending edge insertion: `pendingEdgeInsertId` is the edge a node-creation
+  dialog will insert into. The canvas "+" records it with
+  `setPendingEdgeInsertId(edgeId)` and opens the dialog; the dialog reads it to
+  decide between `insert-node` and `add-node`, and clears it once the insertion
+  is accepted. `closeDialog()` clears it too, in the same commit that closes the
+  dialog, so a closed dialog can never leave the next add inserting into an old
+  edge. The id is opaque here — the store knows nothing about the graph — and it
+  never enters the portable document or the history.
 
 The store never touches graph domain state and is never serialized into the
 portable document: selection and history stay in `@nodera/application`, viewport

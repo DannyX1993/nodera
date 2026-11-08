@@ -61,6 +61,16 @@ export interface NoderaEditorProps {
   readonly slots?: Partial<EditorShellSlots>;
   /** Host hook for a region splitter drag, after the panel was resized. */
   readonly onResizeRegion?: (region: PanelRegion, size: number) => void;
+  /**
+   * Replaces the framework's "+" button on every edge (S6).
+   *
+   * The canvas keeps the midpoint position and the activation path (the edge
+   * becomes the pending insertion and the node-creation dialog opens); this prop
+   * only changes what the control looks like, so a host can ship an icon, a
+   * different label or its own component. The affordance itself is still enabled
+   * by `features.edgeInsertion`, never by rendering it.
+   */
+  readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
   readonly className?: string;
 }
 
@@ -131,7 +141,10 @@ function regionContent(panelIds: readonly string[]): ReactNode {
  * A palette drop becomes `builder.graph.addNode`, so the drop path is the SDK's
  * use case and not a second mutation route.
  */
-function DefaultCanvasRegion(props: { readonly builder: Builder }): ReactNode {
+function DefaultCanvasRegion(props: {
+  readonly builder: Builder;
+  readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
+}): ReactNode {
   const builder = props.builder;
   const ui = useUiState();
   const theme = useTheme();
@@ -150,6 +163,10 @@ function DefaultCanvasRegion(props: { readonly builder: Builder }): ReactNode {
           colorMode={theme.colorScheme ?? "light"}
           showMinimap={builder.features.minimap}
           showControls={builder.adapter?.capabilities.controls ?? true}
+          edgeInsertion={builder.features.edgeInsertion}
+          {...(props.renderEdgeInsert === undefined
+            ? {}
+            : { renderEdgeInsert: props.renderEdgeInsert })}
           onDropNodeDefinition={(definitionId, position) => {
             builder.graph.addNode({ type: definitionId, position });
           }}
@@ -203,7 +220,15 @@ function EditorSurface(props: NoderaEditorProps): ReactNode {
   const hostResize = props.onResizeRegion;
 
   const slots: EditorShellSlots = {
-    canvas: hostSlots?.canvas ?? <DefaultCanvasRegion builder={builder} />,
+    canvas:
+      hostSlots?.canvas ?? (
+        <DefaultCanvasRegion
+          builder={builder}
+          {...(props.renderEdgeInsert === undefined
+            ? {}
+            : { renderEdgeInsert: props.renderEdgeInsert })}
+        />
+      ),
     ...(hostSlots?.header === undefined && headerContent === undefined
       ? {}
       : { header: hostSlots?.header ?? headerContent }),

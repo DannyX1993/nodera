@@ -89,6 +89,9 @@ export function createDemoBuilder(): Builder {
       id: DEMO_BUILDER_ID,
       adapter: createReactFlowAdapter(),
       registry: { nodes: DEMO_NODES },
+      // The host asks for the edge affordance; the framework adds no control it
+      // was not asked for, and the same flag is what `builder.features` reports.
+      features: { edgeInsertion: true },
       document: { format: "ggd", version: "1.0.0" },
       graph: { graphId: "demo-layout-switch", layout: DEMO_LAYOUT },
     }),

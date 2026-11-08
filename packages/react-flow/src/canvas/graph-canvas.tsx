@@ -1,10 +1,13 @@
 import {
+  createElement,
   useMemo,
   useCallback,
   useEffect,
   useRef,
+  type CSSProperties,
   type FC,
   type ComponentType,
+  type ReactNode,
   type MouseEvent,
   type DragEvent as ReactDragEvent,
 } from "react";
@@ -16,8 +19,10 @@ import {
   Controls,
   MiniMap,
   ConnectionMode,
+  EdgeLabelRenderer,
   type NodeChange,
   type EdgeChange,
+  type EdgeProps,
   type Connection,
   type IsValidConnection,
   type Edge as RfEdge,
@@ -31,6 +36,7 @@ import {
 
 import type { EditorEngine } from "@nodera/application";
 import type { DragPolicy } from "@nodera/ui-core";
+import { useEdgeInsertActions } from "@nodera/ui-react";
 import {
   moveNode,
   createEdge,
@@ -108,6 +114,22 @@ export function canvasBackgroundOptions(): CanvasBackgroundOptions {
 /*  Edge types                                                         */
 /* ------------------------------------------------------------------ */
 
+/** Options that turn the edge insert affordance on.
+ *
+ * Passed to {@link canvasEdgeTypes}; the canvas supplies it from its
+ * `edgeInsertion` / `renderEdgeInsert` props.
+ */
+export interface EdgeInsertRenderOptions {
+  /**
+   * Renders the "+" affordance of one edge.
+   *
+   * The canvas owns the position (the midpoint of the rendered edge) and the
+   * activation plumbing; the renderer only decides what the control looks like.
+   * The framework's default is {@link DefaultEdgeInsertButton}.
+   */
+  readonly render: (edgeId: string) => ReactNode;
+}
+
 /**
  * React Flow edge-type map built from an edge renderer registry.
  *
@@ -116,22 +138,154 @@ export function canvasBackgroundOptions(): CanvasBackgroundOptions {
  * names an unregistered renderer id is absent from this map, so React Flow
  * falls back to its built-in default edge instead of blanking the graph.
  *
+ * When `insert` is supplied every type is wrapped so it also renders that
+ * affordance at its midpoint; without it the map keeps the registered
+ * components untouched, so a canvas without the affordance renders exactly as
+ * before.
+ *
  * Casts stay confined to the adapter boundary: React Flow's `EdgeTypes` is a
  * `ComponentType<any>` map while Nodera renderers have stricter props.
  */
-export function canvasEdgeTypes(edgeRenderers?: EdgeRendererRegistry): EdgeTypes {
+export function canvasEdgeTypes(
+  edgeRenderers?: EdgeRendererRegistry,
+  insert?: EdgeInsertRenderOptions,
+): EdgeTypes {
   const types: EdgeTypes = {};
   if (edgeRenderers) {
     for (const id of edgeRenderers.listIds()) {
       try {
-        types[id] = edgeRenderers.get(id) as unknown as EdgeTypes[string];
+        // The registry stores a bare `ComponentType`; an edge renderer receives
+        // React Flow's `EdgeProps`, which is what the wrapper passes through.
+        types[id] = withEdgeInsert(
+          edgeRenderers.get(id) as unknown as ComponentType<EdgeProps>,
+          insert,
+        ) as unknown as EdgeTypes[string];
       } catch {
         // Skip unresolvable registrations.
       }
     }
   }
-  types[DEFAULT_EDGE_RENDERER_ID] = DefaultEdgeRenderer;
+  types[DEFAULT_EDGE_RENDERER_ID] = withEdgeInsert(
+    DefaultEdgeRenderer,
+    insert,
+  ) as unknown as EdgeTypes[string];
   return types;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Edge insert affordance (S6)                                        */
+/* ------------------------------------------------------------------ */
+
+/** Accessible name of the framework's "+" button. */
+export const EDGE_INSERT_LABEL = "Insert node";
+
+/**
+ * Style of the affordance button.
+ *
+ * Token-driven with literal fallbacks (AGENTS.md §15): a host themes it through
+ * CSS custom properties and an unthemed graph still paints a visible target.
+ */
+const EDGE_INSERT_BUTTON_STYLE: CSSProperties = {
+  pointerEvents: "all",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "var(--ndr-edge-insert-size, 20px)",
+  height: "var(--ndr-edge-insert-size, 20px)",
+  padding: 0,
+  borderRadius: "999px",
+  border: "var(--ndr-edge-insert-border, 1px solid #7c8896)",
+  background: "var(--ndr-edge-insert-background, #ffffff)",
+  color: "var(--ndr-edge-insert-color, #334155)",
+  fontSize: "var(--ndr-edge-insert-font-size, 13px)",
+  lineHeight: 1,
+  cursor: "pointer",
+};
+
+/** Props accepted by {@link DefaultEdgeInsertButton}. */
+export interface DefaultEdgeInsertButtonProps {
+  /** Edge the insertion will replace. */
+  readonly edgeId: string;
+}
+
+/**
+ * The framework's "+" on an edge.
+ *
+ * A native `button`, so `Enter` and `Space` activate it and it takes part in the
+ * tab order without a key handler of its own. Activation records the edge as a
+ * pending insertion and opens the node-creation dialog through the UI store
+ * (`useEdgeInsertActions`); it never mutates the graph and never decides where
+ * the node lands. The click does not reach the canvas, so pressing "+" does not
+ * also select the edge it belongs to.
+ */
+export function DefaultEdgeInsertButton(props: DefaultEdgeInsertButtonProps): ReactNode {
+  const insert = useEdgeInsertActions();
+
+  return (
+    <button
+      type="button"
+      data-nodera-edge-insert=""
+      aria-label={EDGE_INSERT_LABEL}
+      aria-haspopup="dialog"
+      style={EDGE_INSERT_BUTTON_STYLE}
+      onClick={(event) => {
+        event.stopPropagation();
+        insert.begin(props.edgeId);
+      }}
+    >
+      +
+    </button>
+  );
+}
+
+/**
+ * Wraps an edge renderer so it also paints the insert affordance.
+ *
+ * React Flow hands every edge its two handle coordinates, so the midpoint is the
+ * geometric middle of the rendered edge rather than a guess from node centres.
+ * The label portal keeps the button outside the SVG path, which is what makes
+ * it a real focusable control instead of an SVG element.
+ */
+function withEdgeInsert(
+  renderer: ComponentType<EdgeProps>,
+  insert: EdgeInsertRenderOptions | undefined,
+): ComponentType<EdgeProps> {
+  if (insert === undefined) {
+    return renderer;
+  }
+
+  const EdgeWithInsert = (props: Record<string, unknown>): ReactNode => {
+    const edgeId = typeof props.id === "string" ? props.id : String(props.id ?? "");
+    const sourceX = typeof props.sourceX === "number" ? props.sourceX : 0;
+    const sourceY = typeof props.sourceY === "number" ? props.sourceY : 0;
+    const targetX = typeof props.targetX === "number" ? props.targetX : 0;
+    const targetY = typeof props.targetY === "number" ? props.targetY : 0;
+    return (
+      <>
+        {/* The props React Flow hands an edge component are `EdgeProps`; this
+            wrapper only reads the id and the two handle coordinates. */}
+        {createElement(renderer, props as unknown as EdgeProps)}
+        <EdgeLabelRenderer>
+          <div
+            data-nodera-edge-insert-for={edgeId}
+            style={{
+              position: "absolute",
+              transform: `translate(-50%, -50%) translate(${String(
+                (sourceX + targetX) / 2,
+              )}px, ${String((sourceY + targetY) / 2)}px)`,
+              pointerEvents: "none",
+            }}
+          >
+            {insert.render(edgeId)}
+          </div>
+        </EdgeLabelRenderer>
+      </>
+    );
+  };
+  EdgeWithInsert.displayName = `NoderaEdgeInsert(${
+    renderer.displayName ?? renderer.name ?? "edge"
+  })`;
+  return EdgeWithInsert;
 }
 
 /* ------------------------------------------------------------------ */
@@ -217,6 +371,25 @@ export interface GraphCanvasProps {
    * behaviour of a canvas whose host owns placement.
    */
   readonly dragPolicy?: DragPolicy;
+  /**
+   * Render the "+" affordance centred on every edge (S6).
+   *
+   * Off by default: the canvas adds no control the host did not ask for.
+   * Activating it records the edge as the pending insertion in the UI state and
+   * opens the registered node-creation dialog, so a canvas that turns it on
+   * needs a `<NoderaUiProvider>` (or its own `renderEdgeInsert`). It adds no
+   * document state: the affordance is presentation only.
+   */
+  readonly edgeInsertion?: boolean;
+  /**
+   * Host renderer for the "+" affordance, replacing the framework's button.
+   *
+   * The canvas keeps the position and the activation path; the host replaces
+   * what the control looks like (or wires its own handler entirely). Hosts that
+   * want the built-in behaviour inside their own component call
+   * `useEdgeInsertActions()` from `@nodera/ui-react`.
+   */
+  readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
   /** CSS class for the outer container. */
   readonly className?: string;
   /** Show the minimap. */
@@ -270,6 +443,8 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   portRenderers,
   interactionMode = "select",
   dragPolicy = "free",
+  edgeInsertion = false,
+  renderEdgeInsert,
   className,
   showMinimap = true,
   showControls = true,
@@ -309,8 +484,23 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [nodesWithDims, nodeTypes],
   );
 
-  // Build edgeTypes map: registry renderers + default sentinel.
-  const edgeTypes = useMemo(() => canvasEdgeTypes(edgeRenderers), [edgeRenderers]);
+  // Build edgeTypes map: registry renderers + default sentinel. When the
+  // affordance is enabled every type is wrapped, so a custom renderer keeps its
+  // own "+" instead of losing the feature.
+  const edgeTypes = useMemo(
+    () =>
+      canvasEdgeTypes(
+        edgeRenderers,
+        edgeInsertion
+          ? {
+              render:
+                renderEdgeInsert ??
+                ((edgeId: string) => <DefaultEdgeInsertButton edgeId={edgeId} />),
+            }
+          : undefined,
+      ),
+    [edgeRenderers, edgeInsertion, renderEdgeInsert],
+  );
 
   // Interaction mode → React Flow drag props (pure mapping, see
   // interaction-mode.ts). The mode itself is never stored in the adapter, and

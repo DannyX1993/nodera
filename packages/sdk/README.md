@@ -89,8 +89,9 @@ export function createDemoBuilder(): Builder {
 Every configuration field is optional. `BuilderConfiguration` groups them by
 concern — `id`, `adapter`, `registry`, `features`, `document`, `ui`, `graph`,
 `plugins` — and defaults to the framework presets (`nodera.builder` as id, the
-three supported features enabled, GGD format, the default theme and editor
-layout, no plugins). `graph.layout` defaults to `{ mode: "free" }`: the
+minimap, history and validation features enabled plus the opt-in ones disabled
+(see [Features](#features)), GGD format, the default theme and editor layout, no
+plugins). `graph.layout` defaults to `{ mode: "free" }`: the
 framework places nothing unless the host asks (see
 [Graph layout mode](#graph-layout-mode--graphlayout)).
 
@@ -109,6 +110,35 @@ assertOk(builder.registerNode(ACME_NODE));
 
 Use `result.ok` when the host wants to render diagnostics instead of aborting
 (see [Error model](#error-model)).
+
+## Features
+
+`features` names the capabilities the host wants, and `builder.features` reports
+the ones the builder resolved. A flag this SDK implements keeps the declared
+value; a flag it does not implement is refused with `sdk.feature-unsupported`
+when it is enabled and silently ignored when it is `false`, so a configuration
+written against a future SDK is honest instead of misleading. A value that is
+not a boolean is `sdk.invalid-input` at `features.<name>`.
+
+| Flag | Default | What it turns on |
+| --- | --- | --- |
+| `minimap` | on | The minimap panel and the canvas minimap. |
+| `history` | on | The undo/redo surface. |
+| `validation` | on | The validation panel and command. |
+| `edgeInsertion` | **off** | The "+" affix on every edge: it opens the node-creation dialog and inserts the chosen definition **on** that edge (`builder.graph.insertNode`). |
+
+`edgeInsertion` is opt-in because it adds a control to the canvas: a host that
+wants it says so. Turning it on is the framework default (`NoderaEditor` renders
+the button and the dialog stays the registered `DialogDefinition`); replacing
+what the control looks like is `NoderaEditor.renderEdgeInsert`, and replacing the
+text or size of the dialog is the registered definition. Location and
+customization are documented in `packages/ui-react/README.md`, the flow itself in
+`docs/GRAPH-LAYOUT.md`.
+
+```ts
+const builder = assertValid(createBuilder({ features: { edgeInsertion: true } }));
+builder.features.edgeInsertion; // true
+```
 
 ## Authoring vocabulary
 

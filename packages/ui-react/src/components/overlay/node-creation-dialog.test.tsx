@@ -3,13 +3,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { NodeDefinition } from "@nodera/node-registry";
 import { CREATE_NODE_DIALOG, type DialogDefinition } from "@nodera/ui-core";
+import { createEdgeId } from "@nodera/contracts";
 
 import {
   DATASOURCE_DEFINITION_ID,
   DISCOVERY_DEFINITIONS,
   SINK_DEFINITION_ID,
   TRANSFORM_DEFINITION_ID,
+  addTestNode,
+  connectTestNodes,
   createDiscoveryEditor,
+  createDiscoveryStore,
   renderWithEditor,
 } from "../discovery/test-helpers.js";
 import { NodeCreationDialog } from "./node-creation-dialog.js";
@@ -110,6 +114,72 @@ describe("NodeCreationDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Broken" }));
 
     expect(editor.graph.getNodes()).toHaveLength(0);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("inserts the chosen definition between the endpoints when an edge insertion is pending", () => {
+    const editor = createDiscoveryEditor();
+    addTestNode(editor, { nodeId: "a", position: { x: 0, y: 0 } });
+    addTestNode(editor, { nodeId: "b", position: { x: 200, y: 0 } });
+    connectTestNodes(editor, { edgeId: "edge-1", from: "a", to: "b" });
+    const store = createDiscoveryStore();
+    store.setPendingEdgeInsertId("edge-1");
+    const onClose = vi.fn();
+    renderWithEditor(<NodeCreationDialog open onClose={onClose} />, { editor, store });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Transform" }));
+
+    const nodes = editor.graph.getNodes();
+    expect(nodes).toHaveLength(3);
+    expect(nodes.map((node) => node.definitionId)).toContain(TRANSFORM_DEFINITION_ID);
+    expect(editor.graph.getEdges()).toHaveLength(2);
+    expect(editor.graph.getEdge(createEdgeId("edge-1"))).toBeUndefined();
+    expect(editor.history.labels()).toEqual([
+      "add-node",
+      "add-node",
+      "create-edge",
+      "insert-node-on-edge",
+    ]);
+    expect(store.getState().pendingEdgeInsertId).toBeUndefined();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds a node instead of inserting when no edge insertion is pending", () => {
+    const editor = createDiscoveryEditor();
+    addTestNode(editor, { nodeId: "a", position: { x: 0, y: 0 } });
+    addTestNode(editor, { nodeId: "b", position: { x: 200, y: 0 } });
+    connectTestNodes(editor, { edgeId: "edge-1", from: "a", to: "b" });
+    const store = createDiscoveryStore();
+    const onClose = vi.fn();
+    renderWithEditor(<NodeCreationDialog open onClose={onClose} />, { editor, store });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Transform" }));
+
+    expect(editor.graph.getNodes()).toHaveLength(3);
+    expect(editor.graph.getEdges()).toHaveLength(1);
+    expect(editor.graph.getEdge(createEdgeId("edge-1"))).toBeDefined();
+    expect(editor.history.labels()).toEqual([
+      "add-node",
+      "add-node",
+      "create-edge",
+      "add-node",
+    ]);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays open and keeps the pending edge when the insertion is refused", () => {
+    const editor = createDiscoveryEditor();
+    addTestNode(editor, { nodeId: "a", position: { x: 0, y: 0 } });
+    const store = createDiscoveryStore();
+    store.setPendingEdgeInsertId("edge-missing");
+    const onClose = vi.fn();
+    renderWithEditor(<NodeCreationDialog open onClose={onClose} />, { editor, store });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Transform" }));
+
+    expect(editor.graph.getNodes()).toHaveLength(1);
+    expect(editor.graph.getEdges()).toHaveLength(0);
+    expect(store.getState().pendingEdgeInsertId).toBe("edge-missing");
     expect(onClose).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, createEvent, act, waitFor, cleanup } from "@testing-library/react";
-import { ReactFlowProvider } from "@xyflow/react";
+import { ReactFlow, ReactFlowProvider } from "@xyflow/react";
 import type { FC, ReactNode } from "react";
 import { createElement } from "react";
 import {
@@ -17,6 +17,13 @@ import { EdgeRendererRegistry, NodeRendererRegistry } from "../registries/render
 import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
 import { DefaultEdgeRenderer } from "../renderers/default-edge-renderer.js";
 import { createNodeId } from "@nodera/contracts";
+import {
+  CREATE_NODE_DIALOG,
+  DialogRegistry,
+  NODERA_CREATE_NODE_DIALOG_ID,
+  UiStateStore,
+} from "@nodera/ui-core";
+import { NoderaUiProvider } from "@nodera/ui-react";
 
 import {
   GraphCanvas,
@@ -24,6 +31,7 @@ import {
   canvasEdgeTypes,
   commitDraggedNodes,
   commitSelectionFromReactFlow,
+  DefaultEdgeInsertButton,
 } from "./graph-canvas.js";
 import type { GraphCanvasProps } from "./graph-canvas.js";
 import { NODE_DEFINITION_MIME_TYPE } from "./definition-drop.js";
@@ -603,5 +611,150 @@ describe("GraphCanvas drag policy", () => {
     rerender(createElement(Canvas, { editor: engine, dragPolicy: "locked" }));
 
     expect(nodeElement(container, "n1").classList.contains("draggable")).toBe(false);
+  });
+});
+
+
+/* ------------------------------------------------------------------ */
+/*  C2: edge insert affordance (S6)                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * React Flow renders no edge at all in jsdom (it never resolves the handle
+ * bounds of a measured node), so — exactly like the edge-renderer replacement
+ * contract above — the affordance is asserted where the canvas resolves it: the
+ * edge type map `canvasEdgeTypes` hands to `<ReactFlow edgeTypes>`, rendered
+ * inside a real `<ReactFlow>` so `EdgeLabelRenderer` has its portal.
+ */
+describe("GraphCanvas edge insert affordance", () => {
+  afterEach(cleanup);
+
+  const EDGE_PROPS: Record<string, unknown> = {
+    id: "edge-1",
+    source: "n1",
+    target: "n2",
+    sourceX: 0,
+    sourceY: 0,
+    targetX: 200,
+    targetY: 100,
+    sourceHandle: "out",
+    targetHandle: "in",
+    selected: false,
+    data: {},
+  };
+
+  function insertStore(): UiStateStore {
+    const dialogs = new DialogRegistry();
+    dialogs.register(CREATE_NODE_DIALOG);
+    return new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      dialogRegistry: dialogs,
+    });
+  }
+
+  /** Renders one edge type the canvas would use, inside a real React Flow. */
+  function renderEdgeType(options: {
+    readonly render?: (edgeId: string) => ReactNode;
+    readonly edgeRenderers?: EdgeRendererRegistry;
+    readonly store?: UiStateStore;
+  }) {
+    const types = canvasEdgeTypes(
+      options.edgeRenderers,
+      options.render === undefined ? undefined : { render: options.render },
+    );
+    const EdgeComponent = types[DEFAULT_EDGE_RENDERER_ID] as unknown as FC<
+      Record<string, unknown>
+    >;
+    return render(
+      <NoderaUiProvider store={options.store ?? insertStore()} editor={makeEngine()}>
+        <ReactFlowProvider>
+          <ReactFlow nodes={[]} edges={[]}>
+            <EdgeComponent {...EDGE_PROPS} />
+          </ReactFlow>
+        </ReactFlowProvider>
+      </NoderaUiProvider>,
+    );
+  }
+
+  it("renders one accessible insert button per edge when the affordance is enabled", () => {
+    renderEdgeType({ render: (edgeId) => createElement(DefaultEdgeInsertButton, { edgeId }) });
+
+    const buttons = screen.getAllByRole("button", { name: "Insert node" });
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.getAttribute("type")).toBe("button");
+    expect(buttons[0]?.getAttribute("aria-haspopup")).toBe("dialog");
+  });
+
+  it("renders no insert button when the affordance is disabled", () => {
+    const types = canvasEdgeTypes();
+    // Disabled means untouched: the canvas keeps the registered renderer as-is.
+    expect(types[DEFAULT_EDGE_RENDERER_ID]).toBe(DefaultEdgeRenderer);
+
+    renderEdgeType({});
+
+    expect(screen.queryByRole("button", { name: "Insert node" })).toBeNull();
+  });
+
+  it("keeps the insert button keyboard reachable", () => {
+    renderEdgeType({ render: (edgeId) => createElement(DefaultEdgeInsertButton, { edgeId }) });
+
+    const button = screen.getByRole("button", { name: "Insert node" });
+    button.focus();
+
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("renders the host component instead of the default button when supplied", () => {
+    renderEdgeType({
+      render: (edgeId) =>
+        createElement("button", { type: "button", "aria-label": `Insert on ${edgeId}` }, "·"),
+    });
+
+    expect(screen.getByRole("button", { name: "Insert on edge-1" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Insert node" })).toBeNull();
+  });
+
+  it("wraps every registered edge renderer, never only the default one", () => {
+    const edgeRenderers = new EdgeRendererRegistry();
+    edgeRenderers.register("custom-edge", DefaultEdgeRenderer as never);
+
+    const raw = canvasEdgeTypes(edgeRenderers);
+    const withInsert = canvasEdgeTypes(edgeRenderers, {
+      render: () => createElement(DefaultEdgeInsertButton, { edgeId: "edge-1" }),
+    });
+
+    expect(withInsert["custom-edge"]).not.toBe(raw["custom-edge"]);
+    expect(withInsert[DEFAULT_EDGE_RENDERER_ID]).not.toBe(raw[DEFAULT_EDGE_RENDERER_ID]);
+  });
+
+  it("records the pending insertion and opens the dialog when activated", () => {
+    const store = insertStore();
+    renderEdgeType({
+      render: () => createElement(DefaultEdgeInsertButton, { edgeId: "edge-1" }),
+      store,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Insert node" }));
+
+    expect(store.getState().pendingEdgeInsertId).toBe("edge-1");
+    expect(store.getState().activeDialogId).toBe(NODERA_CREATE_NODE_DIALOG_ID);
+  });
+
+  it("keeps rendering the graph when the canvas is asked for the affordance", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+
+    render(
+      <NoderaUiProvider store={insertStore()} editor={engine}>
+        <div style={{ width: 800, height: 600 }}>
+          <ReactFlowProvider>
+            <GraphCanvas editor={engine} edgeInsertion />
+          </ReactFlowProvider>
+        </div>
+      </NoderaUiProvider>,
+    );
+
+    expect(screen.getByText("App Node")).toBeDefined();
   });
 });

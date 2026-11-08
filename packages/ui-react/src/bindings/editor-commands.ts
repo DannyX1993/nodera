@@ -5,6 +5,7 @@ import {
   clearSelection,
   copySelection,
   cutSelection,
+  insertNodeOnEdge,
   pasteSelection,
   redo as redoHistory,
   removeEdge,
@@ -79,6 +80,16 @@ export function useEditorCommands(editor: EditorEngine): EditorCommandExecutor {
           return clearSelection(editor).ok;
         case "add-node":
           return addNode(editor, { definitionId: command.definitionId }).ok;
+        case "insert-node":
+          // One all-or-nothing unit in the application layer: the node plus the
+          // two edges that replace the original, so a failure writes nothing
+          // and the surface that dispatched the command reports it as `false`.
+          // Placement stays the SDK's decision (`builder.graph.insertNode`),
+          // exactly like the position of an `add-node` command.
+          return insertNodeOnEdge(editor, {
+            edgeId: command.edgeId,
+            definitionId: command.definitionId,
+          }).ok;
         case "fit-view": {
           if (handlers?.fitView === undefined) {
             return false;

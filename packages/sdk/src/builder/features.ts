@@ -17,7 +17,12 @@ import {
 } from "../errors.js";
 
 /** Capabilities the builder implements today, and therefore accepts. */
-export const SUPPORTED_FEATURES = ["minimap", "history", "validation"] as const;
+export const SUPPORTED_FEATURES = [
+  "minimap",
+  "history",
+  "validation",
+  "edgeInsertion",
+] as const;
 
 /** One capability a host may request. */
 export type BuilderFeature = (typeof SUPPORTED_FEATURES)[number];
@@ -40,6 +45,10 @@ const DEFAULT_FEATURES: ResolvedFeatures = Object.freeze({
   minimap: true,
   history: true,
   validation: true,
+  // Off by default: the affordance adds a control to the canvas, so the host
+  // that wants it says so (`features: { edgeInsertion: true }`) instead of
+  // discovering a button on every edge of every graph.
+  edgeInsertion: false,
 });
 
 function isSupportedFeature(feature: string): feature is BuilderFeature {

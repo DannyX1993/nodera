@@ -55,8 +55,46 @@ describe("UiStateStore", () => {
       interactionMode: "select",
       activePanelId: undefined,
       activeDialogId: undefined,
+      pendingEdgeInsertId: undefined,
       dragPolicy: "free",
     });
+  });
+
+  it("records the edge an insertion is pending for and notifies once per change", () => {
+    const store = createStore();
+    const seen: (string | undefined)[] = [];
+    store.subscribe((state) => seen.push(state.pendingEdgeInsertId));
+
+    store.setPendingEdgeInsertId("edge-1");
+    store.setPendingEdgeInsertId("edge-1");
+
+    expect(store.getState().pendingEdgeInsertId).toBe("edge-1");
+    expect(seen).toEqual(["edge-1"]);
+
+    store.setPendingEdgeInsertId(undefined);
+
+    expect(store.getState().pendingEdgeInsertId).toBeUndefined();
+    expect(seen).toEqual(["edge-1", undefined]);
+  });
+
+  it("clears the pending edge insertion when the dialog closes", () => {
+    const store = createDialogStore();
+    store.setPendingEdgeInsertId("edge-1");
+    store.openDialog("acme.dialog.create-node");
+
+    store.closeDialog();
+
+    expect(store.getState().activeDialogId).toBeUndefined();
+    expect(store.getState().pendingEdgeInsertId).toBeUndefined();
+  });
+
+  it("keeps the pending edge insertion while its dialog is open", () => {
+    const store = createDialogStore();
+
+    store.setPendingEdgeInsertId("edge-1");
+    store.openDialog("acme.dialog.create-node");
+
+    expect(store.getState().pendingEdgeInsertId).toBe("edge-1");
   });
 
   it("seeds the drag policy the host declares", () => {

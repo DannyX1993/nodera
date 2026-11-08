@@ -30,6 +30,7 @@ rankSpacing: 280 }`, so the seed nodes are first placed on a deterministic grid.
 | Arrange      | `builder.graph.arrange({ direction, spacing, rankSpacing })`          |
 | Drag         | `builder.graphLayout.setDragPolicy(policy)` — `locked`, `snap-back`, `free` |
 | "+"          | `CreateNodeButton` → the built-in node-creation dialog               |
+| "+" on an edge | `features.edgeInsertion` → the canvas affordance → `builder.graph.insertNode` |
 
 Pressing **Arrange** is the only thing that re-places nodes. It is one explicit
 action and one history unit: `builder.graph.undo()` puts every previous position
@@ -46,6 +47,16 @@ The **"+"** button opens the framework's node-creation dialog, which lists the
 definitions the host registered. The host handles the selection itself and adds
 the node with `builder.graph.addNode`, so `mode: "auto"` gives it a free slot;
 the status line reports where it landed. Press Arrange to rank it with the rest.
+
+The builder declares `features: { edgeInsertion: true }`, so the canvas paints a
+**"+" on every edge** as well. Clicking it opens the same dialog on that edge;
+the host sees `pendingEdgeInsertId` in the UI state and inserts with
+`builder.graph.insertNode`, so the chosen node lands between the two endpoints
+(`ingest → parse` becomes `ingest → new → parse`) as a single history unit: one
+undo restores the original edge. A refused insertion prints the SDK diagnostic in
+the status line and leaves the graph untouched. The button is the framework's
+default; `NoderaEditor.renderEdgeInsert` replaces it when a host wants its own
+icon or control.
 
 The **Drag** select calls `builder.graphLayout.setDragPolicy` and starts from
 `builder.graphLayout.dragPolicy()`, so it always shows the policy the canvas is

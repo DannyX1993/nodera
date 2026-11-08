@@ -218,6 +218,38 @@ Nothing is guessed when the request is refused: an unknown `edgeId` is
 definition without a usable input / output port carry the use case's own code in
 `metadata.useCaseCode`, and no graph write, history entry or event happens.
 
+### The "+" on an edge
+
+`features.edgeInsertion` is the host-side switch for the affordance, and it is
+**off** by default: the framework adds no control to the canvas unless the host
+asks (`createBuilder({ features: { edgeInsertion: true } })`, reported as
+`builder.features.edgeInsertion`). When it is on, the React Flow canvas paints one
+native, keyboard-reachable "+" (`aria-label="Insert node"`) at the midpoint of
+every edge — registered custom edge renderers included — and one click runs the
+whole flow:
+
+1. the canvas records the edge as `UiState.pendingEdgeInsertId` and opens
+   `nodera.dialog.create-node` through `useDialogActions`;
+2. the user picks a definition in the usual node-creation dialog (a
+   `DialogDefinition`, customisable like any other);
+3. the selection dispatches `{ kind: "insert-node", edgeId, definitionId }`,
+   which the host runs as `builder.graph.insertNode({ edgeId, type })` — one node
+   plus two edges replacing the original, as **one** history unit, so one `undo()`
+   restores the original edge.
+
+The pending edge is presentation state only: it never enters the portable
+document, `builder.graph.nodes()`/`edges()` never see it, and it is cleared when
+the insertion completes and whenever the dialog closes. A refused insertion
+writes nothing, pushes no history and leaves the dialog open with its diagnostic,
+exactly like a refused add.
+
+The default button is replaceable without duplicating the composition:
+`<NoderaEditor builder={builder} renderEdgeInsert={(edgeId) => <MyButton … />} />`
+keeps the position and the activation path and changes only the control (the
+`GraphCanvas` prop has the same name for a host that composes the canvas itself).
+What the button looks like is the host's; when it lands and what it writes is the
+framework's.
+
 ### `builder.graphLayout`
 
 The composition point of the port:
@@ -254,6 +286,10 @@ every layout action in its own toolbar **above** the canvas:
   `builder.graph.addNode`, passing the anchor it chose (`after`) or none, and
   `mode: "auto"` gives it the slot that follows. The demo passes none, so a new
   node lands at the end of the graph;
+- the "+" the canvas paints on every edge, because the demo declares
+  `features: { edgeInsertion: true }`: the dialog opens on that edge and the same
+  host handler inserts with `builder.graph.insertNode`, so the node lands between
+  the two endpoints as one history unit — one undo restores the edge;
 - a status line printing what moved, or the `sdk.invalid-input` diagnostic that
   refused the call (an emptied spacing field is refused, not hidden).
 

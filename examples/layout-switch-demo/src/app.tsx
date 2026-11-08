@@ -16,6 +16,8 @@
  * | Drag policy    | `builder.graphLayout.setDragPolicy(policy)`                |
  * | "+"            | `CreateNodeButton` → the built-in node-creation dialog,    |
  * |                | whose selection the host adds with `builder.graph.addNode` |
+ * | "+" on an edge  | the canvas affordance (`features.edgeInsertion`), whose     |
+ * |                | selection the host inserts with `builder.graph.insertNode` |
  *
  * Nothing is persisted by those overrides: they win for the one `Arrange` call
  * that carries them, and the next call without them reads `graph.layout` again.
@@ -179,13 +181,30 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   };
 
   /**
-   * Adds the definition the dialog offered.
+   * Creates the node the dialog offered.
    *
-   * The dialog hands the selection back instead of dispatching the command, so
-   * the addition goes through the SDK: `mode: "auto"` is what gives the new node
-   * a free slot, and the host reports where it landed.
+   * One dialog, two creation paths: when an edge "+" opened it, the definition
+   * is inserted **into** that edge (`builder.graph.insertNode`, one history unit,
+   * so one undo restores the original edge); otherwise it is added with
+   * `builder.graph.addNode` and `mode: "auto"` gives it a free slot.
    */
   const addNode = (definitionId: string): void => {
+    const edgeId = ui.pendingEdgeInsertId;
+    if (edgeId !== undefined) {
+      const inserted = builder.graph.insertNode({ edgeId, type: definitionId });
+      if (!inserted.ok) {
+        setStatus(
+          `Node "${definitionId}" was not inserted on "${edgeId}" — ` +
+            issueSummary(inserted.error),
+        );
+        return;
+      }
+      setStatus(
+        `Node "${inserted.value.node.id}" inserted on "${edgeId}" at ` +
+          `${positionLabel(inserted.value.node.position)}; one undo restores the edge.`,
+      );
+      return;
+    }
     const added = builder.graph.addNode({ type: definitionId });
     if (!added.ok) {
       setStatus(`Node "${definitionId}" was not added — ${issueSummary(added.error)}`);

@@ -68,7 +68,7 @@ decides which components it uses, where it places them and how they look.
 | `Toolbar` | registry-driven actions with availability gating and toolbar renderer replacement |
 | `ContextMenu` | store-driven menu at the pointer position, target-aware items, Escape/outside-click close, menu renderer replacement |
 | `Dialog` | modal surface for one `DialogDefinition`: ARIA name/description, focus move and trap, focus restore, Escape/backdrop dismissal only when the definition is dismissible |
-| `NodeCreationDialog` | the node palette inside `Dialog`: opens on the host's `open`, adds exactly one node through the `add-node` command (or the host's `onAddNode`), closes on the accepted selection |
+| `NodeCreationDialog` | the node palette inside `Dialog`: opens on the host's `open`, inserts the chosen definition on the pending edge through the `insert-node` command or adds exactly one node through `add-node` (or the host's `onAddNode`), closes on the accepted selection |
 | `CreateNodeButton` | the "+" affordance: a native button with `aria-haspopup="dialog"` that opens `nodera.dialog.create-node` through `useDialogActions` |
 | `ValidationPanel` | severity counts, validate action, issue list with element links, optional auto-validate |
 | `HistoryPanel` | undo/redo labels with a current marker and click-to-walk |
@@ -174,6 +174,31 @@ focus behaviour come from `Dialog` and `NodePalette` — focus starts in the
 palette search field, `Tab` cycles inside, and `Escape` closes the dialog because
 `CREATE_NODE_DIALOG` is dismissible.
 
+### Inserting a node on an edge
+
+One dialog serves both creation paths. The canvas "+" (enabled by
+`features.edgeInsertion`, see `packages/sdk/README.md`) records the edge with
+`useEdgeInsertActions().begin(edgeId)`: it writes `pendingEdgeInsertId` to the UI
+store and opens `nodera.dialog.create-node` through `useDialogActions`. While
+that edge is pending, the dialog dispatches
+`{ kind: "insert-node", edgeId, definitionId }` instead of `add-node`;
+`useEditorCommands` executes it through the application's
+`insert-node-on-edge` use case, which replaces the edge with `source → node →
+target` as **one** history unit — one undo restores the original edge. A refusal
+reports `false`, leaves the graph and the history untouched, and keeps the
+dialog open. The pending edge is cleared when the insertion is accepted and,
+from the store, whenever the dialog closes, so the next add cannot insert into an
+old edge.
+
+A host that wants its own control renders it through
+`NoderaEditor.renderEdgeInsert={(edgeId) => <MyButton edgeId={edgeId} />}` (or
+`GraphCanvas.renderEdgeInsert`), and can call `useEdgeInsertActions()` from the
+component to keep the built-in behaviour. The canvas owns the midpoint position
+and forwards activation; the host owns what the button looks like. A host that
+handles the selection itself (`onAddNode`) receives the definition id and reads
+`pendingEdgeInsertId` from `useUiState()` to decide between
+`builder.graph.insertNode` and `builder.graph.addNode`.
+
 `CreateNodeButton` props: `label` (accessible name, default `Add node`),
 `children` (visible content, default `+`), `className` and `disabled`. It is a
 native `button type="button"`, so `Enter` and `Space` activate it, it has no
@@ -190,6 +215,8 @@ theme variables on its wrapper element.
 - `useNoderaUi`, `useEditorEngine`, `useTheme`, `useUiState`, `useUiStateActions`
 - `useDialogActions` — `open(dialogId)` / `close()` over the UI store, which
   refuses an id its `DialogRegistry` does not know
+- `useEdgeInsertActions` — `begin(edgeId)`: records the edge as the pending
+  insertion and opens the node-creation dialog
 - `useLayoutActions` — apply/reset layouts, resize, show/hide/toggle, dock, float,
   save and restore preferences
 - `useEditorSnapshot`, `useToolAvailability`, `useGraphQueries`,

@@ -71,6 +71,16 @@ export interface UiState {
    */
   readonly activeDialogId: string | undefined;
   /**
+   * Edge a node-creation dialog will insert into, if one was opened from the
+   * edge "+" affordance.
+   *
+   * Presentation state only: it tells the dialog which edge the chosen
+   * definition belongs to, so it never enters the portable document, and it is
+   * cleared when the dialog closes (see {@link UiStateStore.closeDialog}) or
+   * when the insertion completes.
+   */
+  readonly pendingEdgeInsertId: string | undefined;
+  /**
    * What a manual drag does with the positions the layout assigned.
    *
    * The canvas adapter reads it reactively (a policy change re-renders without
@@ -128,6 +138,7 @@ export class UiStateStore {
       interactionMode: options.interactionMode ?? "select",
       activePanelId: undefined,
       activeDialogId: undefined,
+      pendingEdgeInsertId: undefined,
       dragPolicy: options.dragPolicy ?? "free",
     };
   }
@@ -257,12 +268,31 @@ export class UiStateStore {
     return ok(resolved.value);
   }
 
-  /** Closes the open dialog, if any. */
-  closeDialog(): void {
-    if (this.state.activeDialogId === undefined) {
+  /**
+   * Records (or clears, with `undefined`) the edge an insertion is pending for.
+   *
+   * The edge id is opaque here: the store is framework-agnostic and does not
+   * check it against a graph. Setting the value already stored notifies nobody.
+   */
+  setPendingEdgeInsertId(pendingEdgeInsertId: string | undefined): void {
+    if (pendingEdgeInsertId === this.state.pendingEdgeInsertId) {
       return;
     }
-    this.commit({ ...this.state, activeDialogId: undefined });
+    this.commit({ ...this.state, pendingEdgeInsertId });
+  }
+
+  /**
+   * Closes the open dialog, if any, and ends its edge-insertion session.
+   *
+   * The pending edge lives exactly as long as the dialog it was opened for, so
+   * both fields are cleared in one commit: a closed dialog can never leave a
+   * later `add-node` guessing that it has to insert instead.
+   */
+  closeDialog(): void {
+    if (this.state.activeDialogId === undefined && this.state.pendingEdgeInsertId === undefined) {
+      return;
+    }
+    this.commit({ ...this.state, activeDialogId: undefined, pendingEdgeInsertId: undefined });
   }
 
   /**

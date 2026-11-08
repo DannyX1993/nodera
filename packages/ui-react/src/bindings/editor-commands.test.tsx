@@ -1,7 +1,8 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { addNode, selectNode } from "@nodera/application";
+import { addNode, createEdge, selectNode } from "@nodera/application";
+import { createEdgeId } from "@nodera/contracts";
 
 import { createTestEditor, TEST_DEFINITION_ID } from "../test/fixtures.js";
 import { useEditorCommands } from "./editor-commands.js";
@@ -197,6 +198,65 @@ describe("useEditorCommands", () => {
       expect(result.current({ kind: "custom", id: "acme.command" }, { onCustom })).toBe(true);
     });
     expect(onCustom).toHaveBeenCalledWith("acme.command", editor);
+  });
+
+  it("inserts a node between two endpoints through the insert-node command", () => {
+    const editor = createTestEditor();
+    const { result } = renderHook(() => useEditorCommands(editor));
+    act(() => {
+      result.current({ kind: "add-node", definitionId: TEST_DEFINITION_ID });
+      result.current({ kind: "add-node", definitionId: TEST_DEFINITION_ID });
+    });
+    const [source, target] = editor.graph.getNodes();
+    const created = createEdge(editor, {
+      edgeId: "edge-1",
+      source: { nodeId: String(source?.id), portId: "out" },
+      target: { nodeId: String(target?.id), portId: "in" },
+    });
+    expect(created.ok).toBe(true);
+
+    let executed = false;
+    act(() => {
+      executed = result.current({
+        kind: "insert-node",
+        edgeId: "edge-1",
+        definitionId: TEST_DEFINITION_ID,
+      });
+    });
+
+    expect(executed).toBe(true);
+    expect(editor.graph.getNodes()).toHaveLength(3);
+    expect(editor.graph.getEdges()).toHaveLength(2);
+    expect(editor.graph.getEdge(createEdgeId("edge-1"))).toBeUndefined();
+    expect(editor.history.labels()).toEqual([
+      "add-node",
+      "add-node",
+      "create-edge",
+      "insert-node-on-edge",
+    ]);
+  });
+
+  it("reports false when the insert-node command is refused", () => {
+    const editor = createTestEditor();
+    const { result } = renderHook(() => useEditorCommands(editor));
+    act(() => {
+      result.current({ kind: "add-node", definitionId: TEST_DEFINITION_ID });
+    });
+    const historyBefore = editor.history.size();
+
+    let executed = true;
+    act(() => {
+      executed = result.current({
+        kind: "insert-node",
+        edgeId: "edge-missing",
+        definitionId: TEST_DEFINITION_ID,
+      });
+    });
+
+    expect(executed).toBe(false);
+    expect(editor.graph.getNodes()).toHaveLength(1);
+    expect(editor.graph.getEdges()).toHaveLength(0);
+    expect(editor.history.size()).toBe(historyBefore);
   });
 
   it("leaves panel commands to the layout actions", () => {

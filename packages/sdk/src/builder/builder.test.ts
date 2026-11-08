@@ -82,6 +82,7 @@ describe("createBuilder defaults", () => {
       minimap: true,
       history: true,
       validation: true,
+      edgeInsertion: false,
     });
     expect(builder.registries.nodes.size).toBe(0);
     expect(builder.registries.edges.size).toBe(0);
@@ -214,6 +215,7 @@ describe("feature configuration", () => {
       minimap: true,
       history: true,
       validation: true,
+      edgeInsertion: false,
     });
     expect(create({ features: { history: false } }).features.history).toBe(false);
   });

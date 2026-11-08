@@ -21,6 +21,11 @@ export type ToolCommand =
   | { readonly kind: "validate" }
   | { readonly kind: "fit-view" }
   | { readonly kind: "add-node"; readonly definitionId: string }
+  | {
+      readonly kind: "insert-node";
+      readonly edgeId: string;
+      readonly definitionId: string;
+    }
   | { readonly kind: "select-node"; readonly nodeId: string }
   | { readonly kind: "select-edge"; readonly edgeId: string }
   | { readonly kind: "clear-selection" }
