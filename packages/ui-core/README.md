@@ -78,7 +78,8 @@ the registry, reducers and geometry live in `layout-engine`.
 `UiStateStore` is the single presentation-state container: `themeId`,
 `layoutId`, `layout` (panel state), `menu` (open context/panel menu),
 `searchQuery`, `interactionMode`, `activePanelId`, `activeDialogId`,
-`pendingEdgeInsertId` and `dragPolicy`.
+`pendingEdgeInsertId`, `pendingAppendAnchorId`, `dragPolicy`, `connections` and
+`ports`.
 
 - Immutable snapshots: `getState()` keeps its identity until something really
   changes, and a no-op mutation notifies nobody (that is what keeps panels from
@@ -88,7 +89,7 @@ the registry, reducers and geometry live in `layout-engine`.
 - Mutators: `setTheme`, `setLayout(layoutId, layout)`, `updateLayout(updater)`,
   `openMenu`, `closeMenu`, `setSearchQuery`, `setInteractionMode`,
   `setActivePanel`, `openDialog(dialogId)`, `closeDialog`, `setDragPolicy`,
-  `setPendingEdgeInsertId`.
+  `setConnections`, `setPorts`, `setPendingEdgeInsertId`.
 - Drag policy: `DragPolicy` (`"free" | "locked" | "snap-back"`) says what a
   manual drag does with the positions the layout assigned. `"free"` (the store
   default, and today's behaviour) commits the dropped position, `"locked"` makes
@@ -98,6 +99,16 @@ the registry, reducers and geometry live in `layout-engine`.
   (`builder.graphLayout.dragPolicy()` / `setDragPolicy`), and the canvas
   re-renders from the state, so no module-level variable or React-only context
   carries it.
+- Connections and ports policies: `ConnectionsPolicy` (`"editable" | "fixed"`)
+  and `PortsPolicy` (`"visible" | "hidden"`) say what a person may do with the
+  surface of a graph. `"editable"`/`"visible"` are the store defaults and today's
+  behaviour; `"fixed"` offers no connectable handle and refuses a connection, and
+  `"hidden"` renders no port handle at all while node renderers keep their port
+  data. They are independent of the placement mode, write nothing on their own,
+  and the store only holds the values — `@nodera/sdk` validates them and seeds
+  them from `graph.layout.connections` / `graph.layout.ports`
+  (`builder.graphLayout.connectionsPolicy()` / `setConnectionsPolicy` and
+  `portsPolicy()` / `setPortsPolicy`), and the canvas re-renders from the state.
 - Dialogs: the store takes an optional `dialogRegistry`, and `openDialog(id)`
   resolves the id through it. It returns the definition or the registry's
   `not-found` error and, when it refuses, neither the state nor its subscribers

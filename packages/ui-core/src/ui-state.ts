@@ -25,6 +25,35 @@ export type InteractionMode = "select" | "pan";
  */
 export type DragPolicy = "free" | "locked" | "snap-back";
 
+/**
+ * Whether a person may draw a new connection on the canvas.
+ *
+ * Host configuration, reflected in the UI state so the canvas re-renders when
+ * the host changes it:
+ *
+ * - `"editable"` (the default, and today's behaviour): the canvas accepts a
+ *   connection and writes it through the `create-edge` use case.
+ * - `"fixed"`: the canvas offers no connectable handle and refuses a connection
+ *   that arrives anyway, so the graph keeps the edges it was given.
+ *
+ * Pure presentation policy: it writes no document state, pushes no history
+ * entry and emits no event by itself.
+ */
+export type ConnectionsPolicy = "editable" | "fixed";
+
+/**
+ * Whether the node surface paints the port handles of its nodes.
+ *
+ * Host configuration, reflected in the UI state so the canvas re-renders when
+ * the host changes it:
+ *
+ * - `"visible"` (the default, and today's behaviour): every port is painted as
+ *   a React Flow handle, so connections have something to attach to.
+ * - `"hidden"`: no port handle is rendered at all — not merely made
+ *   invisible — while node renderers keep receiving their port data.
+ */
+export type PortsPolicy = "visible" | "hidden";
+
 /** Element a context menu was opened for. */
 export type MenuTargetKind = "node" | "edge" | "pane" | "canvas";
 
@@ -104,6 +133,24 @@ export interface UiState {
    * on its own.
    */
   readonly dragPolicy: DragPolicy;
+  /**
+   * Whether a person may draw a new connection on the canvas.
+   *
+   * The canvas adapter reads it reactively (a policy change re-renders without
+   * a rebuild); the builder seeds it from `graph.layout.connections` and changes
+   * it through `builder.graphLayout.setConnectionsPolicy`. It never writes an
+   * edge by itself.
+   */
+  readonly connections: ConnectionsPolicy;
+  /**
+   * Whether the node surface paints its port handles.
+   *
+   * The canvas adapter reads it reactively (a policy change re-renders without
+   * a rebuild); the builder seeds it from `graph.layout.ports` and changes it
+   * through `builder.graphLayout.setPortsPolicy`. Hiding the handles writes
+   * nothing: the port data still reaches every node renderer.
+   */
+  readonly ports: PortsPolicy;
 }
 
 /** Initial values accepted by {@link UiStateStore}. */
@@ -125,6 +172,16 @@ export interface UiStateStoreOptions {
    * whose host owns placement.
    */
   readonly dragPolicy?: DragPolicy;
+  /**
+   * Connections policy of the canvas. Defaults to `"editable"`, today's
+   * behaviour.
+   */
+  readonly connections?: ConnectionsPolicy;
+  /**
+   * Ports policy of the node surface. Defaults to `"visible"`, today's
+   * behaviour.
+   */
+  readonly ports?: PortsPolicy;
 }
 
 /** Listener notified after every state change. */
@@ -156,6 +213,8 @@ export class UiStateStore {
       pendingEdgeInsertId: undefined,
       pendingAppendAnchorId: undefined,
       dragPolicy: options.dragPolicy ?? "free",
+      connections: options.connections ?? "editable",
+      ports: options.ports ?? "visible",
     };
   }
 
@@ -346,6 +405,34 @@ export class UiStateStore {
       return;
     }
     this.commit({ ...this.state, dragPolicy });
+  }
+
+  /**
+   * Applies the connections policy of the canvas.
+   *
+   * The builder is what validates the value (`builder.graphLayout
+   * .setConnectionsPolicy`), so an invalid policy never reaches the store;
+   * setting the policy already applied notifies nobody.
+   */
+  setConnections(connections: ConnectionsPolicy): void {
+    if (connections === this.state.connections) {
+      return;
+    }
+    this.commit({ ...this.state, connections });
+  }
+
+  /**
+   * Applies the ports policy of the node surface.
+   *
+   * The builder is what validates the value (`builder.graphLayout
+   * .setPortsPolicy`), so an invalid policy never reaches the store; setting the
+   * policy already applied notifies nobody.
+   */
+  setPorts(ports: PortsPolicy): void {
+    if (ports === this.state.ports) {
+      return;
+    }
+    this.commit({ ...this.state, ports });
   }
 
   private commit(next: UiState): void {

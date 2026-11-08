@@ -14,6 +14,8 @@
  * | Rank spacing   | `builder.graph.arrange({ rankSpacing, … })`                |
  * | Arrange        | `builder.graph.arrange({ … })` — one explicit history unit |
  * | Drag policy    | `builder.graphLayout.setDragPolicy(policy)`                |
+ * | Connections    | `builder.graphLayout.setConnectionsPolicy(policy)`         |
+ * | Ports          | `builder.graphLayout.setPortsPolicy(policy)`               |
  * | "+"            | `CreateNodeButton` → the built-in node-creation dialog,    |
  * |                | whose selection the host adds with `builder.graph.addNode` |
  * | "+" on an edge  | the canvas affordance (`features.edgeInsertion`), whose     |
@@ -54,6 +56,24 @@ type Direction = (typeof DIRECTIONS)[number];
 
 /** What a manual drag does with the positions the layout assigned. */
 type DragPolicy = ReturnType<Builder["graphLayout"]["dragPolicy"]>;
+
+/** Whether a person may draw a new connection on the canvas. */
+type ConnectionsPolicy = ReturnType<Builder["graphLayout"]["connectionsPolicy"]>;
+
+/** Whether the node surface paints its port handles. */
+type PortsPolicy = ReturnType<Builder["graphLayout"]["portsPolicy"]>;
+
+/**
+ * The built-in strategy id that does not own the positions.
+ *
+ * A strategy that owns the positions owns the surface around them: with
+ * `nodera.graph-layout.layered` the host fixes the connections and hides the port
+ * handles, so nobody adds an edge or a handle the arrangement does not know
+ * about. `nodera.graph-layout.free` places nothing, so the surface is the host's
+ * again — editable connections and visible ports. The id is the SDK's own
+ * built-in, not a private convention.
+ */
+const FREE_STRATEGY_ID = "nodera.graph-layout.free";
 
 /** Drag policies the host offers, in the order it shows them. */
 const DRAG_POLICIES = ["free", "locked", "snap-back"] as const satisfies readonly DragPolicy[];
@@ -114,12 +134,21 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   const [dragPolicy, setDragPolicy] = useState<DragPolicy>(
     () => builder.graphLayout.dragPolicy(),
   );
+  // Seeded from the builder's configuration too, so the toolbar reports the
+  // policies the canvas is really applying from the first render.
+  const [connections, setConnections] = useState<ConnectionsPolicy>(
+    () => builder.graphLayout.connectionsPolicy(),
+  );
+  const [ports, setPorts] = useState<PortsPolicy>(() => builder.graphLayout.portsPolicy());
 
   /**
    * Selects the strategy the next `arrange()` runs.
    *
    * The registry owns the id: an unknown one is refused with a diagnostic and
-   * the selection stays where it was.
+   * the selection stays where it was. Selecting a strategy also selects the
+   * surface it implies — a layout-owned graph fixes its connections and hides its
+   * port handles, `nodera.graph-layout.free` hands both back to the host — because
+   * that is the host's own configuration decision, not a framework toggle.
    */
   const selectStrategy = (id: string): void => {
     const selected = builder.graphLayout.setDefault(id);
@@ -128,9 +157,45 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
       return;
     }
     setStrategyId(selected.value.id);
+    const surface = applySurface(selected.value.id !== FREE_STRATEGY_ID);
     // Selecting a strategy changes the geometry, so the host applies it at once
     // instead of leaving the canvas showing an arrangement of another strategy.
     applyArrangement({ direction, spacing, rankSpacing, strategyId: selected.value.id });
+    if (!surface.ok) {
+      setStatus(`Surface of "${selected.value.id}" was not applied — ${surface.status}`);
+    }
+  };
+
+  /**
+   * Applies the surface a strategy implies: fixed connections and hidden ports
+   * when the layout owns the positions, editable connections and visible ports
+   * when it does not.
+   *
+   * Both are presentation policies: they write no document state, push no history
+   * entry and emit no event, so a refused value simply leaves the previous one in
+   * place and the toolbar keeps reporting it.
+   */
+  const applySurface = (
+    layoutOwned: boolean,
+  ): { readonly ok: boolean; readonly status: string } => {
+    const changedConnections = builder.graphLayout.setConnectionsPolicy(
+      layoutOwned ? "fixed" : "editable",
+    );
+    if (!changedConnections.ok) {
+      return { ok: false, status: issueSummary(changedConnections.error) };
+    }
+    setConnections(changedConnections.value);
+
+    const changedPorts = builder.graphLayout.setPortsPolicy(layoutOwned ? "hidden" : "visible");
+    if (!changedPorts.ok) {
+      return { ok: false, status: issueSummary(changedPorts.error) };
+    }
+    setPorts(changedPorts.value);
+
+    return {
+      ok: true,
+      status: `Connections ${changedConnections.value}, ports ${changedPorts.value}.`,
+    };
   };
 
   /**
@@ -390,6 +455,10 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
         </button>
 
         <CreateNodeButton className="demo-button" />
+
+        <span className="demo-control" data-testid="layout-surface">
+          {`surface: connections ${connections} · ports ${ports}`}
+        </span>
       </header>
 
       <p className="demo-status" role="status" aria-live="polite">

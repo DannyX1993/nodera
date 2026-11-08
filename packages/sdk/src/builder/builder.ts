@@ -34,12 +34,14 @@ import {
   UiStateStore,
   createDefaultPanelRegistry,
   createDefaultToolRegistry,
+  type ConnectionsPolicy,
   type DialogDefinition,
   type DragPolicy,
   type LayoutDefinition,
   type LayoutPanelPlacement,
   type PanelDefinition,
   type PanelRegistry,
+  type PortsPolicy,
   type ToolDefinition,
   type ToolRegistry,
 } from "@nodera/ui-core";
@@ -109,6 +111,18 @@ import { resolveFeatures, type ResolvedFeatures } from "./features.js";
  * it is part of what `builder.graphLayout` reads and writes.
  */
 export type { DragPolicy } from "@nodera/ui-core";
+
+/**
+ * Connections policy of the canvas, re-exported from `@nodera/ui-core` because
+ * it is part of what `builder.graphLayout` reads and writes.
+ */
+export type { ConnectionsPolicy } from "@nodera/ui-core";
+
+/**
+ * Ports policy of the node surface, re-exported from `@nodera/ui-core` because
+ * it is part of what `builder.graphLayout` reads and writes.
+ */
+export type { PortsPolicy } from "@nodera/ui-core";
 
 /** Id of a builder the host did not name. */
 export const DEFAULT_BUILDER_ID = "nodera.builder";
@@ -214,6 +228,46 @@ export interface BuilderGraphLayoutApi {
    * `graph.layout.drag` and the previous policy stays.
    */
   setDragPolicy(policy: DragPolicy): Result<DragPolicy, SdkIssues>;
+  /**
+   * Connections policy the canvas applies today.
+   *
+   * It is the policy declared in `graph.layout.connections` (`"editable"` by
+   * default): `"fixed"` makes the canvas offer no connectable handle and refuse
+   * a connection that arrives anyway, so nobody adds an edge the arrangement the
+   * layout owns does not know about. Unless the host changed it at runtime with
+   * {@link BuilderGraphLayoutApi.setConnectionsPolicy}.
+   */
+  connectionsPolicy(): ConnectionsPolicy;
+  /**
+   * Changes whether a person may draw a new connection, and reflects it in the
+   * UI state the canvas reads, so a presentation binding re-renders without a
+   * rebuild.
+   *
+   * It never writes an edge by itself and never touches the ones the document
+   * holds; existing edges stay editable in the document. A value outside the
+   * union is refused with `sdk.invalid-input` at `graph.layout.connections` and
+   * the previous policy stays.
+   */
+  setConnectionsPolicy(policy: ConnectionsPolicy): Result<ConnectionsPolicy, SdkIssues>;
+  /**
+   * Ports policy the node surface applies today.
+   *
+   * It is the policy declared in `graph.layout.ports` (`"visible"` by default):
+   * `"hidden"` renders no port handle at all while node renderers keep receiving
+   * their port data. Unless the host changed it at runtime with
+   * {@link BuilderGraphLayoutApi.setPortsPolicy}.
+   */
+  portsPolicy(): PortsPolicy;
+  /**
+   * Changes whether the node surface paints its port handles, and reflects it in
+   * the UI state the canvas reads, so a presentation binding re-renders without
+   * a rebuild.
+   *
+   * It never writes anything: hiding a handle removes a control, not a port. A
+   * value outside the union is refused with `sdk.invalid-input` at
+   * `graph.layout.ports` and the previous policy stays.
+   */
+  setPortsPolicy(policy: PortsPolicy): Result<PortsPolicy, SdkIssues>;
 }
 
 /**
@@ -525,6 +579,26 @@ function graphLayoutIssues(
       ),
     );
   }
+  const connections: unknown = Reflect.get(layout, "connections");
+  if (connections !== undefined && connections !== "editable" && connections !== "fixed") {
+    issues.push(
+      shapeIssue(
+        'Builder graph layout connections policy must be "editable" or "fixed"',
+        connections,
+        [...path, "connections"],
+      ),
+    );
+  }
+  const ports: unknown = Reflect.get(layout, "ports");
+  if (ports !== undefined && ports !== "visible" && ports !== "hidden") {
+    issues.push(
+      shapeIssue(
+        'Builder graph layout ports policy must be "visible" or "hidden"',
+        ports,
+        [...path, "ports"],
+      ),
+    );
+  }
   return issues;
 }
 
@@ -544,6 +618,33 @@ function resolveDragPolicy(configuration: GraphLayoutConfiguration | undefined):
     return "free";
   }
   return configuration.drag === "snap-back" ? "snap-back" : "locked";
+}
+
+/**
+ * Resolves the connections policy a validated configuration declares.
+ *
+ * Unlike the drag policy it does not depend on who owns placement: a graph the
+ * host positions by hand may still fix its connections (an imported graph, a
+ * read-only inspection surface), so the declared value always wins and
+ * `"editable"` — today's behaviour — is the default. Fail-closed like the rest of
+ * the configuration: only `"fixed"` fixes anything, so an unknown value can
+ * never take connections away from a host that did not ask for it.
+ */
+function resolveConnectionsPolicy(
+  configuration: GraphLayoutConfiguration | undefined,
+): ConnectionsPolicy {
+  return configuration?.connections === "fixed" ? "fixed" : "editable";
+}
+
+/**
+ * Resolves the ports policy a validated configuration declares.
+ *
+ * Same rule as the connections policy: independent of the placement mode, the
+ * declared value wins and `"visible"` — today's behaviour — is the default, so an
+ * unknown value never hides a handle nobody asked to hide.
+ */
+function resolvePortsPolicy(configuration: GraphLayoutConfiguration | undefined): PortsPolicy {
+  return configuration?.ports === "hidden" ? "hidden" : "visible";
 }
 
 /**
@@ -1115,6 +1216,10 @@ class SdkBuilder implements Builder {
       all: () => this.strategyRegistry.all(),
       dragPolicy: () => this.store.getState().dragPolicy,
       setDragPolicy: (policy) => this.selectDragPolicy(policy),
+      connectionsPolicy: () => this.store.getState().connections,
+      setConnectionsPolicy: (policy) => this.selectConnectionsPolicy(policy),
+      portsPolicy: () => this.store.getState().ports,
+      setPortsPolicy: (policy) => this.selectPortsPolicy(policy),
     };
     this.dialogs = {
       register: (dialog) => this.addDialog(dialog),
@@ -1392,6 +1497,56 @@ class SdkBuilder implements Builder {
     this.store.setDragPolicy(policy);
     return ok(policy);
   }
+
+  /**
+   * Applies a connections policy to the UI state the canvas reads.
+   *
+   * Same contract as {@link selectDragPolicy}: the union is checked here because
+   * the value comes from a host, and a refused policy leaves both the state and
+   * its subscribers untouched.
+   */
+  private selectConnectionsPolicy(
+    policy: ConnectionsPolicy,
+  ): Result<ConnectionsPolicy, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("graphLayout.setConnectionsPolicy")]);
+    }
+    if (policy !== "editable" && policy !== "fixed") {
+      return err([
+        shapeIssue(
+          'Builder graph layout connections policy must be "editable" or "fixed"',
+          policy,
+          ["graph", "layout", "connections"],
+        ),
+      ]);
+    }
+    this.store.setConnections(policy);
+    return ok(policy);
+  }
+
+  /**
+   * Applies a ports policy to the UI state the canvas reads.
+   *
+   * Same contract as {@link selectDragPolicy}: the union is checked here because
+   * the value comes from a host, and a refused policy leaves both the state and
+   * its subscribers untouched.
+   */
+  private selectPortsPolicy(policy: PortsPolicy): Result<PortsPolicy, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("graphLayout.setPortsPolicy")]);
+    }
+    if (policy !== "visible" && policy !== "hidden") {
+      return err([
+        shapeIssue(
+          'Builder graph layout ports policy must be "visible" or "hidden"',
+          policy,
+          ["graph", "layout", "ports"],
+        ),
+      ]);
+    }
+    this.store.setPorts(policy);
+    return ok(policy);
+  }
 }
 
 /**
@@ -1605,6 +1760,8 @@ export function createBuilder(
     layout: createLayoutState(layoutDefinition, { panels: panels.all() }),
     dialogRegistry: dialogs,
     dragPolicy: resolveDragPolicy(declaredGraphLayout),
+    connections: resolveConnectionsPolicy(declaredGraphLayout),
+    ports: resolvePortsPolicy(declaredGraphLayout),
   });
 
   const graph = configuration.graph;

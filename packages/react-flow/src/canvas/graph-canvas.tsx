@@ -22,6 +22,8 @@ import {
   ConnectionMode,
   EdgeLabelRenderer,
   BaseEdge,
+  Handle,
+  Position,
   type NodeChange,
   type EdgeChange,
   type EdgeProps,
@@ -38,7 +40,7 @@ import {
 } from "@xyflow/react";
 
 import type { EditorEngine } from "@nodera/application";
-import type { DragPolicy } from "@nodera/ui-core";
+import type { ConnectionsPolicy, DragPolicy, PortsPolicy } from "@nodera/ui-core";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
 import { useEdgeInsertActions, useNoderaUi } from "@nodera/ui-react";
 import {
@@ -56,7 +58,12 @@ import {
 import { useEditorGraph } from "./use-editor-graph.js";
 import { useNodeTypes } from "./custom-node.js";
 import { isNodeDefinitionDrag, nodeDefinitionFromDataTransfer } from "./definition-drop.js";
-import { DEFAULT_NODE_RENDERER_ID } from "../registries/renderer-registries.js";
+import {
+  DEFAULT_EDGE_RENDERER_ID,
+  DEFAULT_NODE_RENDERER_ID,
+  DEFAULT_PORT_RENDERER_ID,
+  PortRendererRegistry,
+} from "../registries/renderer-registries.js";
 import {
   nodePositionFromReactFlow,
   connectionFromReactFlow,
@@ -64,12 +71,15 @@ import {
   applyMeasuredDimensions,
   hasNewDimensions,
 } from "../map/react-flow-mapper.js";
-import type { NodeRendererRegistry, EdgeRendererRegistry, PortRendererRegistry } from "../registries/renderer-registries.js";
-import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
+import type {
+  NodeRendererRegistry,
+  EdgeRendererRegistry,
+} from "../registries/renderer-registries.js";
 import { DefaultEdgeRenderer } from "../renderers/default-edge-renderer.js";
 import type {
   NoderaNodeData,
   NoderaNodeRendererProps,
+  NoderaPortRendererProps,
 } from "../renderers/node-renderer-props.js";
 import { canvasInteractionSettings, type CanvasInteractionMode } from "./interaction-mode.js";
 
@@ -631,6 +641,132 @@ export function commitSelectionFromReactFlow(
   });
 }
 
+/**
+ * Commits one React Flow connection through the `create-edge` use case.
+ *
+ * Returns whether the connection was **accepted**. Under any policy other than
+ * `"editable"` nothing is written and the caller reports nothing to its host, so
+ * a surface whose connections are fixed can never produce an edge. Under
+ * `"editable"` this is exactly the path the canvas always ran: an incomplete
+ * connection is dropped by the mapper and a semantic violation is decided by the
+ * use case, never here — so the return value says "the canvas accepted it", not
+ * "an edge appeared".
+ */
+export function commitConnection(
+  editor: EditorEngine,
+  connection: CanvasConnection,
+  connectionsPolicy: ConnectionsPolicy = "editable",
+): boolean {
+  if (connectionsPolicy !== "editable") {
+    return false;
+  }
+  const conn = connectionFromReactFlow({
+    source: connection.source,
+    target: connection.target,
+    sourceHandle: connection.sourceHandle ?? null,
+    targetHandle: connection.targetHandle ?? null,
+  });
+  if (conn === undefined) {
+    return false;
+  }
+  createEdge(editor, {
+    source: { nodeId: conn.source.nodeId, portId: conn.source.portId },
+    target: { nodeId: conn.target.nodeId, portId: conn.target.portId },
+  });
+  return true;
+}
+
+/** One connection as React Flow reports it, before it is mapped to the domain. */
+export interface CanvasConnection {
+  readonly source: string;
+  readonly target: string;
+  readonly sourceHandle?: string | null;
+  readonly targetHandle?: string | null;
+}
+
+/** A port renderer that draws nothing: no React Flow `Handle`, no control. */
+const HiddenPort: FC<NoderaPortRendererProps> = () => null;
+
+/**
+ * Visual contract of a port handle, mirrored from `PortHandle` so a themed host
+ * keeps its `--ndr-handle-*` tokens when the port is painted inert.
+ *
+ * `PortHandle` renders those values itself but does not forward React Flow's
+ * `isConnectable`, and the node wrapper that owns port rendering never passes it
+ * down, so a handle it renders always accepts a connection. `"fixed"` therefore
+ * paints the same contract with `isConnectable={false}`: React Flow omits its
+ * `connectable` marker and refuses to start a connection from it, instead of the
+ * canvas letting a drag start and then rejecting the write.
+ */
+const INERT_PORT_HANDLE_STYLE: CSSProperties = {
+  width: "var(--ndr-handle-size, 8px)",
+  height: "var(--ndr-handle-size, 8px)",
+  backgroundColor: "var(--ndr-handle-background, #ffffff)",
+  borderWidth: "var(--ndr-handle-border-width, 1.5px)",
+  borderStyle: "solid",
+  borderColor: "var(--ndr-handle-border-color, #7c8896)",
+  borderRadius: "var(--ndr-handle-radius, 50%)",
+};
+
+/** A port handle a person cannot start or end a connection from. */
+function InertPort({
+  portId,
+  direction = "bidirectional",
+  name,
+}: NoderaPortRendererProps): ReactNode {
+  const isInput = direction === "input";
+  return (
+    <Handle
+      id={portId}
+      type={isInput ? "target" : "source"}
+      position={isInput ? Position.Left : Position.Right}
+      isConnectable={false}
+      aria-label={name ?? portId}
+      data-nodera-port-id={portId}
+      data-nodera-port-direction={direction}
+      className="nodera-port-handle"
+      style={INERT_PORT_HANDLE_STYLE}
+    />
+  );
+}
+
+/**
+ * Port renderer registry the node surface uses under the two policies.
+ *
+ * `"visible"` ports with `"editable"` connections hands the host's registry
+ * through untouched, so today's handles are exactly today's handles. Otherwise
+ * every port renderer id — the host's registered ones and the built-in default —
+ * is answered with one replacement component:
+ *
+ * - `"hidden"` ports: a component that draws nothing, which removes the React
+ *   Flow `Handle` element itself instead of styling it away, so no element is
+ *   left to start or end a connection from;
+ * - `"visible"` ports with fixed connections: an inert handle, painted exactly
+ *   as before but refusing every connection.
+ *
+ * The node data keeps its ports in every case, so a renderer body receives the
+ * same `data.ports` it would otherwise (hiding a handle removes a control, not a
+ * port).
+ */
+export function portRenderersForPolicy(
+  connectionsPolicy: ConnectionsPolicy,
+  portsPolicy: PortsPolicy,
+  registry: PortRendererRegistry | undefined,
+): PortRendererRegistry | undefined {
+  if (portsPolicy === "visible" && connectionsPolicy === "editable") {
+    return registry;
+  }
+  const replacement = portsPolicy === "hidden" ? HiddenPort : InertPort;
+  const replaced = new PortRendererRegistry();
+  replaced.register(DEFAULT_PORT_RENDERER_ID, replacement);
+  for (const rendererId of registry?.listIds() ?? []) {
+    if (!replaced.has(rendererId)) {
+      replaced.register(rendererId, replacement);
+    }
+  }
+  return replaced;
+}
+
 /* ------------------------------------------------------------------ */
 /*  GraphCanvas                                                        */
 /* ------------------------------------------------------------------ */
@@ -662,6 +798,27 @@ export interface GraphCanvasProps {
    * behaviour of a canvas whose host owns placement.
    */
   readonly dragPolicy?: DragPolicy;
+  /**
+   * Whether a person may draw a new connection on this canvas.
+   *
+   * The host owns the value (it is UI state in `@nodera/ui-core`, seeded from
+   * `graph.layout.connections`); the canvas maps it onto React Flow's
+   * `nodesConnectable` prop and the connect-commit path. `"fixed"` offers no
+   * connectable handle and refuses a connection that arrives anyway, so no edge
+   * is written, no event is emitted and no history entry is pushed. Defaults to
+   * `"editable"`, today's behaviour.
+   */
+  readonly connectionsPolicy?: ConnectionsPolicy;
+  /**
+   * Whether the node surface paints its port handles.
+   *
+   * The host owns the value (it is UI state in `@nodera/ui-core`, seeded from
+   * `graph.layout.ports`). `"hidden"` renders no handle element at all — not an
+   * invisible one — while every node renderer keeps receiving its `data.ports`,
+   * so a host can show port names in a layout-owned graph without offering a
+   * connection to drag. Defaults to `"visible"`, today's behaviour.
+   */
+  readonly portsPolicy?: PortsPolicy;
   /**
    * Render the "+" affordance centred on every edge (S6).
    *
@@ -743,6 +900,8 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   portRenderers,
   interactionMode = "select",
   dragPolicy = "free",
+  connectionsPolicy = "editable",
+  portsPolicy = "visible",
   edgeInsertion = false,
   renderEdgeInsert,
   className,
@@ -762,7 +921,14 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
 
   // nodeTypes: wrapper components that resolve the definition renderer
   // and ALWAYS render the port handles (via useNodeTypes/createNodeType).
-  const nodeTypes = useNodeTypes(nodeRenderers, portRenderers);
+  // Under the `"hidden"` ports policy the wrapper renders no handle at all: the
+  // policy substitutes the port renderers, never the node data the renderer body
+  // receives.
+  const effectivePortRenderers = useMemo(
+    () => portRenderersForPolicy(connectionsPolicy, portsPolicy, portRenderers),
+    [connectionsPolicy, portsPolicy, portRenderers],
+  );
+  const nodeTypes = useNodeTypes(nodeRenderers, effectivePortRenderers);
 
   // Measured node dimensions are canvas state (never domain state): RF
   // reports them through `dimensions` node changes and both the minimap
@@ -890,9 +1056,14 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [externalOnDropNodeDefinition],
   );
 
-  // Invalidate connection validation: probe without persisting.
+  // Invalidate connection validation: probe without persisting. A canvas whose
+  // connections are fixed refuses every probe, which also covers a host node
+  // renderer that paints its own handle outside the port renderer registry.
   const isValidConnection = useCallback<IsValidConnection>(
     (connection): boolean => {
+      if (connectionsPolicy !== "editable") {
+        return false;
+      }
       const sourceHandle = (connection as Connection).sourceHandle ?? (connection as RfEdge).sourceHandle;
       const targetHandle = (connection as Connection).targetHandle ?? (connection as RfEdge).targetHandle;
 
@@ -915,7 +1086,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       return result.ok && result.value.valid;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor],
+    [editor, connectionsPolicy],
   );
 
   // Node change handler: record NEW measured dimensions only (identical
@@ -980,27 +1151,26 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [editor],
   );
 
-  // Connect handler: connection → createEdge.
+  // Connect handler: connection → createEdge, under the connections policy.
   const handleConnect = useCallback(
     (params: Connection) => {
-      const conn = connectionFromReactFlow({
-        source: params.source,
-        target: params.target,
-        sourceHandle: params.sourceHandle,
-        targetHandle: params.targetHandle,
-      });
-      if (conn === undefined) {
+      const accepted = commitConnection(
+        editor,
+        {
+          source: params.source,
+          target: params.target,
+          sourceHandle: params.sourceHandle,
+          targetHandle: params.targetHandle,
+        },
+        connectionsPolicy,
+      );
+      if (!accepted) {
         return;
       }
-      const input = {
-        source: { nodeId: conn.source.nodeId, portId: conn.source.portId },
-        target: { nodeId: conn.target.nodeId, portId: conn.target.portId },
-      };
-      createEdge(editor, input);
       externalOnConnect?.(params);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor],
+    [editor, connectionsPolicy],
   );
 
   // Node click handler: selection → selectNode.
@@ -1090,6 +1260,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         colorMode={colorMode}
         fitView
         nodesDraggable={dragPolicy !== "locked"}
+        nodesConnectable={connectionsPolicy === "editable"}
       >
         <Background {...canvasBackgroundOptions()} />
         {showMinimap && (

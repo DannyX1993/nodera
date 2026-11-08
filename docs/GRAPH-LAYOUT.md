@@ -92,6 +92,7 @@ puts it (AGENTS.md §4, §12; odd task S5):
 | Configuration and command | `@nodera/sdk` | `graph.layout`, `builder.graphLayout` and `builder.graph.arrange(request?)`. The SDK reads the graph as plain data, asks the selected strategy and applies the answer through the use case above. |
 | Rendering and affordances | `@nodera/react-flow`, `@nodera/ui-*` | The canvas renders positions **from the document**; the node-creation dialog and its "+" affordance (which is how a node enters the graph in the first place) live in `ui-react`/`ui-core`. Neither calls `arrange`, and neither ships a placement control. |
 | Drag policy | `@nodera/sdk` → `@nodera/ui-core` → `@nodera/react-flow` | `graph.layout.drag` and `builder.graphLayout.setDragPolicy` write `UiState.dragPolicy`; the canvas maps it onto `nodesDraggable` plus the drag-commit path. Reading and writing the policy moves nothing: only a `"free"` drag commits a position. |
+| Connections and ports policies | `@nodera/sdk` → `@nodera/ui-core` → `@nodera/react-flow` | `graph.layout.connections` / `graph.layout.ports` and `builder.graphLayout.setConnectionsPolicy` / `setPortsPolicy` write `UiState.connections` and `UiState.ports`; the canvas maps them onto `nodesConnectable` plus the connect/validation path and onto the port renderers. Neither writes an edge, a port or a history entry. |
 
 Two consequences worth stating, because they are easy to break:
 
@@ -113,6 +114,8 @@ Two consequences worth stating, because they are easy to break:
 | `rankSpacing` | positive finite number, document units: distance between consecutive `Arrange` ranks | the declared `spacing` |
 | `strategy` | globally qualified strategy id | `nodera.graph-layout.layered` |
 | `drag` | `"locked"` or `"snap-back"`: what a manual drag does when the layout owns the positions (inert under `mode: "free"`) | `"locked"` |
+| `connections` | `"editable"` or `"fixed"`: whether a person may draw a new connection (independent of `mode`) | `"editable"` |
+| `ports` | `"visible"` or `"hidden"`: whether the node surface paints a port handle at all (independent of `mode`) | `"visible"` |
 
 ```ts
 import { assertOk, assertValid, createBuilder } from "@nodera/sdk";
@@ -130,6 +133,8 @@ const builder = assertValid(
         rankSpacing: 320,                        // default: spacing
         strategy: "nodera.graph-layout.layered", // the built-in default
         drag: "locked",                          // default; or "snap-back"
+        connections: "editable",                 // default; or "fixed"
+        ports: "visible",                        // default; or "hidden"
       },
     },
   }),
@@ -168,6 +173,44 @@ and no builder is created; at runtime `setDragPolicy` refuses the same way and t
 previous policy stays, with the store and its subscribers untouched. `"free"` is
 accepted at runtime (a host can hand placement back to its own drag handling) but
 not in configuration, where it is what `mode: "free"` already means.
+
+### Fixed connections and hidden ports
+
+A graph whose positions the layout owns has a second invitation to break the
+arrangement: a hand-drawn edge, or an unused port handle waiting to be dragged.
+Both are the same class of problem as the drag — a person editing geometry the
+arrangement does not describe — and both are answered the same way: a host
+declared policy reflected in the UI state, never a framework toggle.
+
+| Policy | What the surface does | Document and history |
+| --- | --- | --- |
+| `connections: "editable"` (default) | Today's behaviour: a validated connection becomes one `create-edge` history unit. | One edge, one history unit. |
+| `connections: "fixed"` | No handle accepts a connection (React Flow's `isConnectable: false`, plus `nodesConnectable={false}`), `isValidConnection` answers `false` for every probe and the connect path refuses before the use case runs. | Nothing: no edge, no event, no history entry. The edges already in the document stay untouched and are still removable and selectable. |
+| `ports: "visible"` (default) | Today's behaviour: every port is painted as a React Flow handle. | Nothing. |
+| `ports: "hidden"` | No handle element is rendered at all — not an invisible one — so there is nothing to drag from. Node renderers keep receiving `data.ports`, so a host can still list port names in its own markup. | Nothing: hiding a handle removes a control, not a port; the document keeps its declarations. |
+
+The two policies are **independent of `mode`**: a host that positions nodes by
+hand may fix its connections (an imported graph, an inspection surface), and a
+layout-owned graph may keep both defaults. They are orthogonal to each other too:
+hidden ports with editable connections is a surface that shows no handle, and
+visible ports with fixed connections is one that shows inert handles.
+
+Both are host configuration with a runtime setter, and both land in the UI state
+so the canvas re-renders without a rebuild:
+
+```ts
+builder.store.getState().connections; // "editable" | "fixed"
+builder.store.getState().ports;       // "visible" | "hidden"
+assertOk(builder.graphLayout.setConnectionsPolicy("fixed"));
+assertOk(builder.graphLayout.setPortsPolicy("hidden"));
+```
+
+At construction an unknown value is `sdk.invalid-input` at
+`graph.layout.connections` / `graph.layout.ports` and no builder is created; at
+runtime the same code and path is returned and the previous policy stays, with
+the store and its subscribers untouched. Nothing about the document is written by
+either — this is presentation policy, so no history entry and no event exists for
+it.
 
 ### `builder.graph.arrange(request?)`
 
@@ -330,7 +373,12 @@ pipeline **without positions** with `graph.layout` declaring `mode: "auto"`,
 `direction: "horizontal"`, `spacing: 240` and `rankSpacing: 280`, and then puts
 every layout action in its own toolbar **above** the canvas:
 
-- a strategy select calling `builder.graphLayout.setDefault(id)`;
+- a strategy select calling `builder.graphLayout.setDefault(id)`, which also
+  applies the surface that strategy implies: with `nodera.graph-layout.layered`
+  the host fixes the connections and hides the port handles
+  (`setConnectionsPolicy("fixed")`, `setPortsPolicy("hidden")`), and with
+  `nodera.graph-layout.free` it restores `"editable"` and `"visible"`. The
+  toolbar reports both values, and the canvas re-renders from the UI state;
 - a drag-policy select calling `builder.graphLayout.setDragPolicy(policy)`, seeded
   from `builder.graphLayout.dragPolicy()`;
 - direction, spacing and rank-spacing fields passed per call to

@@ -103,6 +103,30 @@ export interface GraphLayoutConfiguration {
    * `builder.graphLayout.setDragPolicy`.
    */
   readonly drag?: "locked" | "snap-back";
+  /**
+   * Whether a person may draw a new connection on the canvas.
+   *
+   * `"editable"` (the default) is today's behaviour: a connection the canvas
+   * validates becomes one `create-edge` history unit. `"fixed"` is what a graph
+   * whose edges the layout owns declares — the canvas offers no connectable
+   * handle and refuses a connection that arrives anyway, so nobody can add an
+   * edge the arrangement does not know about. It is presentation policy: no
+   * document write, no history entry and no event on its own, and existing edges
+   * stay editable in the document. The policy can be changed at runtime with
+   * `builder.graphLayout.setConnectionsPolicy`.
+   */
+  readonly connections?: "editable" | "fixed";
+  /**
+   * Whether the node surface paints the port handles of its nodes.
+   *
+   * `"visible"` (the default) is today's behaviour. `"hidden"` renders no port
+   * handle at all — not merely an invisible one — which is what a layout-owned
+   * graph with fixed connections declares: there is nothing to drag a connection
+   * from, while node renderers keep receiving their port data. It is presentation
+   * policy: no document write, no history entry and no event on its own. The
+   * policy can be changed at runtime with `builder.graphLayout.setPortsPolicy`.
+   */
+  readonly ports?: "visible" | "hidden";
 }
 
 /** Initial graph of the builder's own editing session. */

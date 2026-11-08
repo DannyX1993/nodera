@@ -571,6 +571,10 @@ runs, default `nodera.graph-layout.layered`), `rankSpacing` (distance between
 consecutive ranks of an arrangement, default: the declared `spacing`) and `drag`
 (`"locked" | "snap-back"`, default `"locked"`: what a manual drag does when the
 layout owns the positions — see [Manual drags](#manual-drags--graphlayoutdrag--setdragpolicy)).
+Two further fields declare the surface of the same graph: `connections`
+(`"editable" | "fixed"`, default `"editable"`) and `ports`
+(`"visible" | "hidden"`, default `"visible"`) — see
+[Connections and ports](#connections-and-ports--graphlayoutconnections--graphlayoutports).
 
 The assigned position belongs to the same history unit as the creation: `undo()`
 removes the node, `redo()` restores it where it was. A value outside these
@@ -654,6 +658,37 @@ not created (`"free"` is not a configuration value; it is what `mode: "free"`
 resolves to); at runtime it is the same code and path, with the UI state and its
 subscribers untouched.
 
+#### Connections and ports — `graph.layout.connections` / `graph.layout.ports`
+
+A graph whose arrangement the layout owns has a second problem: a hand-drawn edge
+or an unused port handle invites a person to build something the arrangement does
+not describe. Two independent policies declare the surface instead:
+
+| Policy | Declared as | What the canvas does |
+| --- | --- | --- |
+| `connections: "editable"` (default) | nothing, or `graph.layout.connections: "editable"` | Today's behaviour: a validated connection becomes one `create-edge` history unit. |
+| `connections: "fixed"` | `graph.layout.connections: "fixed"` | No handle accepts a connection (`isConnectable: false`, `nodesConnectable={false}`), `isValidConnection` answers `false` and the connect path refuses before `createEdge` runs: no edge, no event, no history entry. Existing edges stay in the document untouched. |
+| `ports: "visible"` (default) | nothing, or `graph.layout.ports: "visible"` | Today's behaviour: every port is painted as a React Flow handle. |
+| `ports: "hidden"` | `graph.layout.ports: "hidden"` | No port handle element is rendered at all — not an invisible one — while node renderers keep receiving `data.ports`, so a host can still show port names. |
+
+```ts
+builder.graphLayout.connectionsPolicy();           // "editable" | "fixed"
+builder.graphLayout.portsPolicy();                 // "visible" | "hidden"
+assertOk(builder.graphLayout.setConnectionsPolicy("fixed"));
+assertOk(builder.graphLayout.setPortsPolicy("hidden"));
+```
+
+Both setters write the UI state (`builder.store.getState().connections` and
+`.ports`), so a presentation binding re-renders the canvas without a rebuild.
+Neither is tied to the placement mode: a host that positions nodes by hand may
+still fix its connections, and a layout-owned graph may keep both defaults. They
+are presentation policies only — no document write, no history entry and no
+event on their own — and neither touches the edges the document already holds.
+At construction an unknown value is `sdk.invalid-input` at
+`graph.layout.connections` / `graph.layout.ports` and no builder is created; at
+runtime the same code and path is returned and the previous policy stays, with
+the UI state and its subscribers untouched.
+
 ### Graph layout strategies — `builder.graphLayout`
 
 `builder.graph.arrange()` is explicit and all-or-nothing: it asks the selected
@@ -692,12 +727,14 @@ A strategy that answers a diagnostic makes `arrange()` return that diagnostic as
 nothing.
 
 Members of `builder.graphLayout`: `register(strategy)`, `setDefault(id)`,
-`active()` (the selected id), `all()` (every registered strategy), and the drag
-policy pair `dragPolicy()` / `setDragPolicy(policy)` described above. The
-built-ins are `nodera.graph-layout.free` (no-op) and
-`nodera.graph-layout.layered` (rank by longest path, in-rank order by node id,
-no crossing minimization); a used id is a `sdk.duplicate-id` and an unknown one
-is refused, so a plugin never shadows the host's selection.
+`active()` (the selected id), `all()` (every registered strategy), the drag policy
+pair `dragPolicy()` / `setDragPolicy(policy)` and the surface pairs
+`connectionsPolicy()` / `setConnectionsPolicy(policy)` and `portsPolicy()` /
+`setPortsPolicy(policy)` described above. The built-ins are
+`nodera.graph-layout.free` (no-op) and `nodera.graph-layout.layered` (rank by
+longest path, in-rank order by node id, no crossing minimization); a used id is a
+`sdk.duplicate-id` and an unknown one is refused, so a plugin never shadows the
+host's selection.
 
 A third-party layouter is a host-side adapter over this port: register it, then
 select it by id — in configuration or with `setDefault`. The framework ships no
@@ -720,7 +757,8 @@ There is no runtime toggle for any of this: mode, direction, spacing and
 strategy are host configuration, never a control the framework puts in front of
 a user. A host that wants a control of its own passes per-call overrides to
 `arrange()`, selects the strategy with `builder.graphLayout.setDefault`, and
-changes the drag policy with `setDragPolicy`; see `examples/layout-switch-demo`.
+changes the drag, connections and ports policies with `setDragPolicy`,
+`setConnectionsPolicy` and `setPortsPolicy`; see `examples/layout-switch-demo`.
 
 ### Document — `builder.document`
 

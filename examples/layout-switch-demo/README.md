@@ -24,6 +24,8 @@ rankSpacing: 280 }`, so the seed nodes are first placed on a deterministic grid.
 | Control      | What it calls                                                        |
 | ------------ | -------------------------------------------------------------------- |
 | Strategy     | `builder.graphLayout.setDefault(id)` — `…layered` or `…free`          |
+| Connections  | `builder.graphLayout.setConnectionsPolicy(policy)` — the strategy select sets it |
+| Ports        | `builder.graphLayout.setPortsPolicy(policy)` — the strategy select sets it |
 | Direction    | passed to `builder.graph.arrange({ direction })`                      |
 | Spacing      | passed to `builder.graph.arrange({ spacing })`                        |
 | Rank spacing | passed to `builder.graph.arrange({ rankSpacing })`                    |
@@ -79,6 +81,17 @@ applying. The demo configures `mode: "auto"` without a `drag` value, which means
 the pointer and returns it to its placed position on release, and `free` restores
 the drag-and-commit behaviour. None of them changes a position by itself, so an
 `Arrange` after switching behaves exactly as before.
+
+The **Connections** and **Ports** values are not separate controls: the strategy
+select decides them, because a strategy that owns the positions owns the surface
+around them. Choosing `nodera.graph-layout.layered` calls
+`builder.graphLayout.setConnectionsPolicy("fixed")` and `setPortsPolicy("hidden")`,
+so the canvas offers no handle to drag a connection from and refuses one that
+arrives anyway — the arrangement cannot be contradicted by an edge. Choosing
+`nodera.graph-layout.free` restores `"editable"` and `"visible"`. Both start from
+`builder.graphLayout.connectionsPolicy()` / `portsPolicy()`, and the toolbar shows
+the values the canvas is applying. Neither writes a document position, an edge or
+a history entry, so an `Arrange` after switching behaves exactly as before.
 
 ## The switching belongs to the host
 

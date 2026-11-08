@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { UiStateStore, type DragPolicy } from "./ui-state.js";
+import {
+  UiStateStore,
+  type ConnectionsPolicy,
+  type DragPolicy,
+  type PortsPolicy,
+} from "./ui-state.js";
 import type { LayoutState } from "./layout.js";
 import { DialogRegistry } from "./dialog-registry.js";
 import type { DialogDefinition } from "./dialog-definition.js";
@@ -58,6 +63,8 @@ describe("UiStateStore", () => {
       pendingEdgeInsertId: undefined,
       pendingAppendAnchorId: undefined,
       dragPolicy: "free",
+      connections: "editable",
+      ports: "visible",
     });
   });
 
@@ -347,5 +354,73 @@ describe("UiStateStore", () => {
 
     expect(first).toEqual(["edge"]);
     expect(second).toEqual(["edge"]);
+  });
+});
+
+describe("UiStateStore connections and ports policies", () => {
+  it("defaults to editable connections and visible ports", () => {
+    const state = createStore().getState();
+
+    expect(state.connections).toBe("editable");
+    expect(state.ports).toBe("visible");
+  });
+
+  it("seeds the policies the host declares", () => {
+    const store = new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      layout: emptyLayout,
+      connections: "fixed",
+      ports: "hidden",
+    });
+
+    expect(store.getState().connections).toBe("fixed");
+    expect(store.getState().ports).toBe("hidden");
+  });
+
+  it("changes the connections policy and notifies its subscribers once", () => {
+    const store = createStore();
+    const seen: ConnectionsPolicy[] = [];
+    store.subscribe((state) => seen.push(state.connections));
+
+    store.setConnections("fixed");
+
+    expect(store.getState().connections).toBe("fixed");
+    expect(seen).toEqual(["fixed"]);
+  });
+
+  it("notifies nobody when the connections policy already matches", () => {
+    const store = createStore();
+    const before = store.getState();
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.setConnections("editable");
+
+    expect(notifications).toBe(0);
+    expect(store.getState()).toBe(before);
+  });
+
+  it("changes the ports policy and notifies its subscribers once", () => {
+    const store = createStore();
+    const seen: PortsPolicy[] = [];
+    store.subscribe((state) => seen.push(state.ports));
+
+    store.setPorts("hidden");
+
+    expect(store.getState().ports).toBe("hidden");
+    expect(seen).toEqual(["hidden"]);
+  });
+
+  it("notifies nobody when the ports policy already matches", () => {
+    const store = createStore();
+    const before = store.getState();
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.setPorts("visible");
+
+    expect(notifications).toBe(0);
+    expect(store.getState()).toBe(before);
   });
 });

@@ -21,7 +21,13 @@ import type { PropertyInput } from "../authoring/properties.js";
 import type { SdkIssues } from "../errors.js";
 import type { PluginRegisteredEvent } from "../events/events-api.js";
 import type { BuilderPlugin } from "../plugin/plugin.js";
-import { createBuilder, type Builder, type DragPolicy } from "./builder.js";
+import {
+  createBuilder,
+  type Builder,
+  type ConnectionsPolicy,
+  type DragPolicy,
+  type PortsPolicy,
+} from "./builder.js";
 import type { BuilderConfiguration, GraphLayoutConfiguration } from "./configuration.js";
 
 const NodeRenderer = (): null => null;
@@ -1146,5 +1152,127 @@ describe("graph layout drag policy", () => {
     expect(refused.ok).toBe(false);
     expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
     expect(builder.graphLayout.dragPolicy()).toBe("locked");
+  });
+});
+
+describe("graph layout connections and ports policy", () => {
+  it("declares editable connections and visible ports by default", () => {
+    const builder = create();
+
+    expect(builder.graphLayout.connectionsPolicy()).toBe("editable");
+    expect(builder.graphLayout.portsPolicy()).toBe("visible");
+    expect(builder.store.getState().connections).toBe("editable");
+    expect(builder.store.getState().ports).toBe("visible");
+  });
+
+  it("declares a fixed, portless surface from configuration", () => {
+    const builder = create({
+      graph: { layout: { mode: "auto", connections: "fixed", ports: "hidden" } },
+    });
+
+    expect(builder.graphLayout.connectionsPolicy()).toBe("fixed");
+    expect(builder.graphLayout.portsPolicy()).toBe("hidden");
+    expect(builder.store.getState().connections).toBe("fixed");
+    expect(builder.store.getState().ports).toBe("hidden");
+  });
+
+  const refusedConnections: readonly unknown[] = ["editable-ish", "", true, 42, null];
+  it.each(refusedConnections)(
+    "refuses the connections policy %s at graph.layout.connections and creates no builder",
+    (connections) => {
+      const issues = fail({
+        graph: { layout: { connections } as unknown as GraphLayoutConfiguration },
+      });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({
+        code: "sdk.invalid-input",
+        path: ["graph", "layout", "connections"],
+      });
+    },
+  );
+
+  const refusedPorts: readonly unknown[] = ["invisible", "", false, 7, null];
+  it.each(refusedPorts)(
+    "refuses the ports policy %s at graph.layout.ports and creates no builder",
+    (ports) => {
+      const issues = fail({ graph: { layout: { ports } as unknown as GraphLayoutConfiguration } });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({
+        code: "sdk.invalid-input",
+        path: ["graph", "layout", "ports"],
+      });
+    },
+  );
+
+  it("round-trips both policies through configuration, the getters and the setters", () => {
+    const builder = create({
+      graph: { layout: { connections: "fixed", ports: "hidden" } },
+    });
+
+    expect(builder.graphLayout.connectionsPolicy()).toBe("fixed");
+    expect(builder.graphLayout.portsPolicy()).toBe("hidden");
+
+    const reopened = builder.graphLayout.setConnectionsPolicy("editable");
+    expect(reopened.ok && reopened.value).toBe("editable");
+    expect(builder.graphLayout.connectionsPolicy()).toBe("editable");
+    expect(builder.store.getState().connections).toBe("editable");
+
+    const shown = builder.graphLayout.setPortsPolicy("visible");
+    expect(shown.ok && shown.value).toBe("visible");
+    expect(builder.graphLayout.portsPolicy()).toBe("visible");
+    expect(builder.store.getState().ports).toBe("visible");
+  });
+
+  it("refuses an unknown connections policy at runtime and keeps the previous one", () => {
+    const builder = create({ graph: { layout: { connections: "fixed" } } });
+    const before = builder.store.getState();
+    let notifications = 0;
+    builder.store.subscribe(() => notifications++);
+
+    const refused = builder.graphLayout.setConnectionsPolicy(
+      "open" as unknown as ConnectionsPolicy,
+    );
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["graph", "layout", "connections"],
+    });
+    expect(builder.graphLayout.connectionsPolicy()).toBe("fixed");
+    expect(builder.store.getState()).toBe(before);
+    expect(notifications).toBe(0);
+  });
+
+  it("refuses an unknown ports policy at runtime and keeps the previous one", () => {
+    const builder = create({ graph: { layout: { ports: "hidden" } } });
+    const before = builder.store.getState();
+    let notifications = 0;
+    builder.store.subscribe(() => notifications++);
+
+    const refused = builder.graphLayout.setPortsPolicy("invisible" as unknown as PortsPolicy);
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["graph", "layout", "ports"],
+    });
+    expect(builder.graphLayout.portsPolicy()).toBe("hidden");
+    expect(builder.store.getState()).toBe(before);
+    expect(notifications).toBe(0);
+  });
+
+  it("refuses a policy change on a disposed builder", () => {
+    const builder = create();
+    builder.dispose();
+
+    const refused = builder.graphLayout.setConnectionsPolicy("fixed");
+    const otherRefused = builder.graphLayout.setPortsPolicy("hidden");
+
+    expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
+    expect(!otherRefused.ok && otherRefused.error[0]?.code).toBe("sdk.disposed");
+    expect(builder.graphLayout.connectionsPolicy()).toBe("editable");
+    expect(builder.graphLayout.portsPolicy()).toBe("visible");
   });
 });

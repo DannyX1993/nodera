@@ -29,6 +29,7 @@ import {
   GraphCanvas,
   canvasBackgroundOptions,
   canvasEdgeTypes,
+  commitConnection,
   commitDraggedNodes,
   commitSelectionFromReactFlow,
   DefaultEdgeInsertButton,
@@ -999,5 +1000,119 @@ describe("GraphCanvas phantom empty state", () => {
 
     expect(phantom.getAttribute("data-nodera-phantom-node")).toBe("inactive");
     expect(phantom.style.borderStyle).toBe("dashed");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  E: connections and ports policy (layout-owned graphs)              */
+/* ------------------------------------------------------------------ */
+
+describe("GraphCanvas connections and ports policy", () => {
+  afterEach(cleanup);
+
+  function seededEngine(): EditorEngine {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 200, y: 0 } });
+    return engine;
+  }
+
+  function handles(container: HTMLElement): readonly Element[] {
+    return [...container.querySelectorAll("[data-nodera-port-id]")];
+  }
+
+  it("offers no connectable handle under the fixed connections policy", () => {
+    const { container } = renderCanvas(seededEngine(), { connectionsPolicy: "fixed" });
+    const rendered = handles(container);
+
+    // 2 nodes x 2 ports: the handles are still painted, they just cannot be
+    // used to start or complete a connection.
+    expect(rendered).toHaveLength(4);
+    for (const handle of rendered) {
+      expect(handle.classList.contains("connectable")).toBe(false);
+    }
+  });
+
+  it("refuses to write an edge for a connection that arrives under the fixed policy", () => {
+    const engine = seededEngine();
+    const historyBefore = engine.history.size();
+
+    const accepted = commitConnection(
+      engine,
+      { source: "n1", target: "n2", sourceHandle: "out-1", targetHandle: "in-1" },
+      "fixed",
+    );
+
+    expect(accepted).toBe(false);
+    expect(engine.graph.getEdges()).toHaveLength(0);
+    expect(engine.history.size()).toBe(historyBefore);
+  });
+
+  it("keeps every handle connectable and commits one edge under the editable default", () => {
+    const engine = seededEngine();
+    const historyBefore = engine.history.size();
+    const { container } = renderCanvas(engine);
+    const rendered = handles(container);
+
+    expect(rendered).toHaveLength(4);
+    expect(rendered.every((handle) => handle.classList.contains("connectable"))).toBe(true);
+
+    const accepted = commitConnection(engine, {
+      source: "n1",
+      target: "n2",
+      sourceHandle: "out-1",
+      targetHandle: "in-1",
+    });
+
+    expect(accepted).toBe(true);
+    expect(engine.graph.getEdges()).toHaveLength(1);
+    expect(engine.history.size()).toBe(historyBefore + 1);
+  });
+
+  it("renders no port handle at all under the hidden ports policy", () => {
+    const { container } = renderCanvas(seededEngine(), { portsPolicy: "hidden" });
+
+    // Not hidden with CSS: no handle element is rendered, so there is nothing
+    // for React Flow to connect from or to.
+    expect(container.querySelectorAll(".react-flow__handle")).toHaveLength(0);
+    expect(handles(container)).toHaveLength(0);
+    expect(screen.getAllByText("App Node")).toHaveLength(2);
+  });
+
+  it("keeps handing the port data to the node renderers under the hidden ports policy", () => {
+    const PortAwareNode = ((props: { data: { ports: readonly { id: string }[] } }) =>
+      createElement(
+        "span",
+        { "data-testid": "port-names" },
+        props.data.ports.map((port) => port.id).join(","),
+      )) as never;
+    const nodeRenderers = new NodeRendererRegistry();
+    nodeRenderers.register("test.port-aware-node", PortAwareNode as never);
+    const engine = makeEngine();
+    engine.domain.nodes.unregister("test.app-node");
+    engine.domain.nodes.register({
+      ...def,
+      renderer: "test.port-aware-node",
+    } as unknown as NodeDefinition);
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 200, y: 0 } });
+
+    const { container } = renderCanvas(engine, { nodeRenderers, portsPolicy: "hidden" });
+
+    expect(container.querySelectorAll("[data-nodera-port-id]")).toHaveLength(0);
+    expect(screen.getAllByTestId("port-names").map((element) => element.textContent)).toEqual([
+      "in-1,out-1",
+      "in-1,out-1",
+    ]);
+  });
+
+  it("follows a ports policy the host switches without rebuilding the canvas", () => {
+    const engine = seededEngine();
+    const { container, rerender } = renderCanvas(engine);
+    expect(handles(container)).toHaveLength(4);
+
+    rerender(createElement(Canvas, { editor: engine, portsPolicy: "hidden" }));
+
+    expect(handles(container)).toHaveLength(0);
   });
 });
