@@ -24,6 +24,7 @@ import {
   arrangeGraph,
   clearSelection,
   createEdge,
+  insertNodeOnEdge,
   moveNode,
   redo,
   removeEdge,
@@ -77,6 +78,31 @@ export interface AddNodeRequest {
    * UI selection itself, and the placement stays a function of the graph.
    */
   readonly after?: string;
+}
+
+/**
+ * One node to insert on an existing edge, in the public `type` vocabulary.
+ *
+ * The edge is replaced by the node plus two edges: the original source → the new
+ * node, and the new node → the original target, keeping the original source and
+ * target ports on their own sides. `type` is the definition of the **inserted**
+ * node; the two halves inherit the replaced edge's definition type.
+ */
+export interface InsertNodeRequest {
+  /** Edge the node is inserted into; it is replaced by the two halves. */
+  readonly edgeId: string;
+  /** Globally qualified definition type of the inserted node, e.g. `http.retry`. */
+  readonly type: string;
+  /** Explicit instance id; generated from the definition when omitted. */
+  readonly nodeId?: string;
+  readonly properties?: Readonly<Record<string, unknown>>;
+}
+
+/** What a successful insertion created, in the §9 instance vocabulary. */
+export interface InsertNodeResult {
+  readonly node: NodeInstanceView;
+  /** The two edges replacing the original, in flow order: source → node, node → target. */
+  readonly edges: readonly [EdgeInstanceView, EdgeInstanceView];
 }
 
 /** One edge to create between two node instances. */
@@ -148,6 +174,27 @@ export interface BuilderGraphApi {
     nodeId: string,
     properties: Readonly<Record<string, unknown>>,
   ): Result<NodeInstanceView, SdkIssues>;
+  /**
+   * Inserts a node **on** an existing edge, replacing it with two edges.
+   *
+   * One history unit, all-or-nothing: `source --e--> target` becomes
+   * `source --> node --> target`, the original edge is removed and one `undo()`
+   * restores it with the same id and ports. The original source and target ports
+   * stay on their own endpoints; the new node contributes its own first input and
+   * first output port.
+   *
+   * The position follows the add rule: in `mode: "auto"` the node lands one step
+   * past the edge's **source** along the declared axis — the host's own anchor
+   * rule, with the edge source as the anchor — while `mode: "free"` invents no
+   * position and the node stays unpositioned. It is decided before the use case
+   * runs, so it belongs to the same history unit as the insertion.
+   *
+   * An unknown edge is `sdk.invalid-input` at path `edgeId`; an unknown
+   * definition, a taken instance id or a definition without a usable input /
+   * output port come back as the use case's own structured diagnostic. Nothing is
+   * written, pushed or emitted when any of them refuses.
+   */
+  insertNode(request: InsertNodeRequest): Result<InsertNodeResult, SdkIssues>;
   connect(request: ConnectRequest): Result<EdgeInstanceView, SdkIssues>;
   disconnect(edgeId: string): Result<EdgeInstanceView, SdkIssues>;
   /**
@@ -388,6 +435,24 @@ function missingNodeIssue(nodeId: string): SdkIssue {
 }
 
 /**
+ * Issue for an edge id the graph does not contain, shaped like the use case.
+ *
+ * `insertNode` resolves the edge itself because its placement anchors on the
+ * edge source, so a missing edge is refused at the field the caller wrote
+ * instead of reaching the use case as a bare failure.
+ */
+function missingEdgeIssue(edgeId: string): SdkIssue {
+  return {
+    ...sdkError(
+      "sdk.invalid-input",
+      `Graph has no edge with id "${edgeId}" to insert a node on`,
+      { path: ["edgeId"], metadata: { useCaseCode: "edge-not-found", elementId: edgeId } },
+    ),
+    severity: "error",
+  };
+}
+
+/**
  * Issue for a layout strategy id no registry entry matches.
  *
  * The composition root reports an unregistered `graph.layout.strategy` with it
@@ -581,6 +646,56 @@ export function createGraphApi(
       return existing === undefined
         ? err([missingNodeIssue(nodeId)])
         : ok(toNodeInstanceView(existing));
+    },
+
+    insertNode(request: InsertNodeRequest): Result<InsertNodeResult, SdkIssues> {
+      const closed = closedIssues(isDisposed, "graph.insertNode");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const invalid =
+        requestIssues(
+          request,
+          "Insert-node request must be an object declaring the edge and a node type",
+        ) ??
+        identifierIssues("Edge", request.edgeId, ["edgeId"]) ??
+        textIssues("Insert-node request", "type", request.type, ["type"]) ??
+        (request.nodeId === undefined
+          ? undefined
+          : identifierIssues("Node", request.nodeId, ["nodeId"])) ??
+        (request.properties === undefined
+          ? undefined
+          : propertyMapIssues(request.properties));
+      if (invalid !== undefined) {
+        return err(invalid);
+      }
+      // The edge is resolved before anything is created because placement anchors
+      // on its source: an id the graph does not hold is a refusal, never a guess.
+      const edge = editor.getEdge(request.edgeId);
+      if (edge === undefined) {
+        return err([missingEdgeIssue(request.edgeId)]);
+      }
+      const source = editor.getNode(edge.connection.source.nodeId);
+      const position = placeUnpositionedNode(
+        occupiedPositions(editor.graph.getNodes()),
+        graphLayout,
+        source?.position,
+      );
+      const inserted = insertNodeOnEdge(editor, {
+        edgeId: request.edgeId,
+        definitionId: request.type,
+        ...(request.nodeId === undefined ? {} : { nodeId: request.nodeId }),
+        ...(request.properties === undefined ? {} : { properties: request.properties }),
+        ...(position === undefined ? {} : { position }),
+      });
+      if (!inserted.ok) {
+        return err([useCaseIssue(inserted.error)]);
+      }
+      const edges: readonly [EdgeInstanceView, EdgeInstanceView] = [
+        toEdgeInstanceView(inserted.value.edges[0]),
+        toEdgeInstanceView(inserted.value.edges[1]),
+      ];
+      return ok({ node: toNodeInstanceView(inserted.value.node), edges });
     },
 
     connect(request: ConnectRequest): Result<EdgeInstanceView, SdkIssues> {

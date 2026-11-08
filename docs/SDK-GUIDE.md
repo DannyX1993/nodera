@@ -234,6 +234,7 @@ escape hatch.
 | `version` (instance) | definition version the instance was created against | the document when it pins one | `NodeInstanceView.version`, absent when the domain does not know it |
 | `position` | where the host placed the node | `AddNodeRequest.position` / `graph.moveNode` | `NodeInstanceView.position`, absent until the node is placed |
 | `after` | the node an unpositioned add follows | `AddNodeRequest.after` (a node instance id) | not read back: it decides the slot `NodeInstanceView.position` carries |
+| `edgeId` (insertion) | the edge a node is inserted on | `InsertNodeRequest.edgeId` | not read back: it is replaced by the two halves, `InsertNodeResult.edges` |
 | `label` | human-readable name of a definition | becomes `NodeDefinition.name` / `EdgeDefinition.name` | `NodeDefinitionView.label` / `EdgeDefinitionView.label` |
 | `defaultLabel` (edge definition) | label an instance may inherit | `EdgeDefinition.label` | `EdgeDefinitionView.defaultLabel` |
 | `category` | grouping of definitions in palettes and registries | required on `NodeDefinitionInput` | `NodeDefinitionView.category`; `registries.nodes.byCategory()` |
@@ -301,6 +302,13 @@ passes `after` when exactly one node is selected and nothing when there is no
 selection; the edge "+" passes the edge source. The SDK reads the anchor's
 position and the graph's positions and nothing else, so the answer cannot depend
 on node ids, on storage order or on how often the call is repeated.
+
+`builder.graph.insertNode({ edgeId, type })` uses that same rule with the
+**edge's source as the anchor**, so in `mode: "auto"` the inserted node lands one
+step past the source (an occupied slot pushes it forward) and in `mode: "free"`
+it stays unpositioned. The slot is decided before the use case runs, so it
+belongs to the same history unit as the insertion: one `undo()` removes the node
+and both halves and restores the original edge with its id and ports.
 
 The whole feature — the two placement modes, the layer split, the defaults, the
 `Arrange` command and the example — is on one page: `docs/GRAPH-LAYOUT.md`.
@@ -461,7 +469,7 @@ below are the complete lists:
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
 | `graphLayout.register`, `graphLayout.setDefault` | `graphLayout.active`, `graphLayout.all` |
-| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
+| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
 | `graph.undo`, `graph.redo` — nothing is undone, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |
 

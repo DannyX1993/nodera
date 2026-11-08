@@ -21,6 +21,7 @@ nothing moves unless the host asks.
 | `mode: "free"` (the default) | The host. A node added without a position keeps no position; the canvas adapter decides how to render it until the host places it. |
 | `mode: "auto"` | The builder, and only for the nodes the host left unpositioned: the first free slot **forward** of the anchor the host names (`AddNodeRequest.after`), or the slot one step past the graph's extent when there is no anchor, at add time. A node that already carries a position is never moved. |
 | `Arrange` (explicit) | The selected strategy, for every node of the graph, when the host calls `builder.graph.arrange()`. One history unit. |
+| Edge insertion (`builder.graph.insertNode`) | The builder, in `mode: "auto"`, anchored on the edge's **source**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node and the two edges that replace the original. |
 
 Three invariants hold in every mode:
 
@@ -80,6 +81,7 @@ puts it (AGENTS.md §4, §12; odd task S5):
 | Geometry | `@nodera/graph-layout` | The strategy port, the `free` no-op, the in-house layered strategy and the registry. Plain data in, positions or a diagnostic out. No React, no React Flow, no graph instance. |
 | Position writes | `@nodera/application` | `arrangeGraph(editor, { moves })` validates every id and position first, then writes the whole answer as one reversible history unit (`arrange-graph`). All-or-nothing: a rejected move writes nothing, pushes nothing and emits nothing. |
 | Add-time placement | `@nodera/sdk` | `resolveGraphLayout`, `placeUnpositionedNode` and `nextFreeSlot` decide a position **before** the `add-node` use case runs, so it belongs to the same history unit as the creation. The anchor (`AddNodeRequest.after`) is a node id the host chose; the rule reads its position and the graph's, nothing else. |
+| Edge insertion | `@nodera/application`, `@nodera/sdk` | `insertNodeOnEdge(editor, input)` validates the edge, the definition, the instance id and both middle ports first, then writes the node and the two halves as one reversible unit (`insert-node-on-edge`); a refusal writes nothing, pushes nothing and emits nothing. The SDK decides the position with the same placement rule, anchored on the edge source, **before** the use case runs. |
 | Configuration and command | `@nodera/sdk` | `graph.layout`, `builder.graphLayout` and `builder.graph.arrange(request?)`. The SDK reads the graph as plain data, asks the selected strategy and applies the answer through the use case above. |
 | Rendering and affordances | `@nodera/react-flow`, `@nodera/ui-*` | The canvas renders positions **from the document**; the node-creation dialog and its "+" affordance (which is how a node enters the graph in the first place) live in `ui-react`/`ui-core`. Neither calls `arrange`, and neither ships a placement control. |
 | Drag policy | `@nodera/sdk` → `@nodera/ui-core` → `@nodera/react-flow` | `graph.layout.drag` and `builder.graphLayout.setDragPolicy` write `UiState.dragPolicy`; the canvas maps it onto `nodesDraggable` plus the drag-commit path. Reading and writing the policy moves nothing: only a `"free"` drag commits a position. |
@@ -186,10 +188,39 @@ The placement rule behind the answer (longest-path ranks, the relaxation cap, th
 cycle-locked rank, in-rank order by node id, the two axes, `all` vs
 `unpositioned`) is documented once, in `packages/graph-layout/README.md`.
 
+### `builder.graph.insertNode(request)`
+
+Splitting an edge is one mutation. `source --edge--> target` becomes
+`source --> node --> target` through the `insert-node-on-edge` application use
+case: the node and both halves are created and the original edge is removed as
+**one** history unit, so one `undo()` restores the original edge — same id, same
+ports — and leaves no trace of the node or the two edges. The original source and
+target ports stay on their own endpoints; the inserted node contributes its own
+first input and first output port.
+
+```ts
+const { node, edges } = assertValid(
+  builder.graph.insertNode({ edgeId, type: "acme.http.retry" }),
+);
+builder.graph.undo(); // one step: the original edge is back
+```
+
+The position is the placement rule of
+[Where an added node lands](#where-an-added-node-lands), with the **edge source as
+the anchor**: in `mode: "auto"` the node lands one step past the source along the
+axis, and a slot the graph already occupies pushes it forward, never backward. In
+`mode: "free"` no position is invented and the node stays unpositioned. The slot
+is decided **before** the use case runs, so it belongs to the same history unit as
+the insertion instead of being a second undo step.
+
+Nothing is guessed when the request is refused: an unknown `edgeId` is
+`sdk.invalid-input` at path `edgeId`, an unknown `type`, a taken `nodeId` or a
+definition without a usable input / output port carry the use case's own code in
+`metadata.useCaseCode`, and no graph write, history entry or event happens.
+
 ### `builder.graphLayout`
 
 The composition point of the port:
-
 ```ts
 assertValid(builder.graphLayout.register(myStrategy)); // id: "acme.dagre"
 assertValid(builder.graphLayout.setDefault("acme.dagre"));

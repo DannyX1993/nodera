@@ -4,6 +4,7 @@ export * from "./use-cases/errors.js";
 export * from "./use-cases/nodes.js";
 export * from "./use-cases/arrange.js";
 export * from "./use-cases/edges.js";
+export * from "./use-cases/insert-node-on-edge.js";
 export * from "./use-cases/graphs.js";
 export * from "./use-cases/selection.js";
 export * from "./use-cases/clipboard.js";

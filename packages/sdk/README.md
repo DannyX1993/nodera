@@ -445,9 +445,9 @@ const report = builder.graph.validate();
 
 (`examples/phase6-demo/src/builder.ts` and `demo-app.tsx`, trimmed.)
 
-Members: `addNode`, `removeNode`, `moveNode`, `updateProperties`, `connect`,
-`disconnect`, `arrange`, `nodes`, `edges`, `select`, `clearSelection`, `undo`,
-`redo`, `canUndo`, `canRedo`, `validate`, `nodeCount`, `edgeCount`,
+Members: `addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`,
+`connect`, `disconnect`, `arrange`, `nodes`, `edges`, `select`, `clearSelection`,
+`undo`, `redo`, `canUndo`, `canRedo`, `validate`, `nodeCount`, `edgeCount`,
 `selectedNodes`, `selectedEdges`. `sourcePort` / `targetPort` default to the
 node's first output / input port.
 
@@ -465,6 +465,49 @@ for (const edge of builder.graph.edges()) {
   route(edge.source, edge.sourcePort, edge.target, edge.targetPort, edge.type);
 }
 ```
+
+#### Inserting a node on an edge — `insertNode`
+
+Splitting an edge is one mutation, not three. `insertNode` replaces
+`source --edge--> target` with `source --> node --> target` through the
+`insert-node-on-edge` application use case: the node and both halves are created
+and the original edge is removed as **one** history unit, all-or-nothing.
+
+```ts
+const insertion = assertValid(
+  builder.graph.insertNode({
+    edgeId,
+    type: "demo.retry", // the definition of the node being inserted
+    properties: { attempts: 3 },
+  }),
+);
+
+insertion.node; // the new instance, in the §9 vocabulary
+insertion.edges[0]; // source → node, keeping the original source port
+insertion.edges[1]; // node → target, keeping the original target port
+
+builder.graph.undo(); // one step: the original edge is back, node and halves gone
+```
+
+The original source and target ports stay on their own endpoints; the inserted
+node contributes its own first input and first output port. The two halves
+inherit the replaced edge's definition type — an edge type is the semantic kind
+of the relation — while the original label and metadata are not duplicated onto
+them.
+
+The position follows the add rule, decided **before** the use case runs so it
+belongs to the same history unit: in `mode: "auto"` the node lands one step past
+the edge's **source** along the declared axis (the edge source is the anchor, the
+same rule `AddNodeRequest.after` implements; an occupied slot pushes it
+forward), and in `mode: "free"` no position is invented and the node stays
+unpositioned. See
+[Where `mode: "auto"` puts the new node](#where-mode-auto-puts-the-new-node--addnoderequestafter)
+for the walk itself.
+
+Refusals are structured and write nothing: an unknown `edgeId` is
+`sdk.invalid-input` at path `edgeId`; an unknown `type`, a taken `nodeId` or a
+definition without a usable input / output port come back with the use case's own
+code in `metadata.useCaseCode` and push no history entry.
 
 ### Graph layout mode — `graph.layout`
 
@@ -905,7 +948,7 @@ The closed set, exactly:
 | `bindRenderer`, `use`, `createEditor` | `builder.events.on` / `once` / `off` / `emitSdk` |
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
-| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `connect`, `disconnect`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
+| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
 | `graph.undo`, `graph.redo` — no mutation runs, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |
 
