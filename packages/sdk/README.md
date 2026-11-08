@@ -541,8 +541,15 @@ const installation = builder.use(plugin);
 Rules the SDK enforces: the id and version are checked **before** `install`
 runs; a plugin id installs once per builder (`sdk.plugin-conflict`); a throwing
 `install` becomes `sdk.plugin-invalid` instead of escaping; a failed contribution
-does not undo the ones that worked, and every failure is reported once through
-`plugin.error`. Renderer bindings are not contributions and never appear in
+does not undo the ones that worked (there is no rollback: what a plugin
+registered before a throw stays registered). Failures of a run install are also
+reported through `plugin.error`, one event per failed plugin: an install that
+completes emits one event per failed contribution, while a throwing `install`
+emits exactly one event describing the throw, because the throw aborted it. A
+plugin rejected *before* `install` runs (invalid id or version, already
+installed id) is reported in the issues `use()` returns and produces no event,
+since nothing ran. Only a completely successful install announces
+`plugin.registered`. Renderer bindings are not contributions and never appear in
 `contributionIds`.
 
 ### Theme — `builder.theme`

@@ -73,7 +73,16 @@ export interface BuilderDocumentApi {
   ): Result<Graph, SdkIssues>;
   /** Validates the structure of a raw document object. */
   validate(input: unknown): DocumentValidationReport;
-  /** The same operations bound to one format, as a serializer object. */
+  /**
+   * The same operations bound to one format, as a serializer object.
+   *
+   * The format is checked when an operation runs, not here: `serializer()`
+   * always returns the object, and `serialize`/`deserialize` report
+   * `sdk.unsupported-format` as a `Result` error for a name the SDK does not
+   * implement. Lazy rejection keeps one error channel on the public surface —
+   * the `Result` the host already handles — instead of adding a throwing
+   * construction step for a value it may never call.
+   */
   serializer(format: BuilderDocumentFormatName): BuilderDocumentSerializer;
 }
 

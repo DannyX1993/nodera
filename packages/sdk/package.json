@@ -18,7 +18,6 @@
     "@nodera/domain": "workspace:*",
     "@nodera/edge-registry": "workspace:*",
     "@nodera/graph-model": "workspace:*",
-    "@nodera/history": "workspace:*",
     "@nodera/layout-engine": "workspace:*",
     "@nodera/node-registry": "workspace:*",
     "@nodera/property-system": "workspace:*",

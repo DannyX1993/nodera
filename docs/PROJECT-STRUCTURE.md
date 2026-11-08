@@ -189,7 +189,7 @@ escrito contra los tipos del adaptador de canvas y solo tiene sentido con él
 @nodera/sdk  --> contratos del core: domain, contracts, graph-model,
                  node-registry, edge-registry, property-system, validation,
                  document, serialization-json, serialization-yaml, application,
-                 history, ui-core, theme-engine, layout-engine
+                 ui-core, theme-engine, layout-engine
 ```
 
 La dirección de dependencias es `react-flow → sdk` en la capa de binding y

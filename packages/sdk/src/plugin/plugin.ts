@@ -16,8 +16,13 @@
  *   rejected plugin can never leave a half-registration behind.
  * - Keep what worked, report what did not. A contribution that fails does not
  *   undo the plugin's successful ones; every failure is collected in the
- *   returned issues *and* announced once through `plugin.error`. Only a
- *   completely successful install announces `plugin.registered`.
+ *   returned issues *and* announced through `plugin.error`. Only a completely
+ *   successful install announces `plugin.registered`.
+ * - One `plugin.error` per failed plugin. A throwing `install` aborts the
+ *   plugin, so its throw is what the host is told about — once — even when an
+ *   earlier contribution of the same install had already failed. Without a
+ *   throw, each failed contribution keeps its own event, which is what lets a
+ *   listener react to the specific diagnostic.
  *
  * Renderer bindings are not contributions: `renderers.bind` attaches an opaque
  * value to an existing slot and therefore never appears in `contributionIds`.
@@ -121,6 +126,14 @@ const installedPlugins = new WeakMap<Builder, Set<string>>();
 interface PluginRecorder {
   readonly contributionIds: string[];
   readonly failures: SdkIssue[];
+  /**
+   * Failure groups awaiting announcement, one per failed contribution.
+   *
+   * They are held until the install returns, because a throw that aborts the
+   * plugin must produce exactly one event and supersede them: the host is told
+   * why the plugin stopped, not every step on the way.
+   */
+  readonly announcements: SdkIssues[];
 }
 
 /** Builds one SDK issue. */
@@ -207,7 +220,7 @@ function pluginIssues(plugin: BuilderPlugin): SdkIssue[] {
   return issues;
 }
 
-/** Announces one failed contribution once, with its combined message. */
+/** Announces one failure group once: its combined message and its first code. */
 function emitFailure(builder: Builder, pluginId: string, issues: SdkIssues): void {
   const first = issues[0];
   builder.events.emitSdk("plugin.error", {
@@ -238,7 +251,7 @@ function createPluginApi(
       return registered;
     }
     recorder.failures.push(...registered.error);
-    emitFailure(builder, plugin.id, registered.error);
+    recorder.announcements.push(registered.error);
     return registered;
   }
 
@@ -259,7 +272,7 @@ function createPluginApi(
         // `bindRenderer` already reports `SdkIssues`, the single error shape of
         // the public surface, so the plugin api never exposes `SdkError`.
         recorder.failures.push(...bound.error);
-        emitFailure(builder, plugin.id, bound.error);
+        recorder.announcements.push(bound.error);
         return err(bound.error);
       },
     },
@@ -269,9 +282,12 @@ function createPluginApi(
 /**
  * Installs one plugin into a builder.
  *
- * Fail-closed: nothing runs for a plugin that is rejected, and every failure of
- * a running install is returned together. A successful install announces
- * exactly one `plugin.registered` event with its contribution ids.
+ * Fail-closed: nothing runs for a plugin that is rejected. Every failure of a
+ * running install is returned together, and announced through `plugin.error`
+ * with the one-event-per-failed-plugin rule: a throw aborts the plugin and is
+ * the single event it produces, while a completed install emits one event per
+ * failed contribution. A successful install announces exactly one
+ * `plugin.registered` event with its contribution ids.
  */
 export function installPlugin(
   builder: Builder,
@@ -294,17 +310,27 @@ export function installPlugin(
   }
   installed.add(plugin.id);
 
-  const recorder: PluginRecorder = { contributionIds: [], failures: [] };
+  const recorder: PluginRecorder = { contributionIds: [], failures: [], announcements: [] };
+  let thrown: SdkIssue | undefined;
   try {
     plugin.install(createPluginApi(builder, plugin, recorder));
   } catch (error) {
-    recorder.failures.push(
-      pluginIssue(
-        "sdk.plugin-invalid",
-        `Plugin "${plugin.id}" threw during install: ${messageOf(error)}`,
-        { metadata: { value: plugin.id } },
-      ),
+    thrown = pluginIssue(
+      "sdk.plugin-invalid",
+      `Plugin "${plugin.id}" threw during install: ${messageOf(error)}`,
+      { metadata: { value: plugin.id } },
     );
+    recorder.failures.push(thrown);
+  }
+
+  if (thrown !== undefined) {
+    // The throw aborted the install; it is the one failure the host is told
+    // about, whatever contributions had already reported their own.
+    emitFailure(builder, plugin.id, [thrown]);
+  } else {
+    for (const announcement of recorder.announcements) {
+      emitFailure(builder, plugin.id, announcement);
+    }
   }
 
   if (recorder.failures.length > 0) {

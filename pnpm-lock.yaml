@@ -462,9 +462,6 @@ importers:
       '@nodera/graph-model':
         specifier: workspace:*
         version: link:../graph-model
-      '@nodera/history':
-        specifier: workspace:*
-        version: link:../history
       '@nodera/layout-engine':
         specifier: workspace:*
         version: link:../layout-engine

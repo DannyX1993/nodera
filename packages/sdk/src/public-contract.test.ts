@@ -4,6 +4,7 @@ import type { Result } from "@nodera/contracts";
 import {
   assertValid,
   createBuilder,
+  SDK_ISSUE_CODES,
   type Builder,
   type EdgeDefinitionInput,
   type LayoutDefinition,
@@ -429,22 +430,39 @@ describe("graph facade validates its own arguments", () => {
     ]);
   });
 
-  it("reads validation with tolerant options instead of dereferencing them", () => {
+  it("reports a graph whose node definition was removed, with tolerant options", () => {
     const current = builder();
+    expect(current.registerNode(nodeInput()).ok).toBe(true);
+    expect(current.graph.addNode({ type: "acme.node", nodeId: "n1" }).ok).toBe(true);
+
+    // Removing the definition the instance points at leaves a graph that is
+    // structurally broken but still well-formed as data — the exact case a
+    // stubbed report cannot fake.
+    expect(current.registries.nodes.unregister("acme.node").ok).toBe(true);
 
     // `validate` is a read that returns a report, not a `Result`: a caller
     // passing no options at all must still get the full pipeline.
-    expect(() => current.graph.validate(null as never)).not.toThrow();
-    expect(current.graph.validate(undefined as never).isValid).toBe(true);
+    const report = current.graph.validate(undefined as never);
+    expect(report.issues.map((issue) => issue.code)).toEqual([
+      "structural.unknown-node-definition",
+    ]);
+    expect(report.issues[0]).toMatchObject({ severity: "error", elementId: "n1" });
+    expect(report.structurallyValid).toBe(false);
+    expect(report.configurationValid).toBe(true);
+    expect(report.isValid).toBe(false);
+
+    // Tolerant means "fall back to the default options", not "ignore the call".
+    expect(current.graph.validate(null as never).issues).toEqual(report.issues);
+    expect(current.graph.validate(null as never).isValid).toBe(false);
   });
 });
 
 describe("the malformed-shape sweep", () => {
-  it("never throws for a malformed shape at any public entry point", () => {
+  it("rejects a malformed shape at every public entry point that returns a Result", () => {
     const current = builder();
     current.registerNode(nodeInput());
 
-    const calls: readonly (readonly [string, () => unknown])[] = [
+    const calls: readonly (readonly [string, () => Result<unknown, SdkIssues>])[] = [
       ["createBuilder({registry.nodes:[null]})", () => createBuilder({ registry: { nodes: [null] } as never })],
       ["createBuilder({registry.edges:[null]})", () => createBuilder({ registry: { edges: [null] } as never })],
       ["createBuilder({registry.properties:[null]})", () => createBuilder({ registry: { properties: [null] } as never })],
@@ -460,7 +478,7 @@ describe("the malformed-shape sweep", () => {
       ["createBuilder({graph:42})", () => createBuilder({ graph: 42 } as never)],
       ["registerNode({properties:5})", () => current.registerNode({ ...nodeInput(), properties: 5 } as never)],
       ["registerNode({ports:{inputs:\"x\"}})", () => current.registerNode({ ...nodeInput(), ports: { inputs: "x" } } as never)],
-      ["registerProperty({component:null})", () => current.registerProperty({ id: "custom", type: "custom", component: null } as never)],
+      ["registerProperty({options:5})", () => current.registerProperty({ id: "custom", type: "select", options: 5 } as never)],
       ["layout.register({panels:{}})", () => current.layout.register({ id: "acme.l", panels: {} } as never)],
       ["layout.register({panels:[{region:5}]})", () => current.layout.register({ id: "acme.l", panels: [{ panelId: "palette", region: 5 }] } as never)],
       ["registerTool({command:null})", () => current.registerTool({ id: "acme.t", label: "T", command: null } as never)],
@@ -479,13 +497,46 @@ describe("the malformed-shape sweep", () => {
       ["document.import(null)", () => current.document.import(null)],
       ["document.deserialize(json, null)", () => current.document.deserialize("json", null as never)],
       ["document.export(null)", () => current.document.export(null as never)],
-      ["document.serializer(null)", () => current.document.serializer(null as never)],
-      ["document.validate(null)", () => current.document.validate(null)],
     ];
 
-    for (const [label, call] of calls) {
-      expect(call, label).not.toThrow();
+    // A silent `ok` would pass a `not.toThrow` sweep, so every entry is asserted
+    // to be an actual rejection: a non-empty diagnostic list of published codes.
+    for (const [label, operation] of calls) {
+      const result = call(operation);
+      expect(result.ok, label).toBe(false);
+      if (result.ok) continue;
+      expect(Array.isArray(result.error), label).toBe(true);
+      expect(result.error.length, label).toBeGreaterThan(0);
+      for (const issue of result.error) {
+        expect(SDK_ISSUE_CODES, `${label} → ${issue.code}`).toContain(issue.code);
+        expect(issue.severity, `${label} → ${issue.code}`).toBe("error");
+        expect(issue.message.length, `${label} → ${issue.code}`).toBeGreaterThan(0);
+      }
     }
+  });
+
+  it("reports malformed input to the document reads that return a report or an object", () => {
+    const current = builder();
+
+    // `validate` returns a report, not a `Result`: the rejection *is* the report.
+    const report = current.document.validate(null);
+    expect(report.isValid).toBe(false);
+    expect(report.documentValid).toBe(false);
+    expect(report.issues.length).toBeGreaterThan(0);
+
+    // `serializer` returns the object and checks its format on each call.
+    const serializer = current.document.serializer(null as never);
+    let serialized: ReturnType<typeof serializer.serialize> | undefined;
+    expect(() => {
+      serialized = serializer.serialize(current.document.create());
+    }).not.toThrow();
+    expect(serialized).toBeDefined();
+    if (serialized === undefined) return;
+    expect(serialized.ok).toBe(false);
+    if (serialized.ok) return;
+    expect(serialized.error).toEqual([
+      expect.objectContaining({ code: "sdk.unsupported-format", severity: "error" }),
+    ]);
   });
 });
 
