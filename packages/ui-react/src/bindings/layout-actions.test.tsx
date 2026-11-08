@@ -190,4 +190,126 @@ describe("useLayoutActions", () => {
     expect(panelState(store, "palette")?.size).toBe(300);
     expect(panelState(store, "properties")?.visible).toBe(false);
   });
+
+  it("reports a missing preference and leaves the applied layout untouched", () => {
+    const store = createStore();
+    const preferences = createMemoryLayoutPreferenceStore();
+    const { result } = renderLayoutActions(store);
+    act(() => {
+      result.current.applyLayout(EDITOR_LAYOUT_ID);
+    });
+
+    let restored: unknown;
+    act(() => {
+      restored = result.current.restorePreferences(preferences);
+    });
+
+    expect(restored).toEqual({ status: "missing", ignoredPanelIds: [] });
+    expect(store.getState().layoutId).toBe(EDITOR_LAYOUT_ID);
+    expect(panelState(store, "palette")?.size).toBe(240);
+  });
+
+  it("surfaces the engine diagnostic of a malformed preference", () => {
+    const store = createStore();
+    const preferences = createMemoryLayoutPreferenceStore("not-json");
+    const { result } = renderLayoutActions(store);
+    act(() => {
+      result.current.applyLayout(EDITOR_LAYOUT_ID);
+    });
+
+    let restored: unknown;
+    act(() => {
+      restored = result.current.restorePreferences(preferences);
+    });
+
+    expect(restored).toEqual({
+      status: "malformed",
+      ignoredPanelIds: [],
+      diagnostic: "layout preferences are not valid json",
+    });
+    expect(store.getState().layoutId).toBe(EDITOR_LAYOUT_ID);
+    expect(panelState(store, "palette")?.size).toBe(240);
+  });
+
+  it("surfaces the engine diagnostic of an unsupported preference version", () => {
+    const store = createStore();
+    const preferences = createMemoryLayoutPreferenceStore({
+      version: 7,
+      layoutId: EDITOR_LAYOUT_ID,
+      panels: [],
+    });
+    const { result } = renderLayoutActions(store);
+    act(() => {
+      result.current.applyLayout(EDITOR_LAYOUT_ID);
+    });
+
+    let restored: unknown;
+    act(() => {
+      restored = result.current.restorePreferences(preferences);
+    });
+
+    expect(restored).toEqual({
+      status: "malformed",
+      ignoredPanelIds: [],
+      diagnostic: "layout preferences version 7 is not supported (expected 1)",
+    });
+    expect(store.getState().layoutId).toBe(EDITOR_LAYOUT_ID);
+    expect(panelState(store, "palette")?.size).toBe(240);
+  });
+
+  it("applies a restored preference and reports the ignored panel ids", () => {
+    const store = createStore();
+    const preferences = createMemoryLayoutPreferenceStore({
+      version: 1,
+      layoutId: EDITOR_LAYOUT_ID,
+      panels: [
+        { panelId: "palette", region: "left", visible: true, size: 300 },
+        { panelId: "navigator", region: "left", visible: true, size: 240 },
+      ],
+    });
+    const { result } = renderLayoutActions(store);
+    act(() => {
+      result.current.applyLayout(IDE_LAYOUT_ID);
+    });
+
+    let restored: unknown;
+    act(() => {
+      restored = result.current.restorePreferences(preferences);
+    });
+
+    expect(restored).toEqual({
+      status: "restored",
+      layoutId: EDITOR_LAYOUT_ID,
+      ignoredPanelIds: ["navigator"],
+    });
+    expect(store.getState().layoutId).toBe(EDITOR_LAYOUT_ID);
+    expect(panelState(store, "palette")?.size).toBe(300);
+  });
+
+  it("reports a stored layout the host does not declare without applying anything", () => {
+    const store = createStore();
+    const preferences = createMemoryLayoutPreferenceStore({
+      version: 1,
+      layoutId: "acme.unknown-layout",
+      panels: [],
+    });
+    const { result } = renderLayoutActions(store);
+    act(() => {
+      result.current.applyLayout(EDITOR_LAYOUT_ID);
+    });
+
+    let restored: unknown;
+    act(() => {
+      restored = result.current.restorePreferences(preferences);
+    });
+
+    expect(restored).toEqual({
+      status: "unknown-layout",
+      ignoredPanelIds: [],
+      diagnostic:
+        "Stored layout 'acme.unknown-layout' is not declared by the host; the applied layout is unchanged",
+    });
+    expect(store.getState().layoutId).toBe(EDITOR_LAYOUT_ID);
+    expect(panelState(store, "palette")?.size).toBe(240);
+  });
 });

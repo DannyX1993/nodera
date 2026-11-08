@@ -173,15 +173,44 @@ export function Workspace(props: { readonly editor: EditorEngine }): ReactNode {
     setStatus(`Saved '${store.getState().layoutId}' layout preferences (in memory)`);
   };
 
+  /**
+   * Restores the layout preferences and reports *why* nothing happened.
+   *
+   * `restorePreferences` returns the restore outcome instead of swallowing it:
+   * a host can tell the user whether there was nothing stored, whether the stored
+   * payload is unusable and which saved panels the declared layout no longer has.
+   */
   const restoreLayout = (): void => {
-    if (preferences.load() === undefined) {
-      setStatus("Nothing saved yet — press 'Save layout' first");
-      return;
+    const restored = layout.restorePreferences(preferences);
+    switch (restored.status) {
+      case "restored": {
+        const ignored =
+          restored.ignoredPanelIds.length === 0
+            ? "no saved panel was dropped"
+            : `dropped saved panels: ${restored.ignoredPanelIds.join(", ")}`;
+        setStatus(`Restored layout '${restored.layoutId ?? ""}' — ${ignored}`);
+        return;
+      }
+      case "missing":
+        setStatus("Restore: nothing saved yet — press 'Save layout' first");
+        return;
+      case "malformed":
+        setStatus(`Restore rejected the stored preferences: ${restored.diagnostic ?? "unknown reason"}`);
+        return;
+      case "unknown-layout":
+        setStatus(`Restore skipped: ${restored.diagnostic ?? "the stored layout is not declared here"}`);
+        return;
     }
-    layout.restorePreferences(preferences);
-    const restored = store.getState();
-    const panels = restored.layout?.panels.length ?? 0;
-    setStatus(`Restored layout preferences: '${restored.layoutId}' with ${panels} panels`);
+  };
+
+  const toggleInteractionMode = (): void => {
+    const next = ui.interactionMode === "select" ? "pan" : "select";
+    uiActions.setInteractionMode(next);
+    setStatus(
+      next === "pan"
+        ? "Interaction mode 'pan': any drag moves the canvas"
+        : "Interaction mode 'select': left drag draws a selection box, middle/right drag pans",
+    );
   };
 
   const toggleBrand = (): void => {
@@ -215,208 +244,251 @@ export function Workspace(props: { readonly editor: EditorEngine }): ReactNode {
   };
 
   return (
-    <EditorShell
-      onResizeRegion={(region: DockRegion, size: number) => {
-        // `panelIdForRegion` is the documented mapping from a shell region to
-        // the panel the layout engine can resize (S4: paneles redimensionables).
-        const panelId = panelIdForRegion(store.getState().layout, region);
-        if (panelId !== undefined) {
-          layout.resizePanel(panelId, size);
-        }
-      }}
-      slots={{
-        header: (
-          <Header
-            title="Nodera"
-            subtitle="Phase 5 · UI composition"
-            actions={
-              <div className="demo-controls">
-                <select
-                  className="demo-select"
-                  aria-label="Theme"
-                  data-demo-control="theme"
-                  value={ui.themeId}
-                  onChange={(event) => {
-                    uiActions.setTheme(event.target.value);
-                    setStatus(`Theme switched to '${event.target.value}'`);
-                  }}
-                >
-                  {themeRegistry.all().map((theme) => (
-                    <option key={theme.id} value={theme.id}>
-                      {theme.name}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  className="demo-select"
-                  aria-label="Layout"
-                  data-demo-control="layout"
-                  value={ui.layoutId}
-                  onChange={(event) => {
-                    layout.applyLayout(event.target.value);
-                    setStatus(`Layout applied: '${event.target.value}'`);
-                  }}
-                >
-                  {layoutRegistry.all().map((definition) => (
-                    <option key={definition.id} value={definition.id}>
-                      {definition.name ?? definition.id}
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  type="button"
-                  className="demo-button"
-                  data-demo-control="canvas-only"
-                  onClick={() => {
-                    layout.applyLayout(CANVAS_ONLY_LAYOUT_ID);
-                    setStatus("Canvas only: the same core with almost no chrome");
-                  }}
-                >
-                  Canvas only
-                </button>
-
-                <button
-                  type="button"
-                  className="demo-button"
-                  data-demo-control="float-search"
-                  onClick={floatSearch}
-                >
-                  Float search
-                </button>
-
-                <button
-                  type="button"
-                  className="demo-button"
-                  data-demo-control="dock-search"
-                  onClick={dockSearch}
-                >
-                  Dock search
-                </button>
-
-                <button
-                  type="button"
-                  className="demo-button"
-                  data-demo-control="save-layout"
-                  onClick={saveLayout}
-                >
-                  Save layout
-                </button>
-
-                <button
-                  type="button"
-                  className="demo-button"
-                  data-demo-control="restore-layout"
-                  onClick={restoreLayout}
-                >
-                  Restore layout
-                </button>
-
-                <button
-                  type="button"
-                  className="demo-button"
-                  data-demo-control="toggle-renderers"
-                  data-active={brand}
-                  onClick={toggleBrand}
-                >
-                  {brand ? "Renderers: brand" : "Renderers: default"}
-                </button>
-              </div>
+    <div
+      data-demo-app=""
+      style={{ display: "flex", flex: 1, minWidth: 0, minHeight: 0 }}
+    >
+      <div style={{ display: "flex", flex: 1, minWidth: 0, minHeight: 0 }}>
+        <EditorShell
+          onResizeRegion={(region: DockRegion, size: number) => {
+            // `panelIdForRegion` is the documented mapping from a shell region to
+            // the panel the layout engine can resize (S4: paneles redimensionables).
+            const panelId = panelIdForRegion(store.getState().layout, region);
+            if (panelId !== undefined) {
+              layout.resizePanel(panelId, size);
             }
-          >
-            <Toolbar
-              tools={tools}
-              handlers={handlers}
-              onCommand={(command) => {
-                setStatus(`Command '${command.kind}' is not bound in this demo`);
-              }}
-            />
-          </Header>
-        ),
+          }}
+          slots={{
+            header: (
+              <Header
+                title="Nodera"
+                subtitle="Phase 5 · UI composition"
+                actions={
+                  <div className="demo-controls">
+                    <select
+                      className="demo-select"
+                      aria-label="Theme"
+                      data-demo-control="theme"
+                      value={ui.themeId}
+                      onChange={(event) => {
+                        uiActions.setTheme(event.target.value);
+                        setStatus(`Theme switched to '${event.target.value}'`);
+                      }}
+                    >
+                      {themeRegistry.all().map((theme) => (
+                        <option key={theme.id} value={theme.id}>
+                          {theme.name}
+                        </option>
+                      ))}
+                    </select>
 
-        left: (
-          <>
-            {layoutPlaces(ui.layout, "palette") ? <PanelHost panelId="palette" /> : null}
-            {searchDocked ? <PanelHost panelId="search" /> : null}
-          </>
-        ),
+                    <select
+                      className="demo-select"
+                      aria-label="Layout"
+                      data-demo-control="layout"
+                      value={ui.layoutId}
+                      onChange={(event) => {
+                        layout.applyLayout(event.target.value);
+                        setStatus(`Layout applied: '${event.target.value}'`);
+                      }}
+                    >
+                      {layoutRegistry.all().map((definition) => (
+                        <option key={definition.id} value={definition.id}>
+                          {definition.name ?? definition.id}
+                        </option>
+                      ))}
+                    </select>
 
-        right: (
-          <>
-            {layoutPlaces(ui.layout, "properties") ? <PanelHost panelId="properties" /> : null}
-            {layoutPlaces(ui.layout, "minimap") ? <PanelHost panelId="minimap" /> : null}
-          </>
-        ),
+                    <button
+                      type="button"
+                      className="demo-button"
+                      data-demo-control="canvas-only"
+                      onClick={() => {
+                        layout.applyLayout(CANVAS_ONLY_LAYOUT_ID);
+                        setStatus("Canvas only: the same core with almost no chrome");
+                      }}
+                    >
+                      Canvas only
+                    </button>
 
-        bottom: (
-          <>
-            {layoutPlaces(ui.layout, "validation") ? <PanelHost panelId="validation" /> : null}
-            {layoutPlaces(ui.layout, "history") ? <PanelHost panelId="history" /> : null}
-          </>
-        ),
+                    <button
+                      type="button"
+                      className="demo-button"
+                      data-demo-control="float-search"
+                      onClick={floatSearch}
+                    >
+                      Float search
+                    </button>
 
-        canvas: (
-          <CanvasContainer
-            overlays={
-              <>
-                <ContextMenu
+                    <button
+                      type="button"
+                      className="demo-button"
+                      data-demo-control="dock-search"
+                      onClick={dockSearch}
+                    >
+                      Dock search
+                    </button>
+
+                    <button
+                      type="button"
+                      className="demo-button"
+                      data-demo-control="save-layout"
+                      onClick={saveLayout}
+                    >
+                      Save layout
+                    </button>
+
+                    <button
+                      type="button"
+                      className="demo-button"
+                      data-demo-control="restore-layout"
+                      onClick={restoreLayout}
+                    >
+                      Restore layout
+                    </button>
+
+                    <button
+                      type="button"
+                      className="demo-button"
+                      data-demo-control="interaction-mode"
+                      data-active={ui.interactionMode === "pan"}
+                      aria-pressed={ui.interactionMode === "pan"}
+                      onClick={toggleInteractionMode}
+                    >
+                      {ui.interactionMode === "pan" ? "Mode: pan" : "Mode: select"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="demo-button"
+                      data-demo-control="toggle-renderers"
+                      data-active={brand}
+                      onClick={toggleBrand}
+                    >
+                      {brand ? "Renderers: brand" : "Renderers: default"}
+                    </button>
+                  </div>
+                }
+              >
+                <Toolbar
+                  tools={tools}
                   handlers={handlers}
                   onCommand={(command) => {
-                    setStatus(`Menu command '${command.kind}' is not bound in this demo`);
+                    setStatus(`Command '${command.kind}' is not bound in this demo`);
                   }}
                 />
-                {searchFloating === undefined ? null : (
-                  <div
-                    className="demo-floating"
-                    data-demo-floating="search"
-                    style={{
-                      left: searchFloating.rect?.x ?? 300,
-                      top: searchFloating.rect?.y ?? 96,
-                      width: searchFloating.rect?.width ?? 330,
-                      height: searchFloating.rect?.height ?? 210,
-                    }}
-                  >
-                    <PanelHost panelId="search" />
-                  </div>
-                )}
-                <div className="demo-status" data-demo-status="" role="status">
-                  {status}
-                </div>
+              </Header>
+            ),
+
+            left: (
+              <>
+                {layoutPlaces(ui.layout, "palette") ? <PanelHost panelId="palette" /> : null}
+                {searchDocked ? <PanelHost panelId="search" /> : null}
               </>
-            }
-          >
-            <div className="demo-canvas" onContextMenu={openContextMenu}>
-              <GraphCanvas
-                editor={editor}
-                portRenderers={portRenderers}
-                colorMode={ui.themeId === "nodera.dark" ? "dark" : "light"}
-                onNodeClick={(_event, node) => {
-                  setStatus(`Selected node '${node.id}' — edit it in the properties panel`);
-                }}
-                onEdgeClick={(_event, edge) => {
-                  setStatus(`Selected edge '${edge.id}' (definition ${ROWS_EDGE_DEFINITION_ID})`);
-                }}
-                onLinkValidate={(valid, issues) => {
-                  setStatus(
-                    valid
-                      ? "Connection accepted by the application layer"
-                      : `Connection rejected (${issues.length} issue(s))`,
-                  );
-                }}
-                onDropNodeDefinition={(definitionId, position) => {
-                  const added = addNode(editor, { definitionId, position });
-                  setStatus(
-                    added.ok
-                      ? `Dropped '${definitionId}' at ${Math.round(position.x)},${Math.round(position.y)}`
-                      : `Drop rejected: ${added.error.message}`,
-                  );
-                }}
-              />
-            </div>
-          </CanvasContainer>
-        ),
-      }}
-    />
+            ),
+
+            right: (
+              <>
+                {layoutPlaces(ui.layout, "properties") ? <PanelHost panelId="properties" /> : null}
+                {layoutPlaces(ui.layout, "minimap") ? <PanelHost panelId="minimap" /> : null}
+              </>
+            ),
+
+            bottom: (
+              <>
+                {layoutPlaces(ui.layout, "validation") ? <PanelHost panelId="validation" /> : null}
+                {layoutPlaces(ui.layout, "history") ? <PanelHost panelId="history" /> : null}
+              </>
+            ),
+
+            canvas: (
+              <CanvasContainer
+                overlays={
+                  <>
+                    <ContextMenu
+                      handlers={handlers}
+                      onCommand={(command) => {
+                        setStatus(`Menu command '${command.kind}' is not bound in this demo`);
+                      }}
+                    />
+                    {searchFloating === undefined ? null : (
+                      <div
+                        className="demo-floating"
+                        data-demo-floating="search"
+                        style={{
+                          left: searchFloating.rect?.x ?? 300,
+                          top: searchFloating.rect?.y ?? 96,
+                          width: searchFloating.rect?.width ?? 330,
+                          height: searchFloating.rect?.height ?? 210,
+                        }}
+                      >
+                        <PanelHost panelId="search" />
+                      </div>
+                    )}
+                    <div className="demo-status" data-demo-status="" role="status">
+                      {status}
+                    </div>
+                  </>
+                }
+              >
+                <div className="demo-canvas" onContextMenu={openContextMenu}>
+                  <GraphCanvas
+                    editor={editor}
+                    portRenderers={portRenderers}
+                    /* Editor state → canvas behavior: the mode the host toggles in
+                       the header is the one the adapter applies (S5). */
+                    interactionMode={ui.interactionMode}
+                    colorMode={ui.themeId === "nodera.dark" ? "dark" : "light"}
+                    onNodeClick={(_event, node) => {
+                      setStatus(`Selected node '${node.id}' — edit it in the properties panel`);
+                    }}
+                    onEdgeClick={(_event, edge) => {
+                      setStatus(`Selected edge '${edge.id}' (definition ${ROWS_EDGE_DEFINITION_ID})`);
+                    }}
+                    onLinkValidate={(valid, issues) => {
+                      setStatus(
+                        valid
+                          ? "Connection accepted by the application layer"
+                          : `Connection rejected (${issues.length} issue(s))`,
+                      );
+                    }}
+                    onDropNodeDefinition={(definitionId, position) => {
+                      const added = addNode(editor, { definitionId, position });
+                      setStatus(
+                        added.ok
+                          ? `Dropped '${definitionId}' at ${Math.round(position.x)},${Math.round(position.y)}`
+                          : `Drop rejected: ${added.error.message}`,
+                      );
+                    }}
+                  />
+                </div>
+              </CanvasContainer>
+            ),
+          }}
+        />
+      </div>
+
+      {/*
+        External panel (S4 "paneles externos al canvas"): `metadata` declares
+        `region: "external"`, so no layout places it and the shell gives it no
+        geometry. The host mounts it wherever it wants — here, a column of its
+        own next to the shell, outside `EditorShell` entirely.
+      */}
+      <aside
+        data-demo-external="metadata"
+        aria-label="Host panels outside the shell"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          width: 260,
+          minWidth: 0,
+          borderLeft: "1px solid var(--ndr-colors-border, #d8dee9)",
+          background: "var(--ndr-colors-surface, #ffffff)",
+          overflow: "auto",
+        }}
+      >
+        <PanelHost panelId="metadata" />
+      </aside>
+    </div>
   );
 }

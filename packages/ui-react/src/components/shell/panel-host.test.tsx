@@ -1,9 +1,12 @@
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { EditorEngine } from "@nodera/application";
 import type { PanelDefinition } from "@nodera/ui-core";
 
 import { createDefaultPanelRegistry } from "../../defaults/default-panels.js";
+import { createDefaultComponentRenderers } from "../../defaults/default-renderers.js";
+import { NoderaUiProvider } from "../../providers/ui-provider.js";
 import {
   createComponentRenderers,
   type PanelRendererProps,
@@ -81,6 +84,36 @@ describe("PanelHost", () => {
     fireEvent.click(screen.getByRole("button", { name: "Hide Node palette" }));
 
     expect(panelState(store, "palette")?.visible).toBe(false);
+  });
+
+  it("renders a built-in external panel that no layout region places", () => {
+    const store = createShellStore();
+    const renderers = createDefaultComponentRenderers();
+    const editor = new EditorEngine({ graphId: "graph-external-panel" });
+
+    // The external panel is deliberately absent from the applied layout: an
+    // external panel is mounted by the host wherever it wants, and its region
+    // only keeps it out of the shell geometry (S4 "paneles externos al canvas").
+    expect(
+      store.getState().layout?.panels.some((panel) => panel.panelId === "metadata"),
+    ).toBe(false);
+
+    // `MetadataPanel` is editor-bound, so the host provides the editor it needs;
+    // no region, slot or extra chrome prop is required to mount it.
+    const { container } = render(
+      <NoderaUiProvider store={store} editor={editor} renderers={renderers}>
+        <PanelHost panelId="metadata" />
+      </NoderaUiProvider>,
+    );
+
+    const chrome = container.querySelector<HTMLElement>('[data-nodera-panel-id="metadata"]');
+    expect(chrome).not.toBeNull();
+    expect(chrome?.textContent).toContain("Metadata");
+    expect(container.querySelector("[data-nodera-metadata-panel]")).not.toBeNull();
+    expect(
+      container.querySelector<HTMLElement>('[data-nodera-metadata="graph-id"]')?.textContent,
+    ).toBe("graph-external-panel");
+    expect(container.querySelector("[data-nodera-panel-unregistered]")).toBeNull();
   });
 
   it("offers no hide action for a panel the definition marks as not hideable", () => {

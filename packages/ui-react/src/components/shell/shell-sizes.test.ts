@@ -1,11 +1,104 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createLayoutState, EDITOR_LAYOUT, IDE_LAYOUT } from "@nodera/layout-engine";
+import {
+  DEFAULT_LAYOUT_VIEWPORT,
+  createLayoutState,
+  EDITOR_LAYOUT,
+  IDE_LAYOUT,
+  resolveLayout,
+} from "@nodera/layout-engine";
 import type { LayoutState } from "@nodera/ui-core";
 
 import { computeShellSizes, panelIdForRegion } from "./shell-sizes.js";
 
+/**
+ * Delegation seam of the shell geometry.
+ *
+ * `computeShellSizes` must ask the layout engine where the regions are instead
+ * of re-deriving a max-per-region rule from panel sizes (two geometry paths
+ * drift). The suite records the engine call through a partial module mock so
+ * the delegation is observable: a re-implemented inline rule ignores the
+ * recorded override and fails the pinned cases below.
+ */
+vi.mock("@nodera/layout-engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@nodera/layout-engine")>();
+  return { ...actual, resolveLayout: vi.fn(actual.resolveLayout) };
+});
+
+const resolveLayoutSpy = vi.mocked(resolveLayout);
+
+beforeEach(() => {
+  resolveLayoutSpy.mockClear();
+});
+
 describe("computeShellSizes", () => {
+  it("reads the region edges from the layout engine's resolved geometry", () => {
+    const layout = createLayoutState(IDE_LAYOUT);
+
+    // Rectangles the engine would never produce for this layout: only a real
+    // delegation can report them, an inline max-per-region rule cannot.
+    resolveLayoutSpy.mockReturnValueOnce({
+      viewport: DEFAULT_LAYOUT_VIEWPORT,
+      regions: [
+        { region: "header", rect: { x: 0, y: 0, width: 1280, height: 52 } },
+        { region: "left", rect: { x: 0, y: 52, width: 275, height: 720 } },
+        { region: "bottom", rect: { x: 275, y: 520, width: 700, height: 190 } },
+      ],
+      panels: [],
+      hidden: [],
+      external: [],
+    });
+
+    expect(computeShellSizes(layout)).toEqual({
+      header: 52,
+      footer: 0,
+      left: 275,
+      right: 0,
+      bottom: 190,
+    });
+  });
+
+  it("resolves the geometry with an empty definition and the default viewport", () => {
+    const layout = createLayoutState(EDITOR_LAYOUT);
+
+    computeShellSizes(layout);
+
+    expect(resolveLayoutSpy).toHaveBeenCalledTimes(1);
+    const call = resolveLayoutSpy.mock.calls[0];
+    expect(call?.[0].panels).toEqual([]);
+    expect(call?.[1]).toBe(layout);
+    expect(call?.[2]).toStrictEqual({ viewport: DEFAULT_LAYOUT_VIEWPORT });
+  });
+
+  it("uses the largest panel of a region, never the sum of the panels", () => {
+    const layout: LayoutState = {
+      panels: [
+        { panelId: "palette", region: "left", visible: true, size: 240 },
+        { panelId: "navigator", region: "left", visible: true, size: 260 },
+      ],
+    };
+
+    expect(computeShellSizes(layout).left).toBe(260);
+  });
+
+  it("ignores panels the shell does not dock even when they are larger", () => {
+    const layout: LayoutState = {
+      panels: [
+        { panelId: "palette", region: "left", visible: true, size: 200 },
+        { panelId: "search", region: "floating", visible: true, size: 900 },
+        { panelId: "metadata", region: "external", visible: true, size: 900 },
+      ],
+    };
+
+    expect(computeShellSizes(layout)).toEqual({
+      header: 0,
+      footer: 0,
+      left: 200,
+      right: 0,
+      bottom: 0,
+    });
+  });
+
   it("reports the largest size of the visible panels of every region", () => {
     const layout = createLayoutState(IDE_LAYOUT);
 

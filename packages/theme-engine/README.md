@@ -44,6 +44,26 @@ stylesheet pipeline: every component style reads `var(--ndr-*, fallback)`.
 `DEFAULT_THEME`, `DARK_THEME`. They cover node/edge/handle/selection/canvas
 styles, typography, spacing, borders, shadows and icons.
 
+## Canvas tokens
+
+The `canvas` group describes the surface the canvas paints behind the graph:
+
+| Token | CSS variable | Consumer |
+| --- | --- | --- |
+| `canvas.background` | `--ndr-canvas-background` | `CanvasContainer` (`@nodera/ui-react`) paints the surface colour |
+| `canvas.backgroundDot` | `--ndr-canvas-background-dot` | `canvasBackgroundOptions()` in `@nodera/canvas-react-flow` colours the dot pattern |
+| `canvas.backgroundDotSize` | `--ndr-canvas-background-dot-size` | the dot gap, as a numeric string (`"16"` = 16px) |
+
+`canvas.background` and `canvas.backgroundDot` reach the canvas as CSS variable
+references, so switching the theme (or overriding the variables in a host
+stylesheet) restyles the canvas without re-rendering the adapter. The gap is
+the exception: React Flow's `<Background gap>` is a number and a CSS custom
+property can never feed a numeric prop, so the adapter keeps the token's value
+(`16`) as the documented numeric default in `canvasBackgroundOptions()`.
+
+The former `gridColor` and `gridSize` tokens were removed: nothing consumed them,
+and the canvas paints a dot pattern rather than grid lines.
+
 ## Scripts
 
 `pnpm --filter @nodera/theme-engine test`, `typecheck`.

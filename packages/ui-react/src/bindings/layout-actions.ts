@@ -18,6 +18,31 @@ import type { DockRegion, LayoutState, Rect } from "@nodera/ui-core";
 import { useNoderaUi } from "../providers/ui-provider.js";
 
 /**
+ * Outcome of {@link LayoutActions.restorePreferences}.
+ *
+ * The engine's diagnostics are part of the binding's contract, not an internal
+ * detail: a host reports them to the user instead of guessing why nothing
+ * changed. A restore never throws and never partly applies — the applied layout
+ * is either replaced or left exactly as it was.
+ */
+export interface RestorePreferencesResult {
+  /**
+   * - `restored`: the stored preference was valid and is now the applied layout.
+   * - `missing`: nothing was stored, the applied layout is unchanged.
+   * - `malformed`: the stored payload is unusable, see `diagnostic`.
+   * - `unknown-layout`: the stored layout id is not declared by the host, so
+   *   there is nothing to apply it to, see `diagnostic`.
+   */
+  readonly status: "restored" | "missing" | "malformed" | "unknown-layout";
+  /** Id of the layout that became the applied layout, when one was restored. */
+  readonly layoutId?: string;
+  /** Preference entries dropped because the declared layout no longer has them. */
+  readonly ignoredPanelIds: readonly string[];
+  /** Human-readable reason of a non-restored outcome. */
+  readonly diagnostic?: string;
+}
+
+/**
  * Layout actions of the nearest provider.
  *
  * Every action funnels through a layout-engine reducer and the UI store, so
@@ -41,8 +66,13 @@ export interface LayoutActions {
   floatPanel(panelId: string, rect: Rect): void;
   /** Persists the applied layout state through a host-provided store. */
   savePreferences(preferences: LayoutPreferenceStore): void;
-  /** Restores previously persisted layout preferences. */
-  restorePreferences(preferences: LayoutPreferenceStore): void;
+  /**
+   * Restores previously persisted layout preferences.
+   *
+   * Never throws: a missing, malformed or undeclared preference is a reported
+   * no-op that leaves the applied layout untouched.
+   */
+  restorePreferences(preferences: LayoutPreferenceStore): RestorePreferencesResult;
 }
 
 /** Binds the layout engine and the UI store to a stable actions object. */
@@ -91,24 +121,40 @@ export function useLayoutActions(): LayoutActions {
         }
         saveLayoutPreferences(preferences, state.layoutId, state.layout);
       },
-      restorePreferences: (preferences) => {
+      restorePreferences: (preferences): RestorePreferencesResult => {
         const stored = preferences.load();
         if (stored === undefined) {
-          return;
+          return { status: "missing", ignoredPanelIds: [] };
         }
         const parsed = deserializePreferences(stored);
         if (!parsed.ok) {
-          return;
+          return { status: "malformed", ignoredPanelIds: [], diagnostic: parsed.error.message };
         }
         const definition = layoutRegistry.get(parsed.value.layoutId);
         if (definition === undefined) {
-          return;
+          return {
+            status: "unknown-layout",
+            ignoredPanelIds: [],
+            diagnostic: `Stored layout '${parsed.value.layoutId}' is not declared by the host; the applied layout is unchanged`,
+          };
         }
         const restored = restoreLayoutPreferences(preferences, definition, options());
         if (restored.status !== "restored" || restored.state === undefined) {
-          return;
+          // Nothing was applied: report the engine's own reason unchanged.
+          return restored.diagnostic === undefined
+            ? { status: restored.status, ignoredPanelIds: restored.ignoredPanelIds }
+            : {
+                status: restored.status,
+                ignoredPanelIds: restored.ignoredPanelIds,
+                diagnostic: restored.diagnostic,
+              };
         }
         store.setLayout(definition.id, restored.state);
+        return {
+          status: "restored",
+          layoutId: definition.id,
+          ignoredPanelIds: restored.ignoredPanelIds,
+        };
       },
     };
   }, [store, layoutRegistry, panelRegistry]);

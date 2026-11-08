@@ -42,6 +42,15 @@ const editor = createDemoEditor();
 
 const panelRegistry = createDefaultPanelRegistry();
 
+// The host makes the external panel non-hideable: its region keeps it out of
+// the shell geometry, so "hide" is a layout action with nothing to act on. The
+// host owns that decision, exactly like the placement of the panel itself.
+const metadataPanel = panelRegistry.get("metadata");
+if (metadataPanel !== undefined) {
+  panelRegistry.unregister(metadataPanel.id);
+  panelRegistry.register({ ...metadataPanel, hideable: false });
+}
+
 // The host declares its own layout next to the predefined ones (S4).
 const layoutRegistry = new LayoutRegistry({
   layouts: [...PREDEFINED_LAYOUTS, DEMO_WORKSPACE_LAYOUT],

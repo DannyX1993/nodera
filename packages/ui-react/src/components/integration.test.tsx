@@ -9,7 +9,7 @@ import {
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { EditorEngine, addNode, selectNode } from "@nodera/application";
+import { EditorEngine, addNode, exportDocument, selectNode } from "@nodera/application";
 import {
   EDITOR_LAYOUT,
   EDITOR_LAYOUT_ID,
@@ -461,6 +461,103 @@ describe("7. component replacement", () => {
     const { container } = renderWorkspace({ renderers });
 
     expect(container.querySelector("[data-nodera-toolbar] [data-nodera-tool]")).not.toBeNull();
+  });
+});
+
+describe("8. presentation state never reaches the portable document", () => {
+  /** Keys of a serialized document, at every depth. */
+  function documentKeys(value: unknown, keys: Set<string> = new Set()): Set<string> {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        documentKeys(item, keys);
+      }
+      return keys;
+    }
+    if (typeof value === "object" && value !== null) {
+      for (const [key, nested] of Object.entries(value)) {
+        keys.add(key);
+        documentKeys(nested, keys);
+      }
+    }
+    return keys;
+  }
+
+  it("exports the graph without theme, layout, menu, search or selection state", () => {
+    const { store, editor } = renderWorkspace();
+
+    // Mutate every kind of presentation state the UI layer owns: theme, search
+    // query, an open menu, the interaction mode, a node selection and a layout
+    // change (a different layout plus a resized panel).
+    act(() => {
+      store.setTheme(DARK_THEME_ID);
+      store.setSearchQuery("zzz-search-query");
+      store.openMenu({
+        kind: "context",
+        targetKind: "node",
+        targetId: "node-source",
+        position: { x: 9876, y: 5432 },
+      });
+      store.setInteractionMode("pan");
+      store.updateLayout((layout) => ({
+        panels: layout.panels.map((panel) =>
+          panel.panelId === "palette" ? { ...panel, size: 361 } : panel,
+        ),
+      }));
+    });
+    act(() => {
+      selectNode(editor, { nodeId: "node-source" });
+    });
+
+    // Precondition: the presentation state really changed.
+    const ui = store.getState();
+    expect(ui.themeId).toBe(DARK_THEME_ID);
+    expect(ui.menu).toBeDefined();
+    expect(ui.interactionMode).toBe("pan");
+    expect(ui.layout?.panels.find((panel) => panel.panelId === "palette")?.size).toBe(361);
+    expect(editor.getSelectedNodes()).toEqual(["node-source"]);
+
+    // `exportDocument` emits a `graph.exported` event the mounted panels
+    // subscribe to, so the export runs inside `act` like any other mutation.
+    let exported: ReturnType<typeof exportDocument> | undefined;
+    act(() => {
+      exported = exportDocument(editor, { format: "json" });
+    });
+    if (exported === undefined || !exported.ok) {
+      throw new Error(`export failed: ${JSON.stringify(exported?.error)}`);
+    }
+
+    const keys = documentKeys(JSON.parse(exported.value) as unknown);
+    expect(
+      [...keys].filter((key) =>
+        [
+          "themeId",
+          "layoutId",
+          "layout",
+          "panels",
+          "searchQuery",
+          "menu",
+          "menus",
+          "selectedNodes",
+          "selectedEdges",
+          "selected",
+          "interactionMode",
+          "activePanelId",
+        ].includes(key),
+      ),
+    ).toEqual([]);
+
+    // Nor do the values of that state reach the document.
+    expect(exported.value).not.toContain(DARK_THEME_ID);
+    expect(exported.value).not.toContain(EDITOR_LAYOUT_ID);
+    expect(exported.value).not.toContain("zzz-search-query");
+    expect(exported.value).not.toContain("9876");
+    expect(exported.value).not.toContain("361");
+
+    // The graph itself is still exported, unharmed.
+    expect(keys).toContain("nodes");
+    expect(exported.value).toContain("node-source");
+    expect(exported.value).toContain("node-sink");
+    expect(exported.value).toContain("https://source.test");
   });
 });
 

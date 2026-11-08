@@ -37,6 +37,18 @@ decides which components it uses, where it places them and how they look.
   `PanelRegistry` and the renderer from the component-renderer registry
   (`panel.renderer ?? panel.id`). An unknown panel renders nothing; a known panel
   without a renderer renders a labelled placeholder instead of throwing.
+- **External panels are mounted by the host, anywhere outside the shell.** A
+  definition with `region: "external"` (the built-in `metadata` panel) takes part
+  in no layout: `resolveLayout` reports it in `external`, `computeShellSizes`
+  gives it no geometry, and `EditorShell` never renders it. The host places
+  `<PanelHost panelId="metadata" />` wherever it wants — its own column, a
+  sidebar, a separate window — which is what "paneles externos al canvas" (S4)
+  means in practice.
+- Region edges come from the layout engine: `computeShellSizes` delegates to
+  `resolveLayout` (documented empty definition plus the default viewport) and only
+  maps region rectangles to shell edges (`height` for `header`/`footer`/`bottom`,
+  `width` for `left`/`right`). There is no second max-per-region rule in the React
+  layer, so the shell and the engine cannot drift apart.
 
 ## Components
 
@@ -73,6 +85,22 @@ theme variables on its wrapper element.
   save and restore preferences
 - `useEditorSnapshot`, `useToolAvailability`, `useGraphQueries`,
   `useEditorCommands`, `useValidation`, `useHistory`
+
+`restorePreferences(store)` never throws and never half-applies: it returns a
+`RestorePreferencesResult` so the host can tell the user what happened instead of
+seeing nothing change.
+
+```ts
+const result = layout.restorePreferences(store);
+// { status: "restored", layoutId: "acme.ide", ignoredPanelIds: ["legacy"] }
+// { status: "missing", ignoredPanelIds: [] }
+// { status: "malformed", ignoredPanelIds: [], diagnostic: "layout preferences are not valid json" }
+// { status: "unknown-layout", ignoredPanelIds: [], diagnostic: "Stored layout '…' is not declared by the host; the applied layout is unchanged" }
+```
+
+`ignoredPanelIds` lists the saved entries dropped because the declared layout no
+longer has those panels; `diagnostic` is the layout engine's own message. Only
+`"restored"` touches the UI store.
 
 Each hook is a thin binding: mutations go through the application use cases, rules
 come from the core packages, and no component re-implements them.

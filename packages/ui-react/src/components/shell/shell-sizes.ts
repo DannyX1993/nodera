@@ -1,4 +1,5 @@
-import type { DockRegion, LayoutState } from "@nodera/ui-core";
+import { DEFAULT_LAYOUT_VIEWPORT, resolveLayout } from "@nodera/layout-engine";
+import type { DockRegion, LayoutDefinition, LayoutState } from "@nodera/ui-core";
 
 /** Edge length of every docked region of the shell. */
 export interface ShellSizes {
@@ -10,12 +11,38 @@ export interface ShellSizes {
 }
 
 /**
+ * Definition the shell hands to the layout engine.
+ *
+ * `computeShellSizes` reports region *edges* only, and those come from the
+ * applied `LayoutState`; the shell declares no layout of its own, so it passes
+ * an explicitly empty definition instead of inventing panels the host never
+ * asked for (S2/S4: the framework imposes no layout).
+ */
+const SHELL_GEOMETRY_DEFINITION: LayoutDefinition = {
+  id: "nodera.shell.region-geometry",
+  panels: [],
+};
+
+/** Edge of a resolved region rectangle that becomes the shell size. */
+const REGION_DIMENSION: Record<DockRegion, "width" | "height"> = {
+  header: "height",
+  footer: "height",
+  bottom: "height",
+  left: "width",
+  right: "width",
+};
+
+/**
  * Edge sizes of the regions the shell renders.
  *
- * A region is as large as its largest visible panel (side regions stack
- * vertically, stacked regions side by side, so the widest/tallest panel decides
- * the region). Regions without a visible panel and layouts that are not applied
- * yet report `0`, which the shell renders as "size to content".
+ * The layout engine owns region geometry: this function delegates to
+ * `resolveLayout` with the documented default viewport and only maps the
+ * resolved region rectangles to shell edges — `height` for the horizontal
+ * regions (`header`, `footer`, `bottom`) and `width` for the side regions
+ * (`left`, `right`). There is no second max-per-region rule here, so the shell
+ * and the engine cannot drift apart. Regions the layout does not place, panels
+ * that are hidden, floating or external, and layouts not applied yet report `0`,
+ * which the shell renders as "size to content".
  */
 export function computeShellSizes(layout: LayoutState | undefined): ShellSizes {
   const sizes: Record<DockRegion, number> = {
@@ -26,25 +53,18 @@ export function computeShellSizes(layout: LayoutState | undefined): ShellSizes {
     bottom: 0,
   };
 
-  if (layout !== undefined) {
-    for (const panel of layout.panels) {
-      if (!panel.visible || panel.region === "floating" || panel.region === "external") {
-        continue;
-      }
-      const region: DockRegion = panel.region;
-      if (panel.size > sizes[region]) {
-        sizes[region] = panel.size;
-      }
-    }
+  if (layout === undefined) {
+    return sizes;
   }
 
-  return {
-    header: sizes.header,
-    footer: sizes.footer,
-    left: sizes.left,
-    right: sizes.right,
-    bottom: sizes.bottom,
-  };
+  const resolved = resolveLayout(SHELL_GEOMETRY_DEFINITION, layout, {
+    viewport: DEFAULT_LAYOUT_VIEWPORT,
+  });
+  for (const { region, rect } of resolved.regions) {
+    sizes[region] = rect[REGION_DIMENSION[region]];
+  }
+
+  return sizes;
 }
 
 /**
