@@ -67,12 +67,52 @@ decides which components it uses, where it places them and how they look.
 | `MetadataPanel` | graph metadata editor (`name`, `description`, `tags`) |
 | `Toolbar` | registry-driven actions with availability gating and toolbar renderer replacement |
 | `ContextMenu` | store-driven menu at the pointer position, target-aware items, Escape/outside-click close, menu renderer replacement |
+| `Dialog` | modal surface for one `DialogDefinition`: ARIA name/description, focus move and trap, focus restore, Escape/backdrop dismissal only when the definition is dismissible |
 | `ValidationPanel` | severity counts, validate action, issue list with element links, optional auto-validate |
 | `HistoryPanel` | undo/redo labels with a current marker and click-to-walk |
 
 Every component derives its styles from the theme CSS custom properties
 (`var(--ndr-*, fallback)`), so a host theme or its own stylesheet changes the look
 without touching component code.
+
+## Dialogs
+
+`Dialog` renders one `DialogDefinition` and owns no state: `open` and `onClose`
+come from the host, normally through `useDialogActions` over the same
+`UiStateStore` the rest of the UI reads.
+
+```tsx
+const dialogs = useDialogActions();
+const state = useUiState();
+const definition = state.activeDialogId === undefined
+  ? undefined
+  : dialogRegistry.get(state.activeDialogId);
+
+<Dialog definition={definition ?? CREATE_NODE} open={definition !== undefined} onClose={dialogs.close}>
+  <button type="button" onClick={() => dialogs.close()}>Done</button>
+</Dialog>
+```
+
+Accessibility is built in, not delegated to the host (AGENTS.md §15): the panel
+is `role="dialog"` with `aria-modal="true"`, its accessible name is the
+definition title (`aria-labelledby`) and its description is wired with
+`aria-describedby` when the definition declares one. On open, focus moves to the
+first focusable control inside the panel (or to the panel itself, which is
+`tabindex="-1"`, when it holds none); `Tab` and `Shift+Tab` wrap inside the
+panel in both directions; on close, focus returns to the element that had it
+before opening. `Escape` and a backdrop click call `onClose` **only** when
+`dismissible` is true — a `dismissible: false` dialog is dismissable through its
+own controls only.
+
+The size token is reflected as the `nodera-dialog-size-<size>` class and the
+`data-nodera-dialog-size` attribute next to `nodera-dialog`, and the panel
+measures from theme tokens (`--ndr-dialog-size-sm|md|lg`, `--ndr-colors-backdrop`,
+spacing, borders, shadows) with the built-in fallbacks, so no colour is
+hard-coded here.
+
+The primitive does not portal and does not lock the rest of the document: the
+trap covers the rendered panel only, and a host that needs a hard modal lock or
+a portal wraps `Dialog` in its own overlay.
 
 ## Providers and hooks
 
@@ -81,6 +121,8 @@ registries, the component renderers and an optional `editor`, and writes the
 theme variables on its wrapper element.
 
 - `useNoderaUi`, `useEditorEngine`, `useTheme`, `useUiState`, `useUiStateActions`
+- `useDialogActions` — `open(dialogId)` / `close()` over the UI store, which
+  refuses an id its `DialogRegistry` does not know
 - `useLayoutActions` — apply/reset layouts, resize, show/hide/toggle, dock, float,
   save and restore preferences
 - `useEditorSnapshot`, `useToolAvailability`, `useGraphQueries`,

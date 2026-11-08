@@ -1,3 +1,7 @@
+import { err, ok, type RegistryError, type Result } from "@nodera/contracts";
+
+import type { DialogDefinition } from "./dialog-definition.js";
+import type { DialogRegistry } from "./dialog-registry.js";
 import type { LayoutState } from "./layout.js";
 
 /** Interaction mode of the editor surface. */
@@ -40,6 +44,14 @@ export interface UiState {
   readonly interactionMode: InteractionMode;
   /** Panel that currently has focus, if any. */
   readonly activePanelId: string | undefined;
+  /**
+   * Id of the open dialog, if any.
+   *
+   * Dialogs are presentation state: the id is enough to render one, and it
+   * never enters the portable document. Only an id registered in the store's
+   * `DialogRegistry` can be set (see {@link UiStateStore.openDialog}).
+   */
+  readonly activeDialogId: string | undefined;
 }
 
 /** Initial values accepted by {@link UiStateStore}. */
@@ -51,6 +63,11 @@ export interface UiStateStoreOptions {
   readonly layout?: LayoutState;
   readonly interactionMode?: InteractionMode;
   readonly searchQuery?: string;
+  /**
+   * Dialogs the store can open. Without it the store opens no dialog at all:
+   * an id that is not registered is refused instead of rendered.
+   */
+  readonly dialogRegistry?: DialogRegistry;
 }
 
 /** Listener notified after every state change. */
@@ -66,8 +83,10 @@ export type UiStateListener = (state: UiState) => void;
 export class UiStateStore {
   private state: UiState;
   private readonly listeners = new Set<UiStateListener>();
+  private readonly dialogRegistry: DialogRegistry | undefined;
 
   constructor(options: UiStateStoreOptions) {
+    this.dialogRegistry = options.dialogRegistry;
     this.state = {
       themeId: options.themeId,
       layoutId: options.layoutId,
@@ -76,6 +95,7 @@ export class UiStateStore {
       searchQuery: options.searchQuery ?? "",
       interactionMode: options.interactionMode ?? "select",
       activePanelId: undefined,
+      activeDialogId: undefined,
     };
   }
 
@@ -174,6 +194,42 @@ export class UiStateStore {
       return;
     }
     this.commit({ ...this.state, activePanelId });
+  }
+
+  /**
+   * Opens the registered dialog with the given id.
+   *
+   * The id is validated against the `DialogRegistry` before it reaches the
+   * state, so an unknown id is refused with its `not-found` diagnostic and the
+   * previous state (and its subscribers) stay untouched. A store without a
+   * registry therefore opens nothing, which keeps the invariant "the open id is
+   * always a registered one" true by construction.
+   */
+  openDialog(dialogId: string): Result<DialogDefinition, RegistryError> {
+    const registry = this.dialogRegistry;
+    if (registry === undefined) {
+      return err({
+        kind: "not-found",
+        id: dialogId,
+        message: `no dialog registry is configured, so dialog "${dialogId}" cannot be opened`,
+      });
+    }
+    const resolved = registry.require(dialogId);
+    if (!resolved.ok) {
+      return resolved;
+    }
+    if (this.state.activeDialogId !== dialogId) {
+      this.commit({ ...this.state, activeDialogId: dialogId });
+    }
+    return ok(resolved.value);
+  }
+
+  /** Closes the open dialog, if any. */
+  closeDialog(): void {
+    if (this.state.activeDialogId === undefined) {
+      return;
+    }
+    this.commit({ ...this.state, activeDialogId: undefined });
   }
 
   private commit(next: UiState): void {

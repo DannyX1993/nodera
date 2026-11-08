@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { UiStateStore } from "./ui-state.js";
 import type { LayoutState } from "./layout.js";
+import { DialogRegistry } from "./dialog-registry.js";
+import type { DialogDefinition } from "./dialog-definition.js";
 
 const emptyLayout: LayoutState = { panels: [] };
 
@@ -20,6 +22,26 @@ function createStore() {
   });
 }
 
+const createNodeDialog: DialogDefinition = {
+  id: "acme.dialog.create-node",
+  title: "Create node",
+};
+
+function dialogRegistry(): DialogRegistry {
+  const registry = new DialogRegistry();
+  registry.register(createNodeDialog);
+  return registry;
+}
+
+function createDialogStore(dialogs: DialogRegistry | null = dialogRegistry()) {
+  return new UiStateStore({
+    themeId: "nodera.light",
+    layoutId: "nodera.editor",
+    layout: emptyLayout,
+    ...(dialogs === null ? {} : { dialogRegistry: dialogs }),
+  });
+}
+
 describe("UiStateStore", () => {
   it("exposes the initial UI state with documented defaults", () => {
     const store = createStore();
@@ -32,6 +54,7 @@ describe("UiStateStore", () => {
       searchQuery: "",
       interactionMode: "select",
       activePanelId: undefined,
+      activeDialogId: undefined,
     });
   });
 
@@ -141,6 +164,59 @@ describe("UiStateStore", () => {
 
     store.setActivePanel(undefined);
     expect(store.getState().activePanelId).toBeUndefined();
+  });
+
+  it("opens a registered dialog by id and resolves its definition", () => {
+    const store = createDialogStore();
+
+    const opened = store.openDialog("acme.dialog.create-node");
+
+    expect(opened.ok).toBe(true);
+    expect(opened.ok && opened.value).toBe(createNodeDialog);
+    expect(store.getState().activeDialogId).toBe("acme.dialog.create-node");
+
+    store.closeDialog();
+    expect(store.getState().activeDialogId).toBeUndefined();
+  });
+
+  it("refuses a dialog id the registry does not know and leaves the state untouched", () => {
+    const store = createDialogStore();
+    store.openDialog("acme.dialog.create-node");
+    const before = store.getState();
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    const refused = store.openDialog("acme.dialog.missing");
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error.kind).toBe("not-found");
+    expect(store.getState()).toBe(before);
+    expect(store.getState().activeDialogId).toBe("acme.dialog.create-node");
+    expect(notifications).toBe(0);
+  });
+
+  it("refuses every dialog when the store has no dialog registry", () => {
+    const store = createDialogStore(null);
+
+    const refused = store.openDialog("acme.dialog.create-node");
+
+    expect(refused.ok).toBe(false);
+    expect(store.getState().activeDialogId).toBeUndefined();
+  });
+
+  it("does not notify nor rebuild state when the same dialog is already open", () => {
+    const store = createDialogStore();
+    store.openDialog("acme.dialog.create-node");
+    const before = store.getState();
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.openDialog("acme.dialog.create-node");
+    store.closeDialog();
+    store.closeDialog();
+
+    expect(notifications).toBe(1);
+    expect(before.activeDialogId).toBe("acme.dialog.create-node");
   });
 
   it("supports several independent subscribers", () => {

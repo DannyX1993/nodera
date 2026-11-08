@@ -1,4 +1,6 @@
 export * from "./layout.js";
+export * from "./dialog-definition.js";
+export * from "./dialog-registry.js";
 export * from "./panel-definition.js";
 export * from "./panel-registry.js";
 export * from "./tool-definition.js";
