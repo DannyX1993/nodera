@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nodera Phase 5 demo — UI composition</title>
+    <style>
+      /*
+       * Page chrome only.
+       *
+       * The demo intentionally ships no component stylesheet: every editor
+       * surface is styled by `@nodera/ui-react` inline with `var(--ndr-*)`
+       * tokens, and `NoderaUiProvider` writes those tokens on its wrapper
+       * element. The rules below only teach the document how to fill the
+       * viewport and how the demo's own controls look; they read the same
+       * tokens, so the host chrome follows the active theme for free (S3).
+       */
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+
+      /* The provider wrapper is the themed root, and it has to fill the page. */
+      #root > [data-nodera-theme] {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        background: var(--ndr-colors-background, #f8fafc);
+        color: var(--ndr-colors-text, #111827);
+        font-family: var(--ndr-typography-font-family, system-ui);
+        font-size: var(--ndr-typography-font-size-md, 13px);
+      }
+
+      .demo-controls {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: nowrap;
+        white-space: nowrap;
+      }
+
+      .demo-select,
+      .demo-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
+        border: 1px solid var(--ndr-colors-border, #d8dee9);
+        border-radius: var(--ndr-borders-radius-md, 5px);
+        background: var(--ndr-colors-surface, #ffffff);
+        color: var(--ndr-colors-text, #111827);
+        font-family: var(--ndr-typography-font-family, system-ui);
+        font-size: var(--ndr-typography-font-size-sm, 11px);
+        line-height: 1.4;
+        cursor: pointer;
+      }
+
+      .demo-button[data-active="true"] {
+        border-color: var(--ndr-colors-accent, #2563eb);
+        color: var(--ndr-colors-accent, #2563eb);
+      }
+
+      .demo-canvas {
+        position: relative;
+        display: flex;
+        flex: 1;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      /* Overlay layer: the canvas container disables pointer events for it. */
+      .demo-overlay,
+      .demo-floating,
+      .demo-status {
+        pointer-events: auto;
+      }
+
+      .demo-floating {
+        position: absolute;
+        border: 1px solid var(--ndr-colors-border-strong, #94a3b8);
+        border-radius: var(--ndr-borders-radius-md, 5px);
+        box-shadow: var(--ndr-shadows-lg, 0 8px 24px rgba(15, 23, 42, 0.18));
+        overflow: hidden;
+        display: flex;
+      }
+
+      .demo-status {
+        position: absolute;
+        left: 8px;
+        bottom: 8px;
+        max-width: calc(100% - 24px);
+        padding: 3px 8px;
+        border: 1px solid var(--ndr-colors-border, #d8dee9);
+        border-radius: var(--ndr-borders-radius-md, 5px);
+        background: var(--ndr-colors-surface, #ffffff);
+        color: var(--ndr-colors-text-muted, #5b6472);
+        font-size: var(--ndr-typography-font-size-sm, 11px);
+        box-shadow: var(--ndr-shadows-sm, 0 1px 2px rgba(15, 23, 42, 0.08));
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Brand renderers: the host's own markup, not the framework's. */
+      .demo-brand-palette {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 4px;
+      }
+
+      .demo-brand-palette h4 {
+        margin: 0;
+        font-size: var(--ndr-typography-font-size-sm, 11px);
+        text-transform: uppercase;
+        color: var(--ndr-colors-accent, #2563eb);
+      }
+
+      .demo-brand-card {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border: 1px solid var(--ndr-colors-accent-muted, #93c5fd);
+        border-radius: var(--ndr-borders-radius-lg, 8px);
+        background: var(--ndr-colors-surface-alt, #f1f5f9);
+      }
+
+      .demo-brand-card span {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .demo-field {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .demo-field span {
+        font-size: var(--ndr-typography-font-size-sm, 11px);
+        font-weight: var(--ndr-typography-font-weight-bold, 600);
+        color: var(--ndr-colors-accent, #2563eb);
+      }
+
+      .demo-field input {
+        padding: 2px 6px;
+        border: 2px solid var(--ndr-colors-accent, #2563eb);
+        border-radius: var(--ndr-borders-radius-sm, 3px);
+        background: var(--ndr-colors-surface, #ffffff);
+        color: var(--ndr-colors-text, #111827);
+        font-family: var(--ndr-typography-font-family-mono, ui-monospace);
+        font-size: var(--ndr-typography-font-size-md, 13px);
+      }
+
+      .demo-break {
+        margin-top: 6px;
+        align-self: flex-start;
+        padding: 2px 8px;
+        border: 1px solid var(--ndr-colors-danger, #dc2626);
+        border-radius: var(--ndr-borders-radius-md, 5px);
+        background: transparent;
+        color: var(--ndr-colors-danger, #dc2626);
+        font: inherit;
+        font-size: var(--ndr-typography-font-size-sm, 11px);
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
