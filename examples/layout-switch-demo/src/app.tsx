@@ -226,7 +226,12 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
       return;
     }
 
-    const anchorId = ui.pendingAppendAnchorId;
+    // The palette anchors on the node the host has selected: with exactly one
+    // selection the new node follows it, with none it goes to the end of the
+    // graph. The phantom "+" already carries its own anchor.
+    const selected = builder.graph.selectedNodes();
+    const anchorId =
+      ui.pendingAppendAnchorId ?? (selected.length === 1 ? selected[0] : undefined);
     const added = builder.graph.addNode(
       anchorId === undefined
         ? { type: definitionId }
