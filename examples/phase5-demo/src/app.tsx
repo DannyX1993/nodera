@@ -67,7 +67,12 @@ const TOOLBAR_TOOL_IDS: readonly string[] = [
 ];
 
 /** Rectangle the "Float search" action applies (host-chosen, never persisted). */
-const FLOATING_SEARCH_RECT = Object.freeze({ x: 300, y: 96, width: 330, height: 210 });
+/**
+ * Floating rectangles are host-owned pixels relative to the canvas container.
+ * They must stay inside it: an overlay that overflows the container lands under
+ * the host's own chrome (the external metadata column) and stops taking clicks.
+ */
+const FLOATING_SEARCH_RECT = Object.freeze({ x: 8, y: 48, width: 240, height: 190 });
 
 /** Default property renderer, kept so the brand toggle can be undone. */
 const DEFAULT_STRING_RENDERER = createDefaultPropertyRenderers().get("string");
@@ -297,7 +302,29 @@ export function Workspace(props: { readonly editor: EditorEngine }): ReactNode {
       data-demo-app=""
       style={{ display: "flex", flex: 1, minWidth: 0, minHeight: 0 }}
     >
-      <div style={{ display: "flex", flex: 1, minWidth: 0, minHeight: 0 }}>
+      {/*
+        The host owns stacking between the shell's overlay layer (canvas
+        overlays live at z-index 1 inside the shell) and external chrome it
+        mounts next to it: raising the shell above the external column keeps a
+        floating overlay panel clickable instead of being covered by it.
+      */}
+      <div
+        style={{
+          display: "flex",
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+          position: "relative",
+          zIndex: 2,
+          /*
+           * Panel widths are fixed (palette 250, properties 300): on a narrow
+           * window the shell would otherwise overflow and let one region paint
+           * over the canvas and its overlays. Scrolling keeps every region
+           * clickable instead of stacking them on top of each other.
+           */
+          overflow: "auto",
+        }}
+      >
         <EditorShell
           onResizeRegion={(region: DockRegion, size: number) => {
             // `panelIdForRegion` is the documented mapping from a shell region to
@@ -485,10 +512,10 @@ export function Workspace(props: { readonly editor: EditorEngine }): ReactNode {
                         className="demo-floating"
                         data-demo-floating="search"
                         style={{
-                          left: searchFloating.rect?.x ?? 300,
-                          top: searchFloating.rect?.y ?? 96,
-                          width: searchFloating.rect?.width ?? 330,
-                          height: searchFloating.rect?.height ?? 210,
+                          left: searchFloating.rect?.x ?? 8,
+                          top: searchFloating.rect?.y ?? 48,
+                          width: searchFloating.rect?.width ?? 240,
+                          height: searchFloating.rect?.height ?? 190,
                         }}
                       >
                         <PanelHost panelId="search" />
@@ -551,6 +578,8 @@ export function Workspace(props: { readonly editor: EditorEngine }): ReactNode {
           flexDirection: "column",
           width: 260,
           minWidth: 0,
+          position: "relative",
+          zIndex: 1,
           borderLeft: "1px solid var(--ndr-colors-border, #d8dee9)",
           background: "var(--ndr-colors-surface, #ffffff)",
           overflow: "auto",

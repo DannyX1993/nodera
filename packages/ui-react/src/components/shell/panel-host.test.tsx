@@ -125,3 +125,17 @@ describe("PanelHost", () => {
     expect(screen.queryByRole("button", { name: "Hide Header" })).toBeNull();
   });
 });
+
+describe("PanelHost pointer interaction", () => {
+  it("opts into pointer events so a panel mounted in a pointer-transparent overlay stays interactive", () => {
+    // Regression pin: CanvasContainer overlays are `pointer-events: none`; a panel
+    // placed there (search, floating panels) must opt in or it cannot be used.
+    const renderers = createComponentRenderers();
+    renderers.panels.register("nodera.panel.palette", CustomPanel);
+    const { container } = renderWithUi(<PanelHost panelId="palette" />, { renderers });
+
+    const chrome = container.querySelector<HTMLElement>('[data-nodera-panel-id="palette"]');
+    expect(chrome).not.toBeNull();
+    expect(chrome?.style.pointerEvents).toBe("auto");
+  });
+});

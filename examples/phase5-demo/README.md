@@ -90,3 +90,12 @@ completamente diferentes" means in practice.
   None of it enters the portable document.
 - The demo may be deleted without touching the framework: it only consumes the
   public entry points of the packages.
+
+## Window size
+
+The demo composes panels with fixed widths (palette 250, properties 300, the
+external metadata column 260). Below roughly 1100 px of window width those
+columns compete for space and the shell scrolls; use a normal desktop window to
+evaluate the composition. Floating rectangles are host-owned pixels relative to
+the canvas container, so they must stay inside it — an overlay that overflows
+lands under the host's own chrome and stops taking clicks.

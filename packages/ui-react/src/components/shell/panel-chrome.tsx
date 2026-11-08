@@ -21,6 +21,12 @@ export interface PanelChromeProps {
 }
 
 const PANEL_STYLE: CSSProperties = {
+  /**
+   * Panels are interactive surfaces. A host may mount them inside the
+   * pointer-transparent overlay layer of `CanvasContainer` (a floating panel or
+   * the search panel), where they must opt in to receive pointer events.
+   */
+  pointerEvents: "auto",
   display: "flex",
   flexDirection: "column",
   flex: 1,

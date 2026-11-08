@@ -488,3 +488,52 @@ describe("ContextMenu menu renderer replacement", () => {
     expect(container.querySelector('[data-testid="brand-menu"]')).toBeNull();
   });
 });
+
+describe("ContextMenu pointer interaction", () => {
+  it("opts into pointer events so a menu rendered inside a pointer-transparent overlay stays clickable", () => {
+    // Regression pin: CanvasContainer renders overlays with `pointer-events: none`
+    // and overlay content must opt in; without this the menu is visible but blind.
+    const { container } = renderMenu({ targetKind: "pane" });
+
+    const root = container.querySelector<HTMLElement>("[data-nodera-context-menu]");
+    expect(root).not.toBeNull();
+    expect(root?.style.pointerEvents).toBe("auto");
+  });
+
+  it("highlights the hovered item and clears the highlight when the pointer leaves", () => {
+    const tools: readonly ToolDefinition[] = [
+      { id: "acme.first", label: "First", command: { kind: "validate" } },
+      { id: "acme.second", label: "Second", command: { kind: "validate" } },
+    ];
+    const { container } = renderMenu({ targetKind: "pane", tools });
+
+    const first = container.querySelector<HTMLButtonElement>('[data-nodera-menu-item="acme.first"]');
+    const second = container.querySelector<HTMLButtonElement>('[data-nodera-menu-item="acme.second"]');
+    expect(second).not.toBeNull();
+    // The menu focuses its first enabled item on open, so only that one is
+    // highlighted before any pointer movement.
+    expect(first?.getAttribute("data-nodera-menu-item-hovered")).not.toBeNull();
+    expect(second?.getAttribute("data-nodera-menu-item-hovered")).toBeNull();
+
+    fireEvent.pointerEnter(second as HTMLButtonElement);
+    expect(second?.getAttribute("data-nodera-menu-item-hovered")).not.toBeNull();
+    expect((second as HTMLButtonElement).style.backgroundColor).toContain(
+      "var(--ndr-colors-surface-alt",
+    );
+
+    fireEvent.pointerLeave(second as HTMLButtonElement);
+    expect(second?.getAttribute("data-nodera-menu-item-hovered")).toBeNull();
+  });
+
+  it("highlights the focused item for keyboard users", () => {
+    const { container } = renderMenu({ targetKind: "pane", tools: TARGET_TOOLS });
+
+    const item = container.querySelector<HTMLButtonElement>('[data-nodera-menu-item="acme.always"]');
+
+    fireEvent.focus(item as HTMLButtonElement);
+    expect(item?.getAttribute("data-nodera-menu-item-hovered")).not.toBeNull();
+
+    fireEvent.blur(item as HTMLButtonElement);
+    expect(item?.getAttribute("data-nodera-menu-item-hovered")).toBeNull();
+  });
+});

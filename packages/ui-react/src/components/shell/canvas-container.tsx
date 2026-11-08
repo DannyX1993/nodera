@@ -34,7 +34,10 @@ const OVERLAY_STYLE: CSSProperties = {
   zIndex: 1,
   /*
    * Overlays must not intercept canvas pointers; overlay content opts into
-   * pointer events itself.
+   * pointer events itself (`PanelChrome` and `ContextMenu` do). The layer sits
+   * at `z-index: 1` inside the host's stacking context, so a host that mounts
+   * its own chrome as a later sibling with a higher stacking order must raise
+   * the shell's z-index instead of expecting overlays to float above it.
    */
   pointerEvents: "none",
 };

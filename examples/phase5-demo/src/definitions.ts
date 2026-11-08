@@ -209,7 +209,10 @@ export const DEMO_WORKSPACE_LAYOUT: LayoutDefinition = Object.freeze({
       panelId: "search",
       region: "floating" as const,
       size: 300,
-      rect: Object.freeze({ x: 300, y: 96, width: 330, height: 210 }),
+      // Floating rectangles are host-owned pixels relative to the canvas
+      // container: keep them inside it so the overlay never slides under the
+      // host's own chrome (the external metadata column next to the shell).
+      rect: Object.freeze({ x: 8, y: 48, width: 240, height: 190 }),
     }),
   ]),
 }) as LayoutDefinition;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import {
   isToolAvailable,
@@ -49,6 +49,13 @@ export const CONTEXT_MENU_DANGER_CLASS = "nodera-context-menu-danger";
 
 const MENU_STYLE: CSSProperties = {
   position: "fixed",
+  /**
+   * A menu is an interactive popup: it must receive pointer events even when
+   * the host mounts it inside a pointer-transparent overlay
+   * (`CanvasContainer` overlays are `pointer-events: none` by design). Without
+   * this the menu paints but every click lands on the canvas underneath.
+   */
+  pointerEvents: "auto",
   display: "flex",
   flexDirection: "column",
   gap: "var(--ndr-spacing-xs, 2px)",
@@ -60,6 +67,12 @@ const MENU_STYLE: CSSProperties = {
   zIndex: 1,
   ...SURFACE_STYLE,
   ...TEXT_STYLE,
+};
+
+/** Visual feedback for the hovered or focused item (tokens, not hard colours). */
+const HIGHLIGHT_STYLE: CSSProperties = {
+  backgroundColor: "var(--ndr-colors-surface-alt, #f1f5f9)",
+  color: "var(--ndr-colors-text, #111827)",
 };
 
 const ITEM_STYLE: CSSProperties = {
@@ -242,21 +255,26 @@ interface MenuButtonProps {
 function MenuButton(props: MenuButtonProps): ReactNode {
   const danger = props.tool.danger === true;
   const enabled = isToolAvailable(props.tool, props.availability);
-  const style = !enabled
-    ? { ...ITEM_STYLE, ...DISABLED_STYLE }
-    : danger
-      ? { ...ITEM_STYLE, ...DANGER_STYLE }
-      : ITEM_STYLE;
+  // Inline styles cannot express `:hover`, so the highlight is pointer/keyboard
+  // driven state. Hover and focus share it: both mean "this item is targeted".
+  const [highlighted, setHighlighted] = useState(false);
+  const base = !enabled ? { ...ITEM_STYLE, ...DISABLED_STYLE } : danger ? { ...ITEM_STYLE, ...DANGER_STYLE } : ITEM_STYLE;
+  const style = highlighted && enabled ? { ...base, ...HIGHLIGHT_STYLE } : base;
   return (
     <button
       type="button"
       role="menuitem"
       data-nodera-menu-item={props.tool.id}
+      {...(highlighted ? { "data-nodera-menu-item-hovered": "" } : {})}
       aria-label={props.tool.label}
       title={props.tool.description ?? props.tool.label}
       disabled={!enabled}
       className={danger ? CONTEXT_MENU_DANGER_CLASS : undefined}
       onClick={props.onActivate}
+      onPointerEnter={() => setHighlighted(true)}
+      onPointerLeave={() => setHighlighted(false)}
+      onFocus={() => setHighlighted(true)}
+      onBlur={() => setHighlighted(false)}
       style={style}
     >
       {props.tool.icon === undefined ? null : (
