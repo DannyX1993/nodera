@@ -15,6 +15,12 @@
  *    `@nodera/canvas-react-flow`: the React UI layer composes the adapter from
  *    the host's side, it does not own it.
  * 4. No package outside `packages/canvas-react-flow` imports `@xyflow/react`.
+ * 5. `packages/sdk` is framework- and engine-free: its sources never import
+ *    React, React DOM, `@nodera/ui-react`, `@nodera/canvas-react-flow` or
+ *    `@xyflow`, and its manifest never declares them. The public SDK composes
+ *    the framework-free core only; presentation arrives through the adapter.
+ * 6. `packages/sdk-react` depends on `@nodera/canvas-react-flow` and never on
+ *    `@xyflow/react`: a binding selects an engine, it does not reimplement one.
  *
  * Plain Node ESM, builtins only: the check must be runnable without installing
  * anything and without a bundler (`node scripts/check-architecture.mjs`).
@@ -257,6 +263,116 @@ async function checkReactFlowIsAdapterOnly() {
   return violations;
 }
 
+/** The framework-free public SDK. */
+const SDK_PACKAGE = "sdk";
+/** The React binding of the SDK. */
+const SDK_REACT_PACKAGE = "sdk-react";
+
+/**
+ * Modules `packages/sdk` may never import.
+ *
+ * Matched against real module specifiers and manifest keys, never against free
+ * text: adapter ids such as `nodera.react-flow` are data and must stay legal.
+ */
+const SDK_FORBIDDEN_MODULES = [
+  { pattern: /^react$/, reason: "React belongs to @nodera/sdk-react" },
+  { pattern: /^react\//, reason: "React belongs to @nodera/sdk-react" },
+  { pattern: /^react-dom(\/|$)/, reason: "the SDK runs headless, with no DOM" },
+  { pattern: /^@nodera\/ui-react(\/|$)/, reason: "the SDK is framework-free; presentation belongs to a binding" },
+  {
+    pattern: /^@nodera\/canvas-react-flow(\/|$)/,
+    reason: "the SDK is engine-free; the canvas adapter belongs to a binding",
+  },
+  { pattern: /^@xyflow(\/|$)/, reason: "React Flow lives in packages/canvas-react-flow" },
+];
+
+/** Manifest dependency fields the SDK rule inspects. */
+const DEPENDENCY_FIELDS = [
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+];
+
+/** Reads a package manifest, or `undefined` when the package has none. */
+async function readManifest(packageName) {
+  const path = join(PACKAGES_ROOT, packageName, "package.json");
+  const text = await readFile(path, "utf8").catch(() => undefined);
+  if (text === undefined) {
+    return undefined;
+  }
+  return { path, text, json: JSON.parse(text) };
+}
+
+/** Rule 5: the public SDK never reaches a framework or an engine. */
+async function checkSdkIsFrameworkFree() {
+  const violations = [];
+  const { files } = await packageSources(SDK_PACKAGE);
+  for (const file of files) {
+    const text = await readFile(file, "utf8");
+    for (const { specifier, line } of moduleSpecifiers(text)) {
+      const forbidden = SDK_FORBIDDEN_MODULES.find((entry) => entry.pattern.test(specifier));
+      if (forbidden !== undefined) {
+        violations.push(
+          violation(file, line, `packages/${SDK_PACKAGE} imports "${specifier}" — ${forbidden.reason}`),
+        );
+      }
+    }
+  }
+
+  const manifest = await readManifest(SDK_PACKAGE);
+  for (const field of DEPENDENCY_FIELDS) {
+    for (const name of Object.keys(manifest?.json[field] ?? {})) {
+      const forbidden = SDK_FORBIDDEN_MODULES.find((entry) => entry.pattern.test(name));
+      if (forbidden !== undefined) {
+        const index = manifest.text.indexOf(`"${name}"`);
+        violations.push(
+          violation(
+            manifest.path,
+            index === -1 ? 1 : lineAt(manifest.text, index),
+            `packages/${SDK_PACKAGE}/package.json declares "${name}" — ${forbidden.reason}`,
+          ),
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+/** Rule 6: the React binding selects an engine instead of reimplementing one. */
+async function checkSdkReactDeclaresTheAdapter() {
+  const manifest = await readManifest(SDK_REACT_PACKAGE);
+  if (manifest === undefined) {
+    return [];
+  }
+  const declared = {
+    ...(manifest.json.dependencies ?? {}),
+    ...(manifest.json.peerDependencies ?? {}),
+  };
+  const violations = [];
+  if (!(CANVAS_ADAPTER_SPECIFIER in declared)) {
+    violations.push(
+      violation(
+        manifest.path,
+        1,
+        `packages/${SDK_REACT_PACKAGE} must depend on "${CANVAS_ADAPTER_SPECIFIER}": a binding selects an engine, it does not reimplement one`,
+      ),
+    );
+  }
+  for (const name of Object.keys({ ...declared, ...(manifest.json.devDependencies ?? {}) })) {
+    if (REACT_FLOW_SPECIFIER.test(name)) {
+      violations.push(
+        violation(
+          manifest.path,
+          lineAt(manifest.text, Math.max(manifest.text.indexOf(`"${name}"`), 0)),
+          `packages/${SDK_REACT_PACKAGE}/package.json declares "${name}" — the binding goes through "${CANVAS_ADAPTER_SPECIFIER}"`,
+        ),
+      );
+    }
+  }
+  return violations;
+}
+
 /** Rules the script enforces, in reporting order. */
 const RULES = [
   {
@@ -279,6 +395,16 @@ const RULES = [
     id: "react-flow-adapter-only",
     label: "no package outside packages/canvas-react-flow imports @xyflow/react",
     run: checkReactFlowIsAdapterOnly,
+  },
+  {
+    id: "sdk-framework-free",
+    label: "packages/sdk imports no React, React Flow, ui-react or canvas adapter",
+    run: checkSdkIsFrameworkFree,
+  },
+  {
+    id: "sdk-react-declares-the-adapter",
+    label: "packages/sdk-react depends on the canvas adapter and never on @xyflow/react",
+    run: checkSdkReactDeclaresTheAdapter,
   },
 ];
 
