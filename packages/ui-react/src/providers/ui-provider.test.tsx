@@ -7,9 +7,11 @@ import { DARK_THEME_ID, DEFAULT_THEME_ID, ThemeRegistry } from "@nodera/theme-en
 import { UiStateStore } from "@nodera/ui-core";
 
 import { createDefaultPanelRegistry } from "../defaults/default-panels.js";
+import { createTestEditor } from "../test/fixtures.js";
 import {
   NoderaUiProvider,
   useComponentRenderers,
+  useEditorEngine,
   useLayoutRegistry,
   useNoderaUi,
   usePanelRegistry,
@@ -185,5 +187,55 @@ describe("theme variables", () => {
     });
 
     expect(screen.getByTestId("query").textContent).toBe("needle");
+  });
+});
+
+describe("useEditorEngine", () => {
+  it("returns the editor the host supplied", () => {
+    const editor = createTestEditor();
+
+    const { result } = renderHook(() => useEditorEngine(), {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <NoderaUiProvider store={createStore()} editor={editor}>
+          {children}
+        </NoderaUiProvider>
+      ),
+    });
+
+    expect(result.current).toBe(editor);
+  });
+
+  it("exposes the editor through useNoderaUi", () => {
+    const editor = createTestEditor();
+
+    const { result } = renderHook(() => useNoderaUi().editor, {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <NoderaUiProvider store={createStore()} editor={editor}>
+          {children}
+        </NoderaUiProvider>
+      ),
+    });
+
+    expect(result.current).toBe(editor);
+  });
+
+  it("reports the editor as undefined through useNoderaUi when the host supplies none", () => {
+    const { result } = renderHook(() => useNoderaUi().editor, {
+      wrapper: wrapperFor(createStore()),
+    });
+
+    expect(result.current).toBeUndefined();
+  });
+
+  it("throws the documented error when the provider has no editor", () => {
+    expect(() =>
+      renderHook(() => useEditorEngine(), { wrapper: wrapperFor(createStore()) }),
+    ).toThrow("useEditorEngine requires an editor on <NoderaUiProvider>");
+  });
+
+  it("throws the documented error outside the provider", () => {
+    expect(() => renderHook(() => useEditorEngine())).toThrow(
+      "useEditorEngine requires an editor on <NoderaUiProvider>",
+    );
   });
 });

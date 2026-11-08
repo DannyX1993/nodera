@@ -19,6 +19,7 @@
     "@nodera/graph-model": "workspace:*",
     "@nodera/node-registry": "workspace:*",
     "@nodera/property-system": "workspace:*",
+    "@nodera/ui-core": "workspace:*",
     "@xyflow/react": "^12.12.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

@@ -6,8 +6,10 @@
  * function, component or React Flow object ever travels through the drop.
  */
 
-/** MIME type carrying a node definition id from a palette drag. */
-export const NODE_DEFINITION_MIME_TYPE = "application/nodera-node-definition";
+import { NODE_DEFINITION_MIME_TYPE as SHARED_NODE_DEFINITION_MIME_TYPE } from "@nodera/ui-core";
+
+/** MIME type carrying a node definition id from a palette drag (shared ui contract). */
+export const NODE_DEFINITION_MIME_TYPE = SHARED_NODE_DEFINITION_MIME_TYPE;
 
 /** Narrow structural view of the drag payload the canvas reads. */
 interface DataTransferReader {

@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 
+import type { EditorEngine } from "@nodera/application";
 import { LayoutRegistry } from "@nodera/layout-engine";
 import { ThemeRegistry, type ThemeDefinition } from "@nodera/theme-engine";
 import {
@@ -37,6 +38,12 @@ export interface NoderaUiRegistries {
 export interface NoderaUiProviderProps {
   /** Framework-agnostic UI state store. The host owns its lifetime. */
   readonly store: UiStateStore;
+  /**
+   * Editor the UI surfaces bind to. Optional because panels that only read UI
+   * state (a header, a theme picker) never need a graph, and because the
+   * provider must stay usable without an application session.
+   */
+  readonly editor?: EditorEngine;
   /** Themes the UI can apply. Defaults to the built-in registry. */
   readonly themeRegistry?: ThemeRegistry;
   /** Layouts the shell can apply. Defaults to the built-in registry. */
@@ -53,6 +60,8 @@ export interface NoderaUiProviderProps {
 /** Value of the UI context. */
 export interface NoderaUiContextValue extends NoderaUiRegistries {
   readonly store: UiStateStore;
+  /** Live editor the host supplied, if any. */
+  readonly editor: EditorEngine | undefined;
 }
 
 const NoderaUiContext = createContext<NoderaUiContextValue | undefined>(undefined);
@@ -84,10 +93,11 @@ export function NoderaUiProvider(props: NoderaUiProviderProps): ReactNode {
   const toolRegistry = props.toolRegistry ?? defaults.toolRegistry;
   const renderers = props.renderers ?? defaults.renderers;
   const store = props.store;
+  const editor = props.editor;
 
   const value = useMemo<NoderaUiContextValue>(
-    () => ({ store, themeRegistry, layoutRegistry, panelRegistry, toolRegistry, renderers }),
-    [store, themeRegistry, layoutRegistry, panelRegistry, toolRegistry, renderers],
+    () => ({ store, editor, themeRegistry, layoutRegistry, panelRegistry, toolRegistry, renderers }),
+    [store, editor, themeRegistry, layoutRegistry, panelRegistry, toolRegistry, renderers],
   );
 
   return (
@@ -123,6 +133,23 @@ export function useNoderaUi(): NoderaUiContextValue {
     throw new Error("useNoderaUi must be used inside <NoderaUiProvider>");
   }
   return value;
+}
+
+/**
+ * Editor the UI surfaces bind to.
+ *
+ * Throws instead of returning `undefined` because a surface that asks for the
+ * editor cannot render anything meaningful without one: failing loudly at the
+ * composition boundary beats rendering a silently empty graph panel. The same
+ * message covers the two ways to be misconfigured: composing the surface
+ * outside the provider, or inside a provider the host did not give an editor.
+ */
+export function useEditorEngine(): EditorEngine {
+  const editor = useContext(NoderaUiContext)?.editor;
+  if (editor === undefined) {
+    throw new Error("useEditorEngine requires an editor on <NoderaUiProvider>");
+  }
+  return editor;
 }
 
 /** Current immutable UI state, re-rendering on every store change. */
