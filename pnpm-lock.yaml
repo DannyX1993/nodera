@@ -298,7 +298,18 @@ importers:
         specifier: ^3.0.5
         version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  packages/layout-engine: {}
+  packages/layout-engine:
+    dependencies:
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@nodera/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
+    devDependencies:
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
   packages/node-registry:
     dependencies:
@@ -375,9 +386,25 @@ importers:
 
   packages/testing: {}
 
-  packages/theme-engine: {}
+  packages/theme-engine:
+    dependencies:
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  packages/ui-core: {}
+  packages/ui-core:
+    dependencies:
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
   packages/ui-react: {}
 
