@@ -1,0 +1,76 @@
+# Layout-switch demo
+
+A runnable host application that switches how a Nodera graph is laid out, and
+adds nodes through the built-in node-creation dialog — all from **its own** UI.
+
+```sh
+pnpm --filter @nodera/layout-switch-demo dev      # http://127.0.0.1:5177
+pnpm --filter @nodera/layout-switch-demo build    # production bundle
+pnpm --filter @nodera/layout-switch-demo typecheck
+```
+
+The demo imports `@nodera/sdk`, `@nodera/react-flow` and `@nodera/ui-react` and
+nothing else from the workspace. Its dependency set is the same one
+`examples/phase6-demo` declares (plus `@nodera/ui-react` for the dialog and the
+"+" affordance); it adds no external package and no styling framework.
+
+## What it demonstrates
+
+The graph is a five-node pipeline (`ingest → parse, enrich → score → publish`)
+seeded through `builder.graph.addNode` **without positions**. The builder
+declares `graph.layout: { mode: "auto", direction: "horizontal", spacing: 240,
+rankSpacing: 280 }`, so the seed nodes are first placed on a deterministic grid.
+
+| Control      | What it calls                                                        |
+| ------------ | -------------------------------------------------------------------- |
+| Strategy     | `builder.graphLayout.setDefault(id)` — `…layered` or `…free`          |
+| Direction    | passed to `builder.graph.arrange({ direction })`                      |
+| Spacing      | passed to `builder.graph.arrange({ spacing })`                        |
+| Rank spacing | passed to `builder.graph.arrange({ rankSpacing })`                    |
+| Arrange      | `builder.graph.arrange({ direction, spacing, rankSpacing })`          |
+| "+"          | `CreateNodeButton` → the built-in node-creation dialog               |
+
+Pressing **Arrange** is the only thing that re-places nodes. It is one explicit
+action and one history unit: `builder.graph.undo()` puts every previous position
+back (including the absence of a position). Selecting
+`nodera.graph-layout.free` makes the next Arrange an honest no-op that moves
+nothing and pushes no history entry.
+
+The **overrides are per call**: they win for that one Arrange and are never
+stored. Clear a spacing field (or type `0`) and press Arrange to see the SDK
+refuse the switch with an `sdk.invalid-input` diagnostic at `spacing` or
+`rankSpacing` — the status line prints it and nothing moves.
+
+The **"+"** button opens the framework's node-creation dialog, which lists the
+definitions the host registered. The host handles the selection itself and adds
+the node with `builder.graph.addNode`, so `mode: "auto"` gives it a free slot;
+the status line reports where it landed. Press Arrange to rank it with the rest.
+
+## The switching belongs to the host
+
+There is no framework toggle for placement. The Nodera SDK ships configuration
+(`graph.layout`) and one explicit command (`graph.arrange(options?)`), and the
+React Flow binding renders the canvas from the document. The strategy select,
+the direction select, the two number fields, the Arrange button and the "+"
+affordance in `src/app.tsx` are plain host HTML/CSS **above** the canvas — never
+inside it — and every one of them calls the public SDK. A host that wants its
+own placement UI writes exactly this page; the framework still adds none.
+
+## Files
+
+| File              | Role                                                          |
+| ----------------- | ------------------------------------------------------------- |
+| `src/main.tsx`    | Mounts the app inside `NoderaBuilderProvider`; loads the canvas engine stylesheet |
+| `src/builder.ts`  | The whole composition: one `createBuilder`, seeded graph       |
+| `src/nodes.ts`    | Three node definitions (the vocabulary the dialog offers)      |
+| `src/app.tsx`     | The host controls, the status line and `<NoderaEditor>`        |
+| `index.html`      | Host chrome only (this demo's own page layout)                 |
+
+## Limitations, stated rather than hidden
+
+- No node renderers are registered: the binding's default node renderer draws
+  the three definitions. This demo is about placement, not drawing.
+- The layered strategy ranks by longest path and orders each rank by node id. It
+  does no crossing minimization and produces no edge bend points.
+- The status line is the only observability: the host reports its own
+  diagnostics instead of relying on a console.

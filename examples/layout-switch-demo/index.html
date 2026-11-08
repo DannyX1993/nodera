@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nodera layout-switch demo — the host switches the graph layout</title>
+    <style>
+      /*
+       * Host chrome only.
+       *
+       * The editor surfaces are styled by the framework with `var(--ndr-*)`
+       * tokens, and the canvas engine ships its own stylesheet, which this host
+       * imports from `src/main.tsx`. Everything below fills the viewport,
+       * styles this demo's own controls above the canvas, and supplies the
+       * token values the framework chrome reads. The host owns the layout of
+       * its own page; it never styles inside the canvas.
+       */
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        background: #0b1220;
+        color: #e5e9f0;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 13px;
+      }
+
+      .demo-host {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        height: 100%;
+        padding: 6px;
+        box-sizing: border-box;
+      }
+
+      .demo-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 6px 8px;
+        border: 1px solid #24344d;
+        border-radius: 6px;
+        background: #131c2b;
+      }
+
+      .demo-bar h1 {
+        margin: 0 8px 0 0;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .demo-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: #94a3b8;
+        font-size: 11px;
+      }
+
+      .demo-select,
+      .demo-number,
+      .demo-button {
+        padding: 3px 7px;
+        border: 1px solid #2f3b4f;
+        border-radius: 5px;
+        background: #1a2333;
+        color: #e5e9f0;
+        font-family: inherit;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+
+      .demo-number {
+        width: 64px;
+      }
+
+      .demo-button {
+        cursor: pointer;
+      }
+
+      .demo-button:hover {
+        border-color: #f59e0b;
+      }
+
+      .demo-status {
+        margin: 0;
+        padding: 4px 8px;
+        border: 1px solid #24344d;
+        border-radius: 5px;
+        background: #0f1726;
+        color: #cbd5e1;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+        font-size: 11px;
+        white-space: pre-wrap;
+      }
+
+      .demo-canvas {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        border: 1px solid #24344d;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .demo-canvas [data-nodera-theme] {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background: var(--ndr-colors-background, #f8fafc);
+        color: var(--ndr-colors-text, #111827);
+        font-family: var(--ndr-typography-font-family, system-ui);
+        font-size: var(--ndr-typography-font-size-md, 13px);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

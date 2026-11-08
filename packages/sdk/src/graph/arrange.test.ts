@@ -14,10 +14,13 @@ import type { Result } from "@nodera/contracts";
 import type { NodeDefinitionInput } from "../authoring/nodes.js";
 import { createBuilder, type Builder } from "../builder/builder.js";
 import type { BuilderConfiguration, BuilderGraphConfiguration } from "../builder/configuration.js";
+import type { SdkIssues } from "../errors.js";
+import type { ArrangeRequest } from "./graph-api.js";
 import type { NodeInstanceView } from "../view/instances.js";
 import type {
   GraphLayoutDiagnostic,
   GraphLayoutInput,
+  GraphLayoutOptions,
   GraphLayoutResult,
   GraphLayoutStrategy,
 } from "../vocabulary.js";
@@ -137,6 +140,46 @@ function hostStrategy(id = "acme.dagre"): GraphLayoutStrategy {
 /** A host strategy that refuses to arrange, with a structured diagnostic. */
 function refusingStrategy(diagnostic: GraphLayoutDiagnostic): GraphLayoutStrategy {
   return { id: "acme.refusing", place: () => err(diagnostic) };
+}
+
+/**
+ * A host strategy that records the options it was asked with.
+ *
+ * It observes the placement request an override produces without the test
+ * reading anything the host cannot see.
+ */
+function recordingStrategy(calls: GraphLayoutOptions[]): GraphLayoutStrategy {
+  return {
+    id: "acme.recording",
+    place(input: GraphLayoutInput): Result<GraphLayoutResult, GraphLayoutDiagnostic> {
+      calls.push(input.options);
+      return ok<GraphLayoutResult>({
+        positions: input.nodes.map((node) => ({ nodeId: node.id, position: { x: 0, y: 0 } })),
+      });
+    },
+  };
+}
+
+/**
+ * Calls `arrange` with a request the SDK types would reject.
+ *
+ * The refusal tables below describe hosts that bypass the types; the runtime
+ * boundary is what has to hold, so the cast stays here and nowhere else.
+ */
+function arrangeUnchecked(
+  builder: Builder,
+  request: unknown,
+): Result<readonly NodeInstanceView[], SdkIssues> {
+  return builder.graph.arrange(request as ArrangeRequest | undefined);
+}
+
+/** Two sources feeding one node: two ranks, and two nodes in the first one. */
+function diamond(builder: Builder): void {
+  added(builder, "a");
+  added(builder, "b");
+  added(builder, "c");
+  connected(builder, "a", "c");
+  connected(builder, "b", "c");
 }
 
 describe("graph arrange: the strategy the host selected", () => {
@@ -264,7 +307,132 @@ describe("graph arrange: a strategy that refuses", () => {
   });
 });
 
+describe("graph arrange: per-call overrides", () => {
+  it("applies a per-call direction override on top of the configured direction", () => {
+    const builder = builderWith();
+    chain(builder);
+    arranged(builder);
+    expect(positions(builder)).toEqual({
+      start: { x: 0, y: 0 },
+      work: { x: 240, y: 0 },
+    });
+
+    const moved = builder.graph.arrange({ direction: "vertical" });
+    if (!moved.ok) {
+      throw new Error(
+        `unexpected arrange failure: ${moved.error.map((issue) => issue.code).join(", ")}`,
+      );
+    }
+    expect(moved.value).toHaveLength(2);
+    expect(positions(builder)).toEqual({
+      start: { x: 0, y: 0 },
+      work: { x: 0, y: 240 },
+    });
+  });
+
+  it("persists nothing: the configured direction wins again on the next arrange", () => {
+    const builder = builderWith({ direction: "horizontal" });
+    chain(builder);
+
+    builder.graph.arrange({ direction: "vertical" });
+    expect(positions(builder)).toEqual({
+      start: { x: 0, y: 0 },
+      work: { x: 0, y: 240 },
+    });
+
+    arranged(builder);
+    expect(positions(builder)).toEqual({
+      start: { x: 0, y: 0 },
+      work: { x: 240, y: 0 },
+    });
+  });
+
+  it("passes per-call spacing and rankSpacing to the selected strategy", () => {
+    const calls: GraphLayoutOptions[] = [];
+    const builder = builderWith({ direction: "vertical", spacing: 120, rankSpacing: 300 });
+    chain(builder);
+    expect(builder.graphLayout.register(recordingStrategy(calls)).ok).toBe(true);
+    expect(builder.graphLayout.setDefault("acme.recording").ok).toBe(true);
+
+    builder.graph.arrange({ spacing: 90, rankSpacing: 400 });
+    expect(calls).toEqual([
+      { direction: "vertical", nodeSpacing: 90, rankSpacing: 400, scope: "all" },
+    ]);
+
+    arranged(builder);
+    expect(calls[1]).toEqual({
+      direction: "vertical",
+      nodeSpacing: 120,
+      rankSpacing: 300,
+      scope: "all",
+    });
+  });
+
+  it("changes the applied positions of the layered strategy with the overrides", () => {
+    const builder = builderWith();
+    diamond(builder);
+
+    arranged(builder);
+    expect(positions(builder)).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 0, y: 240 },
+      c: { x: 240, y: 0 },
+    });
+
+    builder.graph.arrange({ spacing: 100, rankSpacing: 500 });
+    expect(positions(builder)).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 0, y: 100 },
+      c: { x: 500, y: 0 },
+    });
+  });
+
+  const invalidOverrides: readonly {
+    readonly request: unknown;
+    readonly path: readonly string[];
+  }[] = [
+    { request: { direction: "diagonal" }, path: ["direction"] },
+    { request: { spacing: 0 }, path: ["spacing"] },
+    { request: { spacing: Number.NaN }, path: ["spacing"] },
+    { request: { spacing: "240" }, path: ["spacing"] },
+    { request: { rankSpacing: -240 }, path: ["rankSpacing"] },
+    { request: { rankSpacing: Number.POSITIVE_INFINITY }, path: ["rankSpacing"] },
+    { request: null, path: ["request"] },
+  ];
+
+  it.each(invalidOverrides)("refuses an invalid override at $path and moves nothing", ({
+    request,
+    path,
+  }) => {
+    const builder = builderWith();
+    chain(builder);
+    arranged(builder);
+    const before = positions(builder);
+
+    const result = arrangeUnchecked(builder, request);
+    if (result.ok) {
+      throw new Error("expected the invalid override to be refused");
+    }
+    expect(result.error[0]?.code).toBe("sdk.invalid-input");
+    expect(result.error[0]?.path).toEqual(path);
+    expect(positions(builder)).toEqual(before);
+  });
+});
+
 describe("graph arrange: lifecycle", () => {
+  it("refuses to arrange with an override on a disposed builder", () => {
+    const builder = builderWith();
+    chain(builder);
+    builder.dispose();
+
+    const result = builder.graph.arrange({ direction: "vertical" });
+    if (result.ok) {
+      throw new Error("expected a disposed builder to refuse an override");
+    }
+    expect(result.error[0]?.code).toBe("sdk.disposed");
+    expect(builder.graph.nodes().every((node) => node.position === undefined)).toBe(true);
+  });
+
   it("refuses to arrange on a disposed builder", () => {
     const builder = builderWith();
     chain(builder);

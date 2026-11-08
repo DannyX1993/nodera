@@ -84,6 +84,24 @@ export interface SelectRequest {
 }
 
 /**
+ * Per-call overrides of the placement `arrange` was configured with.
+ *
+ * A value supplied here wins over `graph.layout` for the one explicit action
+ * that carries it and persists nothing: the next `arrange()` without a request
+ * reads the builder configuration again. It is the host's own action, not an
+ * editor toggle (S4, S16), and a value outside these rules is refused without
+ * moving a single node.
+ */
+export interface ArrangeRequest {
+  /** Axis the ranks advance along; defaults to `graph.layout.direction`. */
+  readonly direction?: "horizontal" | "vertical";
+  /** Distance between in-rank neighbours; defaults to `graph.layout.spacing`. */
+  readonly spacing?: number;
+  /** Distance between consecutive ranks; defaults to the configured rank spacing. */
+  readonly rankSpacing?: number;
+}
+
+/**
  * What an explicit `Arrange` reads from the composition: the registry the
  * selected strategy is resolved from, and the rank distance the host declared.
  *
@@ -123,8 +141,14 @@ export interface BuilderGraphApi {
    * position moves nothing. An answer with no position at all — the `free`
    * strategy, an empty graph — is an honest no-op that pushes no history entry.
    * Returns the moved nodes in the §9 instance vocabulary.
+   *
+   * A `request` overrides the configured direction and spacings for this one
+   * call. The rules are the configuration's own: an unknown direction or a
+   * spacing that is not a positive finite number is `sdk.invalid-input` at its
+   * field path, nothing is applied, and the next call without a request uses
+   * the configured values again (S16).
    */
-  arrange(): Result<readonly NodeInstanceView[], SdkIssues>;
+  arrange(request?: ArrangeRequest): Result<readonly NodeInstanceView[], SdkIssues>;
   /** Every node of the graph, in the §9 instance vocabulary. */
   nodes(): readonly NodeInstanceView[];
   /** Every edge of the graph, flat, in the §9 instance vocabulary. */
@@ -263,6 +287,48 @@ function selectionIssues(
   return undefined;
 }
 
+/**
+ * Issues of a per-call `arrange` override.
+ *
+ * The rules are the configuration's own — the direction is one of two values and
+ * both spacings are positive finite numbers — so a host cannot switch the
+ * geometry into a shape `graph.layout` would have refused. The path names the
+ * field of the request, which is the input the caller actually wrote; a request
+ * that is not an object at all is reported at `request`.
+ */
+function arrangeRequestIssues(request: unknown): SdkIssues | undefined {
+  if (!isPlainObject(request)) {
+    return [
+      shapeIssue(
+        "An arrange request must be an object overriding the direction and the spacings",
+        request,
+        ["request"],
+      ),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  const direction: unknown = Reflect.get(request, "direction");
+  if (direction !== undefined && direction !== "horizontal" && direction !== "vertical") {
+    issues.push(
+      shapeIssue('Arrange direction must be "horizontal" or "vertical"', direction, [
+        "direction",
+      ]),
+    );
+  }
+  for (const field of ["spacing", "rankSpacing"] as const) {
+    const value: unknown = Reflect.get(request, field);
+    if (
+      value !== undefined &&
+      !(typeof value === "number" && Number.isFinite(value) && value > 0)
+    ) {
+      issues.push(
+        shapeIssue(`Arrange ${field} must be a positive finite number`, value, [field]),
+      );
+    }
+  }
+  return issues.length > 0 ? issues : undefined;
+}
+
 /** The diagnostic a disposed builder refuses a mutation with, if it is disposed. */
 function closedIssues(
   isDisposed: () => boolean,
@@ -358,7 +424,8 @@ function strategyDiagnosticIssue(
  * carries none, so the position lands inside the same history unit as the
  * creation and an undo removes it with the node. `arrange` is the explicit
  * opposite of that: it asks the selected strategy about the whole graph and
- * applies the answer as one history unit.
+ * applies the answer as one history unit, with the direction and spacings the
+ * call overrides, if any.
  * `isDisposed` is the builder's own lifecycle flag: a disposed builder refuses
  * every mutation with `sdk.disposed` and keeps every read working, because the
  * state the host already received must stay renderable.
@@ -524,10 +591,14 @@ export function createGraphApi(
       return editor.graph.getNodes().map(toNodeInstanceView);
     },
 
-    arrange(): Result<readonly NodeInstanceView[], SdkIssues> {
+    arrange(request?: ArrangeRequest): Result<readonly NodeInstanceView[], SdkIssues> {
       const closed = closedIssues(isDisposed, "graph.arrange");
       if (closed !== undefined) {
         return err(closed);
+      }
+      const invalid = request === undefined ? undefined : arrangeRequestIssues(request);
+      if (invalid !== undefined) {
+        return err(invalid);
       }
       const strategyId = arrangeSettings.strategies.defaultStrategyId;
       const strategy = arrangeSettings.strategies.get(strategyId);
@@ -540,6 +611,11 @@ export function createGraphApi(
           ),
         ]);
       }
+      // The overrides win for this one call and are never written back, so the
+      // configuration stays exactly what the host declared (S16).
+      const direction = request?.direction ?? graphLayout.direction;
+      const nodeSpacing = request?.spacing ?? graphLayout.spacing;
+      const rankSpacing = request?.rankSpacing ?? arrangeSettings.rankSpacing;
       // The graph is read here, not passed in: the strategy never sees a graph
       // instance, a node class or a canvas, only plain data (S11).
       const placed = strategy.place({
@@ -552,9 +628,9 @@ export function createGraphApi(
           target: edge.connection.target.nodeId,
         })),
         options: {
-          direction: graphLayout.direction,
-          nodeSpacing: graphLayout.spacing,
-          rankSpacing: arrangeSettings.rankSpacing,
+          direction,
+          nodeSpacing,
+          rankSpacing,
           scope: "all",
         },
       });

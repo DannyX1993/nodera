@@ -519,6 +519,22 @@ const arranged = assertOk(builder.graph.arrange());
 builder.graph.undo(); // every previous position, in one step
 ```
 
+A call may override the configured direction and spacings **for that one
+arrange**, and persists nothing: the next call without a request reads
+`graph.layout` again, so a host can switch without rebuilding the builder. The
+rules are the configuration's own — an unknown direction or a spacing that is not
+a positive finite number is `sdk.invalid-input` at the field path (`direction`,
+`spacing`, `rankSpacing`) and nothing moves.
+
+```ts
+assertOk(builder.graph.arrange({ direction: "vertical", spacing: 160, rankSpacing: 320 }));
+assertOk(builder.graph.arrange()); // the configured direction and spacings again
+```
+
+The switching itself belongs to the host's own UI: the framework still ships no
+runtime toggle for mode, direction or spacing inside the editor (S4),
+`examples/layout-switch-demo` is the reference host.
+
 A strategy answer that carries no position at all is an honest no-op: the `free`
 strategy and an empty graph both return an empty list and push no history entry.
 A strategy that answers a diagnostic makes `arrange()` return that diagnostic as
@@ -551,7 +567,9 @@ builder.graphLayout.active(); // "acme.dagre" — the next arrange() runs it
 
 There is no runtime toggle for any of this: mode, direction, spacing and
 strategy are host configuration, never a control the framework puts in front of
-a user.
+a user. A host that wants a control of its own passes per-call overrides to
+`arrange()` and selects the strategy with `builder.graphLayout.setDefault`; see
+`examples/layout-switch-demo`.
 
 ### Document — `builder.document`
 

@@ -1,0 +1,28 @@
+{
+  "name": "@nodera/layout-switch-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runnable demo: a host that switches the graph layout (strategy, direction, spacing) from its own UI and adds nodes through the built-in node-creation dialog.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nodera/react-flow": "workspace:*",
+    "@nodera/sdk": "workspace:*",
+    "@nodera/ui-react": "workspace:*",
+    "@xyflow/react": "^12.12.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^7.1.0"
+  }
+}
