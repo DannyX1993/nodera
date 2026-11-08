@@ -405,7 +405,60 @@ importers:
         specifier: ^3.0.5
         version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  packages/sdk: {}
+  packages/sdk:
+    dependencies:
+      '@nodera/application':
+        specifier: workspace:*
+        version: link:../application
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@nodera/document':
+        specifier: workspace:*
+        version: link:../document
+      '@nodera/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@nodera/edge-registry':
+        specifier: workspace:*
+        version: link:../edge-registry
+      '@nodera/graph-model':
+        specifier: workspace:*
+        version: link:../graph-model
+      '@nodera/history':
+        specifier: workspace:*
+        version: link:../history
+      '@nodera/layout-engine':
+        specifier: workspace:*
+        version: link:../layout-engine
+      '@nodera/node-registry':
+        specifier: workspace:*
+        version: link:../node-registry
+      '@nodera/property-system':
+        specifier: workspace:*
+        version: link:../property-system
+      '@nodera/serialization-json':
+        specifier: workspace:*
+        version: link:../serialization-json
+      '@nodera/serialization-yaml':
+        specifier: workspace:*
+        version: link:../serialization-yaml
+      '@nodera/theme-engine':
+        specifier: workspace:*
+        version: link:../theme-engine
+      '@nodera/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
+      '@nodera/validation':
+        specifier: workspace:*
+        version: link:../validation
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
   packages/serialization-json:
     dependencies:

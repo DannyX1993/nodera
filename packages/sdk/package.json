@@ -2,5 +2,34 @@
   "name": "@nodera/sdk",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/sdk"
+  "type": "module",
+  "description": "Public SDK for the Nodera graph editing framework: builder factory, authoring APIs, registries, document/event/plugin contracts and the engine-agnostic presentation adapter port. No framework dependency.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/application": "workspace:*",
+    "@nodera/contracts": "workspace:*",
+    "@nodera/document": "workspace:*",
+    "@nodera/domain": "workspace:*",
+    "@nodera/edge-registry": "workspace:*",
+    "@nodera/graph-model": "workspace:*",
+    "@nodera/history": "workspace:*",
+    "@nodera/layout-engine": "workspace:*",
+    "@nodera/node-registry": "workspace:*",
+    "@nodera/property-system": "workspace:*",
+    "@nodera/serialization-json": "workspace:*",
+    "@nodera/serialization-yaml": "workspace:*",
+    "@nodera/theme-engine": "workspace:*",
+    "@nodera/ui-core": "workspace:*",
+    "@nodera/validation": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }
