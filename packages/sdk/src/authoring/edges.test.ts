@@ -72,6 +72,21 @@ describe("toEdgeDefinition", () => {
     });
   });
 
+  it("merges style hints with a style object the host already declared", () => {
+    const result = toEdgeDefinition({
+      type: "demo.flow",
+      label: "Data flow",
+      visual: { metadata: { style: { dashArray: "1 1" }, state: "ok" } },
+      style: { strokeWidth: 3 },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.definition.visual).toEqual({
+      metadata: { state: "ok", style: { dashArray: "1 1", strokeWidth: 3 } },
+    });
+  });
+
   it("omits visual when the host declares no style and no hints", () => {
     const result = toEdgeDefinition({ type: "demo.plain", label: "Plain" });
 

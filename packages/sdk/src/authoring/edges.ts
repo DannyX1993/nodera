@@ -108,7 +108,14 @@ function toVisual(input: EdgeDefinitionInput): EdgeVisual | undefined {
   }
   const metadata: Record<string, unknown> = { ...(input.visual?.metadata ?? {}) };
   if (hasHints) {
-    metadata["style"] = hints;
+    // A host may declare `visual.metadata.style` directly; its keys are merged
+    // with the `style` shorthand instead of being replaced, so no authored hint
+    // is ever lost. The shorthand wins on a key declared in both places.
+    const declared = metadata["style"];
+    metadata["style"] =
+      declared !== null && typeof declared === "object" && !Array.isArray(declared)
+        ? { ...declared, ...hints }
+        : hints;
   }
   return {
     ...(input.visual ?? {}),
