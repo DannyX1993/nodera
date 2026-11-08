@@ -46,3 +46,24 @@ export function computeShellSizes(layout: LayoutState | undefined): ShellSizes {
     bottom: sizes.bottom,
   };
 }
+
+/**
+ * First visible panel docked in a region, in layout panel order.
+ *
+ * A region can only be resized when the host knows *which* panel the requested
+ * edge size belongs to: the shell reports the region, the layout engine resizes
+ * a panel. This helper is that mapping, so a host wires
+ * `EditorShell.onResizeRegion` to `useLayoutActions().resizePanel` without
+ * re-implementing the "first visible panel of the region" rule. A region with
+ * no visible panel, and a shell that has no layout applied yet, report
+ * `undefined` and the host simply does nothing.
+ */
+export function panelIdForRegion(
+  layout: LayoutState | undefined,
+  region: DockRegion,
+): string | undefined {
+  const panel = layout?.panels.find(
+    (candidate) => candidate.region === region && candidate.visible,
+  );
+  return panel?.panelId;
+}

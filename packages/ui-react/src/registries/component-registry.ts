@@ -89,6 +89,18 @@ export class ComponentRegistry<TProps> {
     return this.components.get(id);
   }
 
+  /**
+   * Registers or swaps a component for an id.
+   *
+   * This is the Level 2 replacement path: a host swaps a built-in renderer
+   * (node, edge, port, property, panel or toolbar) with its own component by
+   * id without unregistering first, while `register` keeps protecting new
+   * contributions from accidental duplicates.
+   */
+  replace(id: string, component: ComponentType<TProps>): void {
+    this.components.set(id, component);
+  }
+
   /** Removes the component of the id; unknown ids are ignored. */
   unregister(id: string): void {
     this.components.delete(id);

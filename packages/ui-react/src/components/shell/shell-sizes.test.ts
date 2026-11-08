@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createLayoutState, EDITOR_LAYOUT, IDE_LAYOUT } from "@nodera/layout-engine";
 import type { LayoutState } from "@nodera/ui-core";
 
-import { computeShellSizes } from "./shell-sizes.js";
+import { computeShellSizes, panelIdForRegion } from "./shell-sizes.js";
 
 describe("computeShellSizes", () => {
   it("reports the largest size of the visible panels of every region", () => {
@@ -51,5 +51,39 @@ describe("computeShellSizes", () => {
       right: 0,
       bottom: 0,
     });
+  });
+});
+
+describe("panelIdForRegion", () => {
+  it("returns the first visible panel docked in the region", () => {
+    const layout: LayoutState = {
+      panels: [
+        { panelId: "palette", region: "left", visible: true, size: 240 },
+        { panelId: "navigator", region: "left", visible: true, size: 260 },
+        { panelId: "properties", region: "right", visible: true, size: 300 },
+      ],
+    };
+
+    expect(panelIdForRegion(layout, "left")).toBe("palette");
+    expect(panelIdForRegion(layout, "right")).toBe("properties");
+  });
+
+  it("skips hidden panels of the region", () => {
+    const layout: LayoutState = {
+      panels: [
+        { panelId: "palette", region: "left", visible: false, size: 240 },
+        { panelId: "navigator", region: "left", visible: true, size: 240 },
+        { panelId: "validation", region: "bottom", visible: false, size: 160 },
+      ],
+    };
+
+    expect(panelIdForRegion(layout, "left")).toBe("navigator");
+    expect(panelIdForRegion(layout, "bottom")).toBeUndefined();
+  });
+
+  it("returns undefined without a layout or for a region it does not place", () => {
+    expect(panelIdForRegion(undefined, "left")).toBeUndefined();
+    expect(panelIdForRegion(createLayoutState(EDITOR_LAYOUT), "footer")).toBeUndefined();
+    expect(panelIdForRegion({ panels: [] }, "right")).toBeUndefined();
   });
 });

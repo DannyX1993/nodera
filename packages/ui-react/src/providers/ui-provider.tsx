@@ -18,11 +18,9 @@ import {
 } from "@nodera/ui-core";
 
 import { createDefaultPanelRegistry } from "../defaults/default-panels.js";
+import { createDefaultComponentRenderers } from "../defaults/default-renderers.js";
 import { createDefaultToolRegistry } from "../defaults/default-tools.js";
-import {
-  createComponentRenderers,
-  type ComponentRenderers,
-} from "../registries/component-registry.js";
+import type { ComponentRenderers } from "../registries/component-registry.js";
 import { themeStyle } from "../theme-style.js";
 
 /** Registries the provider exposes to every UI component. */
@@ -52,7 +50,10 @@ export interface NoderaUiProviderProps {
   readonly panelRegistry?: PanelRegistry;
   /** Tools the surfaces offer. Defaults to the Phase 5 tools. */
   readonly toolRegistry?: ToolRegistry;
-  /** Replaceable panel/property/toolbar renderers. Defaults to empty registries. */
+  /**
+   * Replaceable panel/property/toolbar renderers. Defaults to the built-in
+   * registries ({@link createDefaultComponentRenderers}).
+   */
   readonly renderers?: ComponentRenderers;
   readonly children: ReactNode;
 }
@@ -72,7 +73,7 @@ function createDefaultRegistries(): NoderaUiRegistries {
     layoutRegistry: new LayoutRegistry(),
     panelRegistry: createDefaultPanelRegistry(),
     toolRegistry: createDefaultToolRegistry(),
-    renderers: createComponentRenderers(),
+    renderers: createDefaultComponentRenderers(),
   };
 }
 

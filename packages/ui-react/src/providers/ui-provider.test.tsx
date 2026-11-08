@@ -2,11 +2,13 @@ import { act, cleanup, render, renderHook, screen } from "@testing-library/react
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { EDITOR_LAYOUT_ID, LayoutRegistry } from "@nodera/layout-engine";
+import { EDITOR_LAYOUT, EDITOR_LAYOUT_ID, LayoutRegistry, createLayoutState } from "@nodera/layout-engine";
 import { DARK_THEME_ID, DEFAULT_THEME_ID, ThemeRegistry } from "@nodera/theme-engine";
 import { UiStateStore } from "@nodera/ui-core";
+import { PROPERTY_TYPES } from "@nodera/property-system";
 
 import { createDefaultPanelRegistry } from "../defaults/default-panels.js";
+import { PanelHost } from "../components/shell/panel-host.js";
 import { createTestEditor } from "../test/fixtures.js";
 import {
   NoderaUiProvider,
@@ -48,9 +50,9 @@ describe("NoderaUiProvider", () => {
           <span data-testid="layout-registry">{String(ui.layoutRegistry instanceof LayoutRegistry)}</span>
           <span data-testid="panel-size">{ui.panelRegistry.size}</span>
           <span data-testid="tool-size">{ui.toolRegistry.size}</span>
-          <span data-testid="renderer-size">
-            {ui.renderers.panels.size + ui.renderers.properties.size + ui.renderers.toolbars.size}
-          </span>
+          <span data-testid="panel-renderers">{ui.renderers.panels.size}</span>
+          <span data-testid="property-renderers">{ui.renderers.properties.size}</span>
+          <span data-testid="toolbar-renderers">{ui.renderers.toolbars.size}</span>
         </>
       );
     }
@@ -65,7 +67,29 @@ describe("NoderaUiProvider", () => {
     expect(screen.getByTestId("layout-registry").textContent).toBe("true");
     expect(screen.getByTestId("panel-size").textContent).toBe("11");
     expect(screen.getByTestId("tool-size").textContent).toBe("8");
-    expect(screen.getByTestId("renderer-size").textContent).toBe("0");
+    expect(screen.getByTestId("panel-renderers").textContent).toBe("11");
+    expect(screen.getByTestId("property-renderers").textContent).toBe(
+      String(PROPERTY_TYPES.length),
+    );
+    expect(screen.getByTestId("toolbar-renderers").textContent).toBe("0");
+  });
+
+  it("renders a preset panel through its built-in renderer by default", () => {
+    const panelRegistry = createDefaultPanelRegistry();
+    const store = new UiStateStore({
+      themeId: DEFAULT_THEME_ID,
+      layoutId: EDITOR_LAYOUT_ID,
+      layout: createLayoutState(EDITOR_LAYOUT, { panels: panelRegistry.all() }),
+    });
+
+    const { container } = render(
+      <NoderaUiProvider store={store} editor={createTestEditor()}>
+        <PanelHost panelId="palette" />
+      </NoderaUiProvider>,
+    );
+
+    expect(container.querySelector("[data-nodera-palette]")).not.toBeNull();
+    expect(container.querySelector("[data-nodera-panel-unregistered]")).toBeNull();
   });
 
   it("exposes the registries through dedicated hooks", () => {
@@ -84,7 +108,8 @@ describe("NoderaUiProvider", () => {
     expect(result.current.panels.size).toBe(11);
     expect(result.current.tools.size).toBe(8);
     expect(result.current.layouts.size).toBeGreaterThan(0);
-    expect(result.current.renderers.panels.size).toBe(0);
+    expect(result.current.renderers.panels.size).toBe(11);
+    expect(result.current.renderers.toolbars.size).toBe(0);
   });
 
   it("uses the registries the host provides instead of the defaults", () => {

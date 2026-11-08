@@ -11,6 +11,7 @@
 export * from "./theme-style.js";
 export * from "./registries/component-registry.js";
 export * from "./defaults/default-panels.js";
+export * from "./defaults/default-renderers.js";
 export * from "./defaults/default-tools.js";
 export * from "./components/shell/shell-sizes.js";
 export * from "./components/shell/editor-shell.js";

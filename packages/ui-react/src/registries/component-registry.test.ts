@@ -99,3 +99,26 @@ describe("createComponentRenderers", () => {
     expect(renderers.panels.size).toBe(0);
   });
 });
+
+describe("ComponentRegistry replacement", () => {
+  it("replaces a built-in component id so a host can swap any renderer", () => {
+    const registry = new ComponentRegistry<{ readonly value: string }>();
+    const first = () => null;
+    const second = () => null;
+    registry.register("nodera.panel.palette", first);
+
+    registry.replace("nodera.panel.palette", second);
+
+    expect(registry.get("nodera.panel.palette")).toBe(second);
+    expect(registry.listIds()).toEqual(["nodera.panel.palette"]);
+  });
+
+  it("registers the id when replacing an id nobody registered yet", () => {
+    const registry = new ComponentRegistry<{ readonly value: string }>();
+
+    registry.replace("acme.custom", () => null);
+
+    expect(registry.has("acme.custom")).toBe(true);
+  });
+});
+
