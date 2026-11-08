@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nodera Phase 6 demo — SDK-only host</title>
+    <style>
+      /*
+       * Host chrome only.
+       *
+       * The editor surfaces are styled by the framework with `var(--ndr-*)`
+       * tokens, and the tokens are written by the SDK React binding on the
+       * element it renders. Everything below either fills the viewport, styles
+       * the demo's own controls and output columns, or supplies the structural
+       * styles of the canvas engine (see the last block).
+       */
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        background: #0b1220;
+        color: #e5e9f0;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 13px;
+      }
+
+      .demo-host {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        height: 100%;
+        padding: 6px;
+        box-sizing: border-box;
+      }
+
+      .demo-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 6px 8px;
+        border: 1px solid #24344d;
+        border-radius: 6px;
+        background: #131c2b;
+      }
+
+      .demo-bar h1 {
+        margin: 0 8px 0 0;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      .demo-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: #94a3b8;
+        font-size: 11px;
+      }
+
+      .demo-select,
+      .demo-button {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 7px;
+        border: 1px solid #2f3b4f;
+        border-radius: 5px;
+        background: #1a2333;
+        color: #e5e9f0;
+        font-family: inherit;
+        font-size: 11px;
+        line-height: 1.4;
+        cursor: pointer;
+      }
+
+      .demo-button:hover:not(:disabled),
+      .demo-select:hover {
+        border-color: #f59e0b;
+      }
+
+      .demo-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+
+      .demo-status {
+        margin: 0;
+        padding: 4px 8px;
+        border: 1px solid #24344d;
+        border-radius: 5px;
+        background: #0f1726;
+        color: #cbd5e1;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+        font-size: 11px;
+        white-space: pre-wrap;
+      }
+
+      /* The editor column: the binding's theme wrapper fills it. */
+      .demo-editor {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        border: 1px solid #24344d;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .demo-editor [data-nodera-theme] {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background: var(--ndr-colors-background, #f8fafc);
+        color: var(--ndr-colors-text, #111827);
+        font-family: var(--ndr-typography-font-family, system-ui);
+        font-size: var(--ndr-typography-font-size-md, 13px);
+      }
+
+      .demo-output {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1.6fr;
+        gap: 6px;
+        height: 190px;
+        min-height: 0;
+      }
+
+      .demo-output-column {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        padding: 4px 8px;
+        border: 1px solid #24344d;
+        border-radius: 6px;
+        background: #0f1726;
+        overflow: hidden;
+      }
+
+      .demo-output-column h2 {
+        margin: 0 0 4px;
+        color: #94a3b8;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .demo-output-column p,
+      .demo-output-column li {
+        margin: 0;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+        font-size: 11px;
+        line-height: 1.5;
+        color: #cbd5e1;
+        word-break: break-word;
+      }
+
+      .demo-log {
+        flex: 1;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        overflow: auto;
+      }
+
+      .demo-log li {
+        display: flex;
+        gap: 6px;
+      }
+
+      .demo-log-name {
+        color: #f59e0b;
+        flex-shrink: 0;
+      }
+
+      .demo-log-detail {
+        color: #94a3b8;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .demo-document {
+        flex: 1;
+        margin: 0;
+        overflow: auto;
+        color: #cbd5e1;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+        font-size: 11px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .demo-issues {
+        flex: 1;
+        margin: 0;
+        padding-left: 14px;
+        overflow: auto;
+      }
+
+      /*
+       * Structural styles of the canvas engine.
+       *
+       * `@nodera/sdk-react` mounts the graph engine but ships no stylesheet for
+       * it, and this demo may import only the two SDK packages — not
+       * `@xyflow/react`. These rules are the layout-critical subset of the
+       * engine's own base stylesheet (positioning and pointer routing, plus the
+       * token-driven surfaces of the engine's chrome). Without them the nodes
+       * are not absolutely positioned and the canvas is unusable.
+       */
+      .react-flow {
+        direction: ltr;
+        width: 100%;
+        height: 100%;
+      }
+
+      .react-flow__container {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .react-flow__renderer {
+        z-index: 4;
+      }
+
+      .react-flow__pane {
+        z-index: 1;
+        touch-action: none;
+      }
+
+      .react-flow__pane.draggable {
+        cursor: grab;
+      }
+
+      .react-flow__pane.dragging {
+        cursor: grabbing;
+      }
+
+      .react-flow__viewport {
+        z-index: 2;
+        transform-origin: 0 0;
+        pointer-events: none;
+      }
+
+      .react-flow__nodes {
+        transform-origin: 0 0;
+        pointer-events: none;
+      }
+
+      .react-flow__node {
+        position: absolute;
+        box-sizing: border-box;
+        transform-origin: 0 0;
+        pointer-events: all;
+        user-select: none;
+      }
+
+      .react-flow__node.draggable {
+        cursor: grab;
+      }
+
+      .react-flow__node.draggable.dragging {
+        cursor: grabbing;
+      }
+
+      .react-flow .react-flow__edges {
+        position: absolute;
+      }
+
+      .react-flow .react-flow__edges svg {
+        position: absolute;
+        overflow: visible;
+        pointer-events: none;
+      }
+
+      .react-flow__edge {
+        pointer-events: visibleStroke;
+      }
+
+      .react-flow__edge-path,
+      .react-flow__connection-path {
+        fill: none;
+      }
+
+      .react-flow__handle {
+        position: absolute;
+        pointer-events: none;
+        min-width: 5px;
+        min-height: 5px;
+      }
+
+      .react-flow__handle.connectionindicator {
+        pointer-events: all;
+        cursor: crosshair;
+      }
+
+      .react-flow__handle-left {
+        top: 50%;
+        left: 0;
+        transform: translate(-50%, -50%);
+      }
+
+      .react-flow__handle-right {
+        top: 50%;
+        right: 0;
+        transform: translate(50%, -50%);
+      }
+
+      .react-flow__panel {
+        position: absolute;
+        z-index: 5;
+        margin: 15px;
+      }
+
+      .react-flow__panel.top {
+        top: 0;
+      }
+
+      .react-flow__panel.bottom {
+        bottom: 0;
+      }
+
+      .react-flow__panel.left {
+        left: 0;
+      }
+
+      .react-flow__panel.right {
+        right: 0;
+      }
+
+      .react-flow__background {
+        background: var(--ndr-canvas-background, transparent);
+      }
+
+      .react-flow__minimap {
+        background: var(--ndr-colors-surface, #ffffff);
+        border: 1px solid var(--ndr-colors-border, #d8dee9);
+        border-radius: var(--ndr-borders-radius-md, 5px);
+      }
+
+      .react-flow__minimap-mask {
+        fill: var(--ndr-colors-surface-alt, rgba(241, 245, 249, 0.7));
+      }
+
+      .react-flow__controls {
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--ndr-colors-border, #d8dee9);
+        border-radius: var(--ndr-borders-radius-md, 5px);
+        overflow: hidden;
+      }
+
+      .react-flow__controls-button {
+        padding: 2px 6px;
+        border: none;
+        border-bottom: 1px solid var(--ndr-colors-border, #d8dee9);
+        background: var(--ndr-colors-surface, #ffffff);
+        color: var(--ndr-colors-text, #111827);
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .react-flow__attribution {
+        padding: 0 2px;
+        background: transparent;
+        font-size: 9px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
