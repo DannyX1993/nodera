@@ -12,16 +12,15 @@
  * `builder.theme.setDefault(...)`.
  */
 
-import type { Builder } from "@nodera/sdk";
+import type { CreateThemeInput } from "@nodera/sdk";
 
 /**
  * Input accepted by `builder.theme.register`.
  *
- * Derived from the public API instead of importing the theme-engine package:
- * the SDK does not re-export the concrete `CreateThemeInput` type, so the demo
- * names the parameter type of the method it calls.
+ * Named with the type the SDK publishes, so a host never reaches into the
+ * theme engine to describe a theme it contributes.
  */
-export type DemoThemeInput = Parameters<Builder["theme"]["register"]>[0];
+export type DemoThemeInput = CreateThemeInput;
 
 /** Id of the theme this host contributes. */
 export const DEMO_THEME_ID = "demo.theme.copper-dusk";

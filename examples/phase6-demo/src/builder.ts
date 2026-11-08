@@ -15,6 +15,7 @@ import {
   type Builder,
   type BuilderPlugin,
   type EdgeDefinitionInput,
+  type LayoutDefinition,
 } from "@nodera/sdk";
 import { createReactFlowAdapter } from "@nodera/sdk-react";
 
@@ -97,7 +98,7 @@ const DEMO_EDGES: readonly EdgeDefinitionInput[] = [
  * Derived from the public API: the SDK declares layouts but does not re-export
  * the layout engine's `LayoutDefinition` type.
  */
-type DemoLayoutDefinition = Parameters<Builder["layout"]["register"]>[0];
+type DemoLayoutDefinition = LayoutDefinition;
 
 /**
  * Layout the host declares and applies at boot.

@@ -20,9 +20,7 @@ export const SDK_ISSUE_CODES = [
   "sdk.unknown-layout",
   "sdk.unsupported-format",
   "sdk.document-invalid",
-  "sdk.adapter-incompatible",
   "sdk.renderer-unsupported",
-  "sdk.renderer-not-a-component",
   "sdk.plugin-invalid",
   "sdk.plugin-conflict",
   "sdk.disposed",
@@ -38,7 +36,7 @@ export type SdkSeverity = "error" | "warning";
 export interface SdkError {
   readonly code: SdkIssueCode;
   readonly message: string;
-  /** Location inside the input that produced it, e.g. `["nodes", 0, "type"]`. */
+  /** Location inside the input that produced it, e.g. `["registry", "nodes", "demo.node"]`. */
   readonly path?: readonly string[];
   /** Structured context for the host, never required to render a message. */
   readonly metadata?: Readonly<Record<string, unknown>>;

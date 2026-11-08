@@ -420,7 +420,7 @@ for (const { rule, violations } of results) {
 const failed = results.filter((result) => result.violations.length > 0);
 if (failed.length === 0) {
   console.log(
-    `\nArchitecture check passed: ${results.length} boundary rules of docs/PROJECT-STRUCTURE.md §7.2 hold.`,
+    `\nArchitecture check passed: ${results.length} boundary rules of docs/PROJECT-STRUCTURE.md §7.2-7.3 hold.`,
   );
   process.exit(0);
 }
