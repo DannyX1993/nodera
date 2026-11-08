@@ -101,3 +101,12 @@ RDD transaction surface. The chain is `feature-branch-chain` with
 the per-PR verification plan. That document is also the record of the review
 evidence gathered before the authority broke: two independent verification
 rounds and one native review slice with a real CRITICAL finding (`R3-001`).
+
+### KI-1 — delivery correction
+
+The six `fase6/*` slice branches were cut as **cumulative tips of one linear
+history**, so every slice is already contained in `feature/fase6-sdk` and a
+merge into it is a no-op. They exist for review only. The deliverable is the
+single branch, mergeable into `master` as a fast-forward after manual testing.
+If the PR chain is ever opened, the tracker must be re-based on `master` first;
+that ref move is destructive and needs an explicit human decision.

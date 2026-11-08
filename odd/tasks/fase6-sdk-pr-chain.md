@@ -1,5 +1,12 @@
 # feature: fase6-sdk — PR chain (delivery plan)
 
+> **Deliverable vs review aid.** The deliverable is the single branch
+> `feature/fase6-sdk` (22 commits, 130 files, +18,025/−471). It already contains
+> every slice below, so it can be merged into `master` as one unit after manual
+> testing — a fast-forward, exactly like phases 1–5. The six `fase6/*` branches
+> exist **only** to make review slices possible; they are contained in the
+> deliverable and merging them into it is a no-op by construction.
+
 `chain_strategy=feature-branch-chain`. Integration base verified: `master`
 (`refs/remotes/origin/master`). Tracker branch: `feature/fase6-sdk` (draft,
 no-merge until every child is reviewed and integrated).
