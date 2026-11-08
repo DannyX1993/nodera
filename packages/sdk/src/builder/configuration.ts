@@ -8,10 +8,13 @@
  */
 
 import type { GraphSettings } from "@nodera/graph-model";
+import type { CreateThemeInput } from "@nodera/theme-engine";
+import type { LayoutDefinition } from "@nodera/ui-core";
 import type { BuilderAdapterInput } from "../adapter/adapter.js";
 import type { EdgeDefinitionInput } from "../authoring/edges.js";
 import type { NodeDefinitionInput } from "../authoring/nodes.js";
 import type { PropertyInput } from "../authoring/properties.js";
+import type { BuilderPlugin } from "../plugin/plugin.js";
 import type { BuilderFeaturesInput } from "./features.js";
 
 /** Definitions the builder registers before the host touches it. */
@@ -19,6 +22,8 @@ export interface BuilderRegistryConfiguration {
   readonly nodes?: readonly NodeDefinitionInput[];
   readonly edges?: readonly EdgeDefinitionInput[];
   readonly properties?: readonly PropertyInput[];
+  readonly themes?: readonly CreateThemeInput[];
+  readonly layouts?: readonly LayoutDefinition[];
 }
 
 /** Portable document format the builder produces and consumes. */
@@ -59,4 +64,6 @@ export interface BuilderConfiguration {
   readonly document?: BuilderDocumentConfiguration;
   readonly ui?: BuilderUiConfiguration;
   readonly graph?: BuilderGraphConfiguration;
+  /** Plugins installed while composing the builder, after the declarative registries. */
+  readonly plugins?: readonly BuilderPlugin[];
 }

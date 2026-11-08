@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { EDITOR_LAYOUT_ID, CANVAS_ONLY_LAYOUT_ID } from "@nodera/layout-engine";
-import { DARK_THEME_ID, DEFAULT_THEME_ID } from "@nodera/theme-engine";
+import {
+  DARK_THEME,
+  DARK_THEME_ID,
+  DEFAULT_THEME_ID,
+  type CreateThemeInput,
+} from "@nodera/theme-engine";
 import {
   DEFAULT_PANELS,
+  type LayoutDefinition,
   type PanelDefinition,
   type ToolDefinition,
 } from "@nodera/ui-core";
@@ -10,6 +16,8 @@ import type { EdgeDefinitionInput } from "../authoring/edges.js";
 import type { NodeDefinitionInput } from "../authoring/nodes.js";
 import type { PropertyInput } from "../authoring/properties.js";
 import type { SdkIssues } from "../errors.js";
+import type { PluginRegisteredEvent } from "../events/events-api.js";
+import type { BuilderPlugin } from "../plugin/plugin.js";
 import { createBuilder, type Builder } from "./builder.js";
 import type { BuilderConfiguration } from "./configuration.js";
 
@@ -492,5 +500,344 @@ describe("builder identity", () => {
     const issues = fail({ id: "builder" });
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ code: "sdk.invalid-id", path: ["id"] });
+  });
+});
+
+function themeInput(overrides: Partial<CreateThemeInput> = {}): CreateThemeInput {
+  return { id: "acme.brand", name: "Acme brand", tokens: DARK_THEME.tokens, ...overrides };
+}
+
+function layoutInput(overrides: Partial<LayoutDefinition> = {}): LayoutDefinition {
+  return {
+    id: "acme.layout",
+    panels: [{ panelId: "palette", region: "left" }],
+    ...overrides,
+  };
+}
+
+describe("builder.use", () => {
+  it("installs a plugin through the builder and emits one plugin.registered", () => {
+    const builder = create();
+    const registered: PluginRegisteredEvent[] = [];
+    builder.events.on("plugin.registered", (payload) => {
+      registered.push(payload);
+    });
+    const plugin: BuilderPlugin = {
+      id: "acme.nodes",
+      version: "1.0.0",
+      install(api) {
+        api.nodes.register(nodeInput());
+      },
+    };
+
+    const installed = builder.use(plugin);
+
+    expect(installed.ok).toBe(true);
+    if (!installed.ok) return;
+    expect(installed.value).toEqual({
+      pluginId: "acme.nodes",
+      version: "1.0.0",
+      contributionIds: ["demo.node"],
+    });
+    expect(builder.registries.nodes.has("demo.node")).toBe(true);
+    expect(registered).toEqual([
+      { pluginId: "acme.nodes", version: "1.0.0", contributionIds: ["demo.node"] },
+    ]);
+  });
+
+  it("refuses to install a plugin after dispose", () => {
+    const builder = create();
+    builder.dispose();
+    let calls = 0;
+
+    const installed = builder.use({
+      id: "acme.nodes",
+      version: "1.0.0",
+      install: () => {
+        calls += 1;
+      },
+    });
+
+    expect(installed.ok).toBe(false);
+    if (installed.ok) return;
+    expect(installed.error[0]).toMatchObject({ code: "sdk.disposed" });
+    expect(calls).toBe(0);
+  });
+});
+
+describe("plugin configuration", () => {
+  it("applies every configured plugin while composing the builder", () => {
+    const builder = create({
+      plugins: [
+        {
+          id: "acme.one",
+          version: "1.0.0",
+          install(api) {
+            api.nodes.register(nodeInput());
+          },
+        },
+        {
+          id: "acme.two",
+          version: "2.0.0",
+          install(api) {
+            api.edges.register(edgeInput());
+          },
+        },
+      ],
+    });
+
+    expect(builder.registries.nodes.has("demo.node")).toBe(true);
+    expect(builder.registries.edges.has("demo.edge")).toBe(true);
+  });
+
+  it("fails closed with the issues of a plugin that cannot install", () => {
+    const issues = fail({
+      plugins: [
+        {
+          id: "acme.bad",
+          version: "1.0.0",
+          install(api) {
+            api.nodes.register(nodeInput({ type: "unqualified" }));
+          },
+        },
+      ],
+    });
+
+    expect(issues.map((issue) => issue.code)).toEqual(["sdk.invalid-id"]);
+  });
+
+  it("reports a configured plugin that is rejected before install", () => {
+    const issues = fail({
+      plugins: [{ id: "acme", version: "1.0", install: () => {} }],
+    });
+
+    expect(issues.map((issue) => issue.code)).toEqual([
+      "sdk.plugin-invalid",
+      "sdk.plugin-invalid",
+    ]);
+    expect(issues.map((issue) => issue.path)).toEqual([["id"], ["version"]]);
+  });
+});
+
+describe("theme API", () => {
+  it("registers a theme built by createTheme into the theme registry", () => {
+    const builder = create();
+
+    const registered = builder.theme.register(themeInput());
+
+    expect(registered.ok).toBe(true);
+    if (!registered.ok) return;
+    expect(registered.value).toMatchObject({ id: "acme.brand", name: "Acme brand" });
+    expect(builder.registries.themes.get("acme.brand")).toBe(registered.value);
+  });
+
+  it("reports a duplicate theme id", () => {
+    const builder = create();
+    expect(builder.theme.register(themeInput()).ok).toBe(true);
+
+    const duplicate = builder.theme.register(themeInput());
+
+    expect(duplicate.ok).toBe(false);
+    if (duplicate.ok) return;
+    expect(duplicate.error[0]).toMatchObject({
+      code: "sdk.duplicate-id",
+      severity: "error",
+      path: ["themes", "acme.brand"],
+    });
+    expect(builder.registries.themes.size).toBe(3);
+  });
+
+  it("surfaces an invalid theme as sdk.invalid-input without throwing", () => {
+    const builder = create();
+
+    expect(() => builder.theme.register(themeInput({ name: "" }))).not.toThrow();
+    const registered = builder.theme.register(themeInput({ name: "" }));
+
+    expect(registered.ok).toBe(false);
+    if (registered.ok) return;
+    expect(registered.error).toHaveLength(1);
+    expect(registered.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      severity: "error",
+      path: ["themes"],
+    });
+    expect(registered.error[0]?.message).toContain("theme name must not be empty");
+    expect(builder.registries.themes.has("acme.brand")).toBe(false);
+  });
+
+  it("refuses an unknown theme id and keeps the active theme", () => {
+    const builder = create();
+    const before = builder.theme.active();
+
+    const selected = builder.theme.setDefault("acme.missing");
+
+    expect(selected.ok).toBe(false);
+    if (selected.ok) return;
+    expect(selected.error[0]).toMatchObject({
+      code: "sdk.unknown-theme",
+      severity: "error",
+    });
+    expect(builder.theme.active()).toBe(before);
+    expect(builder.store.getState().themeId).toBe(DEFAULT_THEME_ID);
+  });
+
+  it("changes the active theme through the UI state store", () => {
+    const builder = create();
+    expect(builder.theme.register(themeInput()).ok).toBe(true);
+
+    const selected = builder.theme.setDefault("acme.brand");
+
+    expect(selected.ok).toBe(true);
+    if (!selected.ok) return;
+    expect(builder.store.getState().themeId).toBe("acme.brand");
+    expect(builder.theme.active()).toBe(selected.value);
+    expect(builder.registries.themes.getDefault()).toBe(selected.value);
+  });
+
+  it("reports the active theme and every registered one", () => {
+    const builder = create();
+    expect(builder.theme.active().id).toBe(DEFAULT_THEME_ID);
+    expect(builder.theme.all().map((theme) => theme.id)).toEqual([
+      DEFAULT_THEME_ID,
+      DARK_THEME_ID,
+    ]);
+
+    expect(builder.theme.register(themeInput()).ok).toBe(true);
+
+    expect(builder.theme.all().map((theme) => theme.id)).toEqual([
+      DEFAULT_THEME_ID,
+      DARK_THEME_ID,
+      "acme.brand",
+    ]);
+  });
+});
+
+describe("layout API", () => {
+  it("registers a layout into the layout registry", () => {
+    const builder = create();
+    const layout = layoutInput();
+
+    const registered = builder.layout.register(layout);
+
+    expect(registered.ok).toBe(true);
+    if (!registered.ok) return;
+    expect(registered.value).toBe(layout);
+    expect(builder.registries.layouts.get("acme.layout")).toBe(layout);
+  });
+
+  it("reports a duplicate layout id", () => {
+    const builder = create();
+    expect(builder.layout.register(layoutInput()).ok).toBe(true);
+
+    const duplicate = builder.layout.register(layoutInput());
+
+    expect(duplicate.ok).toBe(false);
+    if (duplicate.ok) return;
+    expect(duplicate.error[0]).toMatchObject({
+      code: "sdk.duplicate-id",
+      severity: "error",
+      path: ["layouts", "acme.layout"],
+    });
+  });
+
+  it("surfaces an invalid layout as sdk.invalid-input without throwing", () => {
+    const builder = create();
+    const invalid = layoutInput({ panels: [{ panelId: "", region: "left" }] });
+
+    expect(() => builder.layout.register(invalid)).not.toThrow();
+    const registered = builder.layout.register(invalid);
+
+    expect(registered.ok).toBe(false);
+    if (registered.ok) return;
+    expect(registered.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      severity: "error",
+      path: ["layouts", "panels", "0", "panelId"],
+    });
+    expect(builder.registries.layouts.has("acme.layout")).toBe(false);
+  });
+
+  it("refuses an unknown layout id and keeps the active layout", () => {
+    const builder = create();
+    const before = builder.layout.active();
+
+    const selected = builder.layout.setDefault("acme.missing");
+
+    expect(selected.ok).toBe(false);
+    if (selected.ok) return;
+    expect(selected.error[0]).toMatchObject({
+      code: "sdk.unknown-layout",
+      severity: "error",
+    });
+    expect(builder.layout.active()).toBe(before);
+    expect(builder.store.getState().layoutId).toBe(EDITOR_LAYOUT_ID);
+  });
+
+  it("changes the active layout and its panel state through the UI state store", () => {
+    const builder = create();
+    expect(builder.layout.register(layoutInput()).ok).toBe(true);
+
+    const selected = builder.layout.setDefault("acme.layout");
+
+    expect(selected.ok).toBe(true);
+    if (!selected.ok) return;
+    expect(builder.store.getState().layoutId).toBe("acme.layout");
+    expect(builder.layout.active()).toBe(selected.value);
+    expect(
+      builder.store.getState().layout?.panels.map((panel) => [panel.panelId, panel.region]),
+    ).toEqual([["palette", "left"]]);
+  });
+
+  it("reports the active layout and every registered one", () => {
+    const builder = create();
+    expect(builder.layout.active().id).toBe(EDITOR_LAYOUT_ID);
+    expect(builder.layout.all().map((layout) => layout.id)).toEqual([
+      EDITOR_LAYOUT_ID,
+      CANVAS_ONLY_LAYOUT_ID,
+      "nodera.layout.ide",
+    ]);
+  });
+});
+
+describe("theme and layout registry configuration", () => {
+  it("registers configured themes and layouts and applies the selected ones", () => {
+    const builder = create({
+      registry: { themes: [themeInput()], layouts: [layoutInput()] },
+      ui: { theme: "acme.brand", layout: "acme.layout" },
+    });
+
+    expect(builder.registries.themes.has("acme.brand")).toBe(true);
+    expect(builder.registries.layouts.has("acme.layout")).toBe(true);
+    expect(builder.store.getState().themeId).toBe("acme.brand");
+    expect(builder.store.getState().layoutId).toBe("acme.layout");
+    expect(builder.theme.active().id).toBe("acme.brand");
+    expect(builder.layout.active().id).toBe("acme.layout");
+  });
+
+  it("aggregates duplicate and invalid registry entries with every other issue", () => {
+    const issues = fail({
+      registry: {
+        themes: [
+          themeInput(),
+          themeInput(),
+          themeInput({ id: "acme.other", name: "" }),
+        ],
+        layouts: [layoutInput(), layoutInput()],
+      },
+      ui: { theme: "acme.missing" },
+    });
+
+    expect(issues.map((issue) => issue.code)).toEqual([
+      "sdk.duplicate-id",
+      "sdk.invalid-input",
+      "sdk.duplicate-id",
+      "sdk.unknown-theme",
+    ]);
+    expect(issues.map((issue) => issue.path)).toEqual([
+      ["registry", "themes", "acme.brand"],
+      ["registry", "themes"],
+      ["registry", "layouts", "acme.layout"],
+      ["ui", "theme"],
+    ]);
   });
 });

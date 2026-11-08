@@ -18,12 +18,14 @@ import { NoderaDomain } from "@nodera/domain";
 import { NodeRegistry, type NodeDefinition } from "@nodera/node-registry";
 import { EdgeRegistry, type EdgeDefinition } from "@nodera/edge-registry";
 import { ValidatorRegistry } from "@nodera/validation";
-import { DEFAULT_THEME_ID, ThemeRegistry } from "@nodera/theme-engine";
+import { DEFAULT_THEME_ID, ThemeRegistry, createTheme } from "@nodera/theme-engine";
+import type { CreateThemeInput, ThemeDefinition } from "@nodera/theme-engine";
 import { EDITOR_LAYOUT_ID, LayoutRegistry, createLayoutState } from "@nodera/layout-engine";
 import {
   UiStateStore,
   createDefaultPanelRegistry,
   createDefaultToolRegistry,
+  type LayoutDefinition,
   type PanelDefinition,
   type PanelRegistry,
   type ToolDefinition,
@@ -54,6 +56,12 @@ import {
   type SdkIssue,
   type SdkIssues,
 } from "../errors.js";
+import { createBuilderEvents, type BuilderEventApi } from "../events/events-api.js";
+import {
+  installPlugin,
+  type BuilderPlugin,
+  type PluginInstallation,
+} from "../plugin/plugin.js";
 import type {
   BuilderConfiguration,
   BuilderDocumentConfiguration,
@@ -76,6 +84,30 @@ export interface BuilderRegistries {
   readonly layouts: LayoutRegistry;
   readonly panels: PanelRegistry;
   readonly tools: ToolRegistry;
+}
+
+/** Theme surface of the builder: the theme registry plus the active selection. */
+export interface BuilderThemeApi {
+  /** Registers one theme built by the theme engine's `createTheme`. */
+  register(input: CreateThemeInput): Result<ThemeDefinition, SdkIssues>;
+  /** Applies a registered theme to the builder's UI state. */
+  setDefault(themeId: string): Result<ThemeDefinition, SdkIssues>;
+  /** Theme currently applied; falls back to the registry default. */
+  active(): ThemeDefinition;
+  /** Every registered theme, in registration order. */
+  all(): readonly ThemeDefinition[];
+}
+
+/** Layout surface of the builder: the layout registry plus the active selection. */
+export interface BuilderLayoutApi {
+  /** Registers one declarative layout. */
+  register(layout: LayoutDefinition): Result<LayoutDefinition, SdkIssues>;
+  /** Applies a registered layout, and the panel state it produces, to the UI state. */
+  setDefault(layoutId: string): Result<LayoutDefinition, SdkIssues>;
+  /** Layout currently applied; falls back to the registry default. */
+  active(): LayoutDefinition;
+  /** Every registered layout, in registration order. */
+  all(): readonly LayoutDefinition[];
 }
 
 /** The assembled builder: the only object a host needs after configuration. */
@@ -106,12 +138,23 @@ export interface Builder {
   readonly graph: BuilderGraphApi;
   /** Portable document facade over the phase-2 document and serializer packages. */
   readonly document: BuilderDocumentApi;
+  /**
+   * Event subscriptions: the application events of the editing session plus the
+   * two SDK-owned plugin events.
+   */
+  readonly events: BuilderEventApi;
+  /** Theme contributions, bound to the builder's UI state store. */
+  readonly theme: BuilderThemeApi;
+  /** Layout contributions, bound to the builder's UI state store. */
+  readonly layout: BuilderLayoutApi;
   registerNode(input: NodeDefinitionInput): Result<NodeDefinition, SdkIssues>;
   registerEdge(input: EdgeDefinitionInput): Result<EdgeDefinition, SdkIssues>;
   registerProperty(input: PropertyInput): Result<PropertyDefinition, SdkIssues>;
   registerPanel(panel: PanelDefinition): Result<PanelDefinition, SdkIssues>;
   registerTool(tool: ToolDefinition): Result<ToolDefinition, SdkIssues>;
   bindRenderer(kind: RendererKind, id: string, value: unknown): Result<Builder, SdkError>;
+  /** Installs one plugin and reports what it contributed. */
+  use(plugin: BuilderPlugin): Result<PluginInstallation, SdkIssues>;
   createEditor(options?: EditorEngineOptions): Result<EditorEngine, SdkError>;
   dispose(): void;
 }
@@ -136,6 +179,141 @@ function disposed(operation: string): SdkError {
     `The builder has been disposed; "${operation}" is no longer available`,
     { metadata: { operation } },
   );
+}
+
+/** Issue for a theme id no registry entry matches. */
+function unknownThemeIssue(
+  themeId: string,
+  themes: ThemeRegistry,
+  path?: readonly string[],
+): SdkIssue {
+  return toIssue(
+    sdkError("sdk.unknown-theme", `No theme registered with id "${themeId}"`, {
+      ...(path === undefined ? {} : { path }),
+      metadata: { value: themeId, known: themes.all().map((theme) => theme.id) },
+    }),
+  );
+}
+
+/** Issue for a layout id no registry entry matches. */
+function unknownLayoutIssue(
+  layoutId: string,
+  layouts: LayoutRegistry,
+  path?: readonly string[],
+): SdkIssue {
+  return toIssue(
+    sdkError("sdk.unknown-layout", `No layout registered with id "${layoutId}"`, {
+      ...(path === undefined ? {} : { path }),
+      metadata: { value: layoutId, known: layouts.all().map((layout) => layout.id) },
+    }),
+  );
+}
+
+/** Message of a thrown value, whatever the theme engine threw. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Registers one `createTheme` input.
+ *
+ * `createTheme` is the theme engine's validating factory and it throws for the
+ * inputs it rejects (an empty id or name, broken tokens). The SDK never throws
+ * for data, so the throw becomes `sdk.invalid-input` and the registry decides
+ * everything else — duplicate ids included.
+ */
+function registerTheme(
+  themes: ThemeRegistry,
+  input: CreateThemeInput,
+  path: readonly string[],
+): Result<ThemeDefinition, SdkIssues> {
+  let theme: ThemeDefinition;
+  try {
+    theme = createTheme(input);
+  } catch (error) {
+    return err([
+      toIssue(
+        sdkError("sdk.invalid-input", messageOf(error), {
+          path,
+          metadata: { value: input.id },
+        }),
+      ),
+    ]);
+  }
+  const registered = themes.register(theme);
+  if (!registered.ok) {
+    return err([registryIssue(registered.error, [...path, registered.error.id])]);
+  }
+  return ok(registered.value);
+}
+
+/**
+ * Structural checks of a layout definition.
+ *
+ * No core validator covers layouts — `LayoutRegistry` only owns duplicate and
+ * unknown ids — so the SDK checks the boundary of what a host hands in and
+ * lets the registry decide conflicts.
+ */
+function layoutIssues(layout: LayoutDefinition, path: readonly string[]): SdkIssue[] {
+  const issues: SdkIssue[] = [];
+  if (typeof layout.id !== "string" || layout.id.trim().length === 0) {
+    issues.push(
+      toIssue(
+        sdkError("sdk.invalid-input", "Layout must declare a non-empty id", {
+          path,
+          metadata: { value: layout.id },
+        }),
+      ),
+    );
+  }
+  if (!Array.isArray(layout.panels)) {
+    issues.push(
+      toIssue(
+        sdkError("sdk.invalid-input", "Layout must declare its panels as an array", { path }),
+      ),
+    );
+    return issues;
+  }
+  layout.panels.forEach((placement, index) => {
+    if (typeof placement.panelId !== "string" || placement.panelId.trim().length === 0) {
+      issues.push(
+        toIssue(
+          sdkError(
+            "sdk.invalid-input",
+            "Layout panel placement must declare a non-empty panel id",
+            { path: [...path, "panels", String(index), "panelId"] },
+          ),
+        ),
+      );
+    }
+    if (typeof placement.region !== "string" || placement.region.trim().length === 0) {
+      issues.push(
+        toIssue(
+          sdkError("sdk.invalid-input", "Layout panel placement must declare a region", {
+            path: [...path, "panels", String(index), "region"],
+          }),
+        ),
+      );
+    }
+  });
+  return issues;
+}
+
+/** Registers one layout definition after checking its structure. */
+function registerLayout(
+  layouts: LayoutRegistry,
+  layout: LayoutDefinition,
+  path: readonly string[],
+): Result<LayoutDefinition, SdkIssues> {
+  const issues = layoutIssues(layout, path);
+  if (issues.length > 0) {
+    return err(issues);
+  }
+  const registered = layouts.register(layout);
+  if (!registered.ok) {
+    return err([registryIssue(registered.error, [...path, registered.error.id])]);
+  }
+  return ok(registered.value);
 }
 
 /**
@@ -343,6 +521,9 @@ class SdkBuilder implements Builder {
   readonly documentFormat: BuilderDocumentFormat;
   readonly graph: BuilderGraphApi;
   readonly document: BuilderDocumentApi;
+  readonly events: BuilderEventApi;
+  readonly theme: BuilderThemeApi;
+  readonly layout: BuilderLayoutApi;
 
   private readonly domain: NoderaDomain;
   private bindings: RendererBindings;
@@ -362,6 +543,19 @@ class SdkBuilder implements Builder {
     this.bindings = options.renderers;
     this.graph = createGraphApi(this.editor);
     this.document = createDocumentApi(this.editor, this.documentFormat);
+    this.events = createBuilderEvents(this.editor.events);
+    this.theme = {
+      register: (input) => this.addTheme(input),
+      setDefault: (themeId) => this.selectTheme(themeId),
+      active: () => this.activeTheme(),
+      all: () => this.registries.themes.all(),
+    };
+    this.layout = {
+      register: (layout) => this.addLayout(layout),
+      setDefault: (layoutId) => this.selectLayout(layoutId),
+      active: () => this.activeLayout(),
+      all: () => this.registries.layouts.all(),
+    };
   }
 
   get renderers(): RendererBindings {
@@ -458,6 +652,13 @@ class SdkBuilder implements Builder {
     return ok(new EditorEngine({ ...options, domain: this.domain }));
   }
 
+  use(plugin: BuilderPlugin): Result<PluginInstallation, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([toIssue(disposed("use"))]);
+    }
+    return installPlugin(this, plugin);
+  }
+
   /**
    * Releases the builder. Disposing is idempotent and closes every operation
    * that would mutate or extend the composition; the state the host already
@@ -465,6 +666,69 @@ class SdkBuilder implements Builder {
    */
   dispose(): void {
     this.disposedFlag = true;
+  }
+
+  private addTheme(input: CreateThemeInput): Result<ThemeDefinition, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([toIssue(disposed("theme.register"))]);
+    }
+    return registerTheme(this.registries.themes, input, ["themes"]);
+  }
+
+  /**
+   * Applies a registered theme.
+   *
+   * The registry stays the owner of the default id — an unknown id is its
+   * decision — and the UI state store is what the presentation binding reads.
+   */
+  private selectTheme(themeId: string): Result<ThemeDefinition, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([toIssue(disposed("theme.setDefault"))]);
+    }
+    const selected = this.registries.themes.setDefault(themeId);
+    if (!selected.ok) {
+      return err([unknownThemeIssue(themeId, this.registries.themes)]);
+    }
+    this.store.setTheme(themeId);
+    return ok(selected.value);
+  }
+
+  private activeTheme(): ThemeDefinition {
+    const themeId = this.store.getState().themeId;
+    return this.registries.themes.get(themeId) ?? this.registries.themes.getDefault();
+  }
+
+  private addLayout(layout: LayoutDefinition): Result<LayoutDefinition, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([toIssue(disposed("layout.register"))]);
+    }
+    return registerLayout(this.registries.layouts, layout, ["layouts"]);
+  }
+
+  /**
+   * Applies a registered layout together with the panel state it produces.
+   *
+   * The layout engine derives that state from the registered panels, so the
+   * store never holds a layout whose panels the builder does not know.
+   */
+  private selectLayout(layoutId: string): Result<LayoutDefinition, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([toIssue(disposed("layout.setDefault"))]);
+    }
+    const selected = this.registries.layouts.setDefault(layoutId);
+    if (!selected.ok) {
+      return err([unknownLayoutIssue(layoutId, this.registries.layouts)]);
+    }
+    this.store.setLayout(
+      layoutId,
+      createLayoutState(selected.value, { panels: this.registries.panels.all() }),
+    );
+    return ok(selected.value);
+  }
+
+  private activeLayout(): LayoutDefinition {
+    const layoutId = this.store.getState().layoutId;
+    return this.registries.layouts.get(layoutId) ?? this.registries.layouts.getDefault();
   }
 }
 
@@ -559,29 +823,29 @@ export function createBuilder(
     renderers = added.value.renderers;
   }
 
+  for (const input of configuration.registry?.themes ?? []) {
+    const registered = registerTheme(themes, input, ["registry", "themes"]);
+    if (!registered.ok) {
+      issues.push(...registered.error);
+    }
+  }
+
+  for (const layout of configuration.registry?.layouts ?? []) {
+    const registered = registerLayout(layouts, layout, ["registry", "layouts"]);
+    if (!registered.ok) {
+      issues.push(...registered.error);
+    }
+  }
+
   const themeId = configuration.ui?.theme ?? DEFAULT_THEME_ID;
   if (!themes.has(themeId)) {
-    issues.push(
-      toIssue(
-        sdkError("sdk.unknown-theme", `No theme registered with id "${themeId}"`, {
-          path: ["ui", "theme"],
-          metadata: { value: themeId, known: themes.all().map((theme) => theme.id) },
-        }),
-      ),
-    );
+    issues.push(unknownThemeIssue(themeId, themes, ["ui", "theme"]));
   }
 
   const layoutId = configuration.ui?.layout ?? EDITOR_LAYOUT_ID;
   const layoutDefinition = layouts.get(layoutId);
   if (layoutDefinition === undefined) {
-    issues.push(
-      toIssue(
-        sdkError("sdk.unknown-layout", `No layout registered with id "${layoutId}"`, {
-          path: ["ui", "layout"],
-          metadata: { value: layoutId, known: layouts.all().map((layout) => layout.id) },
-        }),
-      ),
-    );
+    issues.push(unknownLayoutIssue(layoutId, layouts, ["ui", "layout"]));
   }
 
   if (issues.length > 0) {
@@ -613,27 +877,36 @@ export function createBuilder(
     domain,
   };
 
-  return ok(
-    new SdkBuilder({
-      id,
-      adapter,
-      features: features.value,
-      diagnostics,
-      registries: {
-        nodes: domain.nodes,
-        edges: domain.edges,
-        validators: domain.validators,
-        themes,
-        layouts,
-        panels,
-        tools,
-      },
-      properties,
-      renderers,
-      store,
-      documentFormat: documentFormat.value,
-      domain,
-      editor: new EditorEngine(editorOptions),
-    }),
-  );
+  const builder = new SdkBuilder({
+    id,
+    adapter,
+    features: features.value,
+    diagnostics,
+    registries: {
+      nodes: domain.nodes,
+      edges: domain.edges,
+      validators: domain.validators,
+      themes,
+      layouts,
+      panels,
+      tools,
+    },
+    properties,
+    renderers,
+    store,
+    documentFormat: documentFormat.value,
+    domain,
+    editor: new EditorEngine(editorOptions),
+  });
+
+  // Configured plugins run last, once every declarative registry is populated,
+  // so a plugin sees the same builder a host would after construction.
+  for (const plugin of configuration.plugins ?? []) {
+    const installed = builder.use(plugin);
+    if (!installed.ok) {
+      issues.push(...installed.error);
+    }
+  }
+
+  return issues.length === 0 ? ok(builder) : err(issues);
 }

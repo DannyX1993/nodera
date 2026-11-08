@@ -14,6 +14,12 @@
  * lossless. `import` is the only mutating call: it loads the rebuilt graph as
  * the editing target through the load use case. `serialize`, `deserialize`,
  * `export` and `validate` never touch the editing session.
+ *
+ * `export` and `serialize` announce their success with the application
+ * `graph.exported` event, using the payload `exportDocument` documents
+ * (`{ graphId, format }`). It is emitted here rather than by delegating to that
+ * use case because the use case rebuilds the document from the graph, which
+ * would drop the carried vendor data this facade preserves.
  */
 
 import { err, ok, type Result, type ValidationIssue } from "@nodera/contracts";
@@ -104,7 +110,12 @@ function documentIssues(issues: readonly ValidationIssue[]): SdkIssues {
   });
 }
 
-/** Serializes one document, refusing a format the SDK does not implement. */
+/**
+ * Serializes one document, refusing a format the SDK does not implement.
+ *
+ * Emitting belongs to the live-document operations, not to this helper: a
+ * serializer object built for one format is a pure string conversion.
+ */
 function serializeDocument(
   document: GraphDocument,
   format: BuilderDocumentFormatName,
@@ -217,6 +228,24 @@ export function createDocumentApi(
     return ok(documentToGraph(parsed.value));
   }
 
+  /**
+   * Serializes the live document and announces the export.
+   *
+   * The event is emitted only after a successful serialization and carries the
+   * same payload the application export use case documents, so a host sees one
+   * `graph.exported` per exported document regardless of which layer serialized.
+   */
+  function exportLive(name: BuilderDocumentFormatName): Result<string, SdkIssues> {
+    const serialized = serializeDocument(create(), name);
+    if (serialized.ok) {
+      editor.events.emit({
+        name: "graph.exported",
+        payload: { graphId: editor.graph.id, format: name },
+      });
+    }
+    return serialized;
+  }
+
   return {
     create,
 
@@ -238,11 +267,11 @@ export function createDocumentApi(
     },
 
     export(name: BuilderDocumentFormatName): Result<string, SdkIssues> {
-      return serializeDocument(create(), name);
+      return exportLive(name);
     },
 
     serialize(name: BuilderDocumentFormatName): Result<string, SdkIssues> {
-      return serializeDocument(create(), name);
+      return exportLive(name);
     },
 
     deserialize,

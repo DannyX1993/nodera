@@ -272,3 +272,67 @@ describe("document validation", () => {
     }
   });
 });
+
+describe("graph.exported emission", () => {
+  it("emits one graph.exported per successful export and serialize", () => {
+    const builder = create();
+    addNodeOrThrow(builder);
+    const graphId = String(builder.editor.graph.id);
+    const exported: { readonly graphId: string; readonly format: string }[] = [];
+    builder.editor.events.subscribe("graph.exported", (event) => {
+      exported.push(event.payload);
+    });
+
+    const json = textOf(builder.document.export("json"));
+
+    expect(json.length).toBeGreaterThan(0);
+    expect(exported).toEqual([{ graphId, format: "json" }]);
+
+    textOf(builder.document.serialize("yaml"));
+
+    expect(exported).toEqual([
+      { graphId, format: "json" },
+      { graphId, format: "yaml" },
+    ]);
+  });
+
+  it("never emits for deserialize, import, validate or a rejected format", () => {
+    const builder = create();
+    addNodeOrThrow(builder);
+    const text = textOf(builder.document.serialize("json"));
+    const document = builder.document.create();
+    const exported: unknown[] = [];
+    builder.editor.events.subscribe("graph.exported", (event) => {
+      exported.push(event.payload);
+    });
+
+    builder.document.deserialize("json", text);
+    builder.document.import(document);
+    builder.document.validate(document);
+    builder.document.export("xml" as BuilderDocumentFormatName);
+
+    expect(exported).toEqual([]);
+  });
+
+  it("emits while still carrying the data the domain does not model", () => {
+    const builder = create();
+    const imported = builder.document.import({
+      format: "ggd",
+      version: "1.0.0",
+      metadata: { id: "graph-demo", name: "Demo" },
+      extensions: [],
+      "x-vendor": { source: "acme" },
+      graph: { nodes: [{ id: "node-a", type: REQUEST }], edges: [] },
+    });
+    expect(imported.ok).toBe(true);
+    const exported: unknown[] = [];
+    builder.editor.events.subscribe("graph.exported", (event) => {
+      exported.push(event.payload);
+    });
+
+    const serialized: unknown = JSON.parse(textOf(builder.document.export("json")));
+
+    expect(exported).toHaveLength(1);
+    expect(field(serialized, "x-vendor")).toEqual({ source: "acme" });
+  });
+});
