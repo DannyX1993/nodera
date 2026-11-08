@@ -2,9 +2,18 @@ import { type FC, type ComponentType, type ReactNode, useMemo } from "react";
 
 import { PortHandle } from "../renderers/port-renderer.js";
 import { DefaultNodeRenderer } from "../renderers/default-node-renderer.js";
-import type { NoderaNodeData, NoderaNodeRendererProps } from "../renderers/node-renderer-props.js";
-import type { NodeRendererRegistry } from "../registries/renderer-registries.js";
-import { DEFAULT_NODE_RENDERER_ID } from "../registries/renderer-registries.js";
+import type {
+  NoderaNodeData,
+  NoderaNodePort,
+  NoderaNodeRendererProps,
+  NoderaPortRendererProps,
+} from "../renderers/node-renderer-props.js";
+import type { NodeRendererRegistry, PortRendererRegistry } from "../registries/renderer-registries.js";
+import {
+  DEFAULT_NODE_RENDERER_ID,
+  DEFAULT_PORT_RENDERER_ID,
+  resolvePortRenderer,
+} from "../registries/renderer-registries.js";
 
 /* ------------------------------------------------------------------ */
 /*  Extended data type                                                 */
@@ -22,6 +31,60 @@ export interface NoderaNodeDataWithRenderer extends NoderaNodeData {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Port rendering                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Builds the props a port renderer receives from a port data entry. */
+function portRendererProps(port: NoderaNodePort): NoderaPortRendererProps {
+  return {
+    portId: port.id,
+    direction: port.direction,
+    ...(port.name !== undefined ? { name: port.name } : {}),
+    ...(port.visual !== undefined ? { visual: port.visual } : {}),
+  };
+}
+
+/**
+ * Resolve the component that draws one port.
+ *
+ * A port renderer id declared in `visual.renderer` is resolved through the
+ * registry (D8); an unknown id falls back to the registered default port
+ * renderer, and when no port registry is supplied (or nothing resolves)
+ * the built-in {@link PortHandle} draws the port. Resolution never throws
+ * here: a missing port renderer must not break a whole node.
+ */
+function resolvePortComponent(
+  port: NoderaNodePort,
+  registry?: PortRendererRegistry,
+): ComponentType<NoderaPortRendererProps> {
+  if (registry === undefined) {
+    return PortHandle;
+  }
+  const rendererId = port.visual?.renderer ?? DEFAULT_PORT_RENDERER_ID;
+  try {
+    return resolvePortRenderer(rendererId, registry);
+  } catch {
+    return PortHandle;
+  }
+}
+
+/**
+ * Renders one component per port of a node.
+ *
+ * The wrapper owns port rendering for EVERY node renderer, so a custom
+ * node renderer gets ports for free and ports are never duplicated.
+ */
+function renderPorts(
+  ports: NoderaNodeData["ports"],
+  registry?: PortRendererRegistry,
+): ReactNode[] {
+  return ports.map((port) => {
+    const PortComponent = resolvePortComponent(port, registry);
+    return <PortComponent key={port.id} {...portRendererProps(port)} />;
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /*  Node type factory                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -30,17 +93,21 @@ export interface NoderaNodeDataWithRenderer extends NoderaNodeData {
  * 1. Resolves the renderer id from data.
  * 2. Looks up a custom renderer in the provided registry.
  * 3. Falls back to DefaultNodeRenderer when not found.
- * 4. Always renders PortHandle rows for data.ports.
+ * 4. Always renders the node ports through the port renderer registry
+ *    (registered port renderer or the built-in PortHandle).
  *
- * The wrapper renders port handles AND the renderer body. The
- * DefaultNodeRenderer also renders ports from data.ports, so the
- * wrapper renders its own port handles in addition to the renderer's.
+ * The wrapper renders ports AND the renderer body. DefaultNodeRenderer
+ * renders no ports itself, so the wrapper is the single owner of port
+ * rendering: a custom node renderer gets ports for free and ports are
+ * never duplicated.
  *
  * @param registry - the node renderer registry (may be undefined)
+ * @param portRendererRegistry - the port renderer registry (may be undefined)
  * @returns a React Flow node type component
  */
 export function createNodeType(
   registry?: NodeRendererRegistry,
+  portRendererRegistry?: PortRendererRegistry,
 ): ComponentType<NoderaNodeRendererProps> {
   return function NoderaNodeRendererComponent({
     data,
@@ -65,16 +132,7 @@ export function createNodeType(
     // Port handles are rendered by the wrapper for ALL renderers,
     // ensuring hosts can always see ports even when supplying
     // custom renderers that don't include them.
-    const portHandles = data.ports.map((port) => {
-      const props: { portId: string; direction: typeof port.direction; name?: string } = {
-        portId: port.id,
-        direction: port.direction,
-      };
-      if (port.name !== undefined) {
-        props.name = port.name;
-      }
-      return <PortHandle key={port.id} {...props} />;
-    });
+    const portHandles = renderPorts(data.ports, portRendererRegistry);
 
     return (
       <>
@@ -97,8 +155,11 @@ export function createNodeType(
  * applications that do not use the factory pattern.
  */
 export const NoderaNodeRenderer: FC<
-  NoderaNodeRendererProps & { nodeRendererRegistry?: NodeRendererRegistry }
-> = ({ data, selected, nodeRendererRegistry }) => {
+  NoderaNodeRendererProps & {
+    nodeRendererRegistry?: NodeRendererRegistry;
+    portRendererRegistry?: PortRendererRegistry;
+  }
+> = ({ data, selected, nodeRendererRegistry, portRendererRegistry }) => {
   // Determine the renderer id from extended data.
   const rendererId = (data as NoderaNodeDataWithRenderer).rendererId;
 
@@ -114,16 +175,7 @@ export const NoderaNodeRenderer: FC<
     RendererComponent = DefaultNodeRenderer;
   }
 
-  const portHandles = data.ports.map((port) => {
-    const props: { portId: string; direction: typeof port.direction; name?: string } = {
-      portId: port.id,
-      direction: port.direction,
-    };
-    if (port.name !== undefined) {
-      props.name = port.name;
-    }
-    return <PortHandle key={port.id} {...props} />;
-  });
+  const portHandles = renderPorts(data.ports, portRendererRegistry);
 
   return (
     <>
@@ -144,10 +196,12 @@ export const NoderaNodeRenderer: FC<
  * - Every registered renderer id from the registry.
  * - The default sentinel (`nodera-default-node`) always.
  *
- * Each component is a factory-created wrapper that renders port handles.
+ * Each component is a factory-created wrapper that resolves the node
+ * renderer and renders the node ports through the port renderer registry.
  */
 export function useNodeTypes(
   registry?: NodeRendererRegistry,
+  portRendererRegistry?: PortRendererRegistry,
 ): Record<string, ComponentType<NoderaNodeRendererProps>> {
   return useMemo(() => {
     const types: Record<string, ComponentType<NoderaNodeRendererProps>> = {};
@@ -155,7 +209,7 @@ export function useNodeTypes(
     if (registry) {
       for (const id of registry.listIds()) {
         try {
-          types[id] = createNodeType(registry);
+          types[id] = createNodeType(registry, portRendererRegistry);
         } catch {
           // Skip unresolvable registrations.
         }
@@ -163,8 +217,8 @@ export function useNodeTypes(
     }
 
     // Default sentinel always available.
-    types[DEFAULT_NODE_RENDERER_ID] = createNodeType(registry);
+    types[DEFAULT_NODE_RENDERER_ID] = createNodeType(registry, portRendererRegistry);
 
     return types;
-  }, [registry]);
+  }, [registry, portRendererRegistry]);
 }

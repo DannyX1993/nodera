@@ -69,4 +69,60 @@ describe("DefaultNodeRenderer", () => {
     const { container } = renderNode(makeData());
     expect(container.querySelectorAll("[data-nodera-port-id]")).toHaveLength(0);
   });
+
+  /* ---------------------------------------------------------------- */
+  /*  Token-driven node styles (S3 Node Styles, D8)                    */
+  /* ---------------------------------------------------------------- */
+
+  it("styles the node from the design tokens when no visual is declared", () => {
+    const { container } = renderNode(makeData());
+    const node = container.querySelector("[data-nodera-node]") as HTMLElement;
+
+    expect(node.style.getPropertyValue("background-color")).toBe(
+      "var(--ndr-node-background, #ffffff)",
+    );
+    expect(node.style.getPropertyValue("border-width")).toBe(
+      "var(--ndr-node-border-width, 1px)",
+    );
+    expect(node.style.getPropertyValue("border-color")).toBe(
+      "var(--ndr-node-border-color, #c7d2e0)",
+    );
+    expect(node.style.getPropertyValue("border-radius")).toBe(
+      "var(--ndr-node-radius, 5px)",
+    );
+    expect(node.style.getPropertyValue("padding")).toBe(
+      "var(--ndr-node-padding, 8px)",
+    );
+    expect(node.style.getPropertyValue("color")).toBe(
+      "var(--ndr-node-text-color, #111827)",
+    );
+    expect(node.style.getPropertyValue("font-size")).toBe(
+      "var(--ndr-node-font-size, 13px)",
+    );
+    expect(node.style.getPropertyValue("min-width")).toBe(
+      "var(--ndr-node-min-width, 140px)",
+    );
+  });
+
+  it("styles selection from the selection tokens when selected", () => {
+    const { container } = renderNode(makeData(), true);
+    const node = container.querySelector("[data-nodera-node]") as HTMLElement;
+
+    expect(node.style.getPropertyValue("background-color")).toBe(
+      "var(--ndr-node-background-selected, #eff6ff)",
+    );
+    expect(node.style.getPropertyValue("outline")).toBe(
+      "var(--ndr-selection-outline-width, 2px) solid var(--ndr-selection-outline-color, #2563eb)",
+    );
+  });
+
+  it("explicit visual background and border colours still win over the tokens", () => {
+    const { container } = renderNode(
+      makeData({ visual: { backgroundColor: "#123456", borderColor: "#654321" } }),
+    );
+    const node = container.querySelector("[data-nodera-node]") as HTMLElement;
+
+    expect(node.style.backgroundColor).toBe("rgb(18, 52, 86)");
+    expect(node.style.borderColor).toBe("rgb(101, 67, 33)");
+  });
 });

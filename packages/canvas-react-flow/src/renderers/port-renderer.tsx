@@ -1,10 +1,39 @@
 import { Handle, Position } from "@xyflow/react";
 
-import type { NoderaNodeData } from "./node-renderer-props.js";
+import type { NoderaPortRendererProps } from "./node-renderer-props.js";
 
 /* ------------------------------------------------------------------ */
 /*  PortHandle                                                         */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Props accepted by {@link PortHandle}.
+ *
+ * `direction` is optional here (defaulting to `bidirectional`) so the
+ * default handle stays usable on its own, while a value that satisfies
+ * {@link NoderaPortRendererProps} is always accepted.
+ */
+export type PortHandleProps = Omit<NoderaPortRendererProps, "direction"> & {
+  readonly direction?: NoderaPortRendererProps["direction"];
+};
+
+/**
+ * Inline styles for the handle.
+ *
+ * Every value is a CSS custom property with a literal fallback (D2/D8):
+ * the theme engine writes `--ndr-handle-*` variables on a wrapper element,
+ * and a host without a theme still gets a usable handle because the
+ * fallback is part of the value. No stylesheet is required.
+ */
+const PORT_HANDLE_STYLE = {
+  width: "var(--ndr-handle-size, 8px)",
+  height: "var(--ndr-handle-size, 8px)",
+  backgroundColor: "var(--ndr-handle-background, #ffffff)",
+  borderWidth: "var(--ndr-handle-border-width, 1.5px)",
+  borderStyle: "solid",
+  borderColor: "var(--ndr-handle-border-color, #7c8896)",
+  borderRadius: "var(--ndr-handle-radius, 50%)",
+} as const;
 
 /**
  * Renders a React Flow {@link Handle} wired to a single port.
@@ -22,11 +51,7 @@ export function PortHandle({
   portId,
   direction = "bidirectional",
   name,
-}: {
-  portId: string;
-  direction?: NoderaNodeData["ports"][0]["direction"];
-  name?: string;
-}) {
+}: PortHandleProps) {
   const type: "target" | "source" =
     direction === "input" ? "target" : "source";
 
@@ -45,6 +70,7 @@ export function PortHandle({
       data-nodera-port-id={portId}
       data-nodera-port-direction={direction}
       className="nodera-port-handle"
+      style={PORT_HANDLE_STYLE}
     />
   );
 }

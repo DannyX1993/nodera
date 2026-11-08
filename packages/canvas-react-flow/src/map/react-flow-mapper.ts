@@ -9,7 +9,7 @@ import type {
 import type { Edge, Graph, Node } from "@nodera/graph-model";
 import type { NodeDefinition, NodeVisual } from "@nodera/node-registry";
 import type { EdgeDefinition, EdgeVisual } from "@nodera/edge-registry";
-import type { PortDeclaration, PortDirection, PortInstance } from "@nodera/graph-model";
+import type { PortDeclaration, PortDirection, PortInstance, PortVisual } from "@nodera/graph-model";
 
 /**
  * React Flow Handle type mapping for Nodera port directions.
@@ -68,6 +68,8 @@ interface PortDataEntry {
   name?: string;
   direction: PortDirection;
   dataType?: string;
+  /** Port presentation hints, copied verbatim from the declaration (D8). */
+  visual?: PortVisual;
 }
 
 /**
@@ -103,6 +105,9 @@ const toReactFlowNode = (
     }
     if (decl.dataType !== undefined) {
       entry.dataType = decl.dataType;
+    }
+    if (decl.visual !== undefined) {
+      entry.visual = decl.visual;
     }
     return entry;
   });

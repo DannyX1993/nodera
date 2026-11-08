@@ -136,4 +136,49 @@ describe("DefaultEdgeRenderer (React Flow EdgeProps)", () => {
     );
     expect(container.querySelector(".nodera-edge-selected")).not.toBeNull();
   });
+
+  /* ---------------------------------------------------------------- */
+  /*  Token-driven edge styles (S3 Edge Styles, D8)                    */
+  /* ---------------------------------------------------------------- */
+
+  function renderEdgePath(selected = false) {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        source="n1"
+        target="n2"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={{}}
+        selected={selected}
+      />,
+    );
+    return container.querySelector(".react-flow__edge-path") as SVGPathElement;
+  }
+
+  it("styles the edge path from the edge tokens", () => {
+    const path = renderEdgePath();
+
+    expect(path.style.getPropertyValue("stroke")).toBe(
+      "var(--ndr-edge-stroke-color, #7c8896)",
+    );
+    expect(path.style.getPropertyValue("stroke-width")).toBe(
+      "var(--ndr-edge-stroke-width, 1.5)",
+    );
+  });
+
+  it("styles a selected edge path from the selected edge tokens", () => {
+    const path = renderEdgePath(true);
+
+    expect(path.style.getPropertyValue("stroke")).toBe(
+      "var(--ndr-edge-stroke-color-selected, #2563eb)",
+    );
+    expect(path.style.getPropertyValue("stroke-width")).toBe(
+      "var(--ndr-edge-stroke-width-selected, 2.5)",
+    );
+  });
 });

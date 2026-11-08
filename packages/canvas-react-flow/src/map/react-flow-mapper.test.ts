@@ -636,6 +636,51 @@ describe("T8 audit fixes", () => {
   });
 });
 
+describe("port visual mapping (S3 component replacement)", () => {
+  it("carries the port declaration visual into data.ports", () => {
+    const decl: PortDeclaration = {
+      id: "p1",
+      name: "Port One",
+      direction: "input",
+      visual: { renderer: "acme.port", metadata: { shape: "diamond" } },
+    };
+    const node = buildNode("node-1", "node-def", [
+      buildPortInstance("p1", "input", decl),
+    ]);
+    const graph = buildGraph([node], []);
+
+    const result = toReactFlowNodes(graph, () =>
+      mockNodeDefinition({ ports: [decl] }),
+    );
+
+    const port = (result[0]!.data as { ports: Array<{ id: string; visual?: unknown }> })
+      .ports[0];
+    expect(port?.visual).toEqual({
+      renderer: "acme.port",
+      metadata: { shape: "diamond" },
+    });
+  });
+
+  it("omits the visual key when the port declaration has no visual", () => {
+    const decl: PortDeclaration = {
+      id: "p1",
+      name: "Port One",
+      direction: "input",
+    };
+    const node = buildNode("node-1", "node-def", [
+      buildPortInstance("p1", "input", decl),
+    ]);
+    const graph = buildGraph([node], []);
+
+    const result = toReactFlowNodes(graph, () =>
+      mockNodeDefinition({ ports: [decl] }),
+    );
+
+    const port = (result[0]!.data as { ports: Array<{ id: string }> }).ports[0];
+    expect(port).not.toHaveProperty("visual");
+  });
+});
+
 describe("applyMeasuredDimensions (T8 minimap fix)", () => {
   it("merges measured dimensions into the matching nodes", () => {
     const nodes = [

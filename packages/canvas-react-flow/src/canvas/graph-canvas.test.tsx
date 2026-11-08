@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { render, screen, fireEvent, act, waitFor, cleanup } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, createEvent, act, waitFor, cleanup } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import type { FC, ReactNode } from "react";
 import { createElement } from "react";
@@ -16,6 +16,7 @@ import { createNodeId } from "@nodera/contracts";
 
 import { GraphCanvas, commitDraggedNodes, commitSelectionFromReactFlow } from "./graph-canvas.js";
 import type { GraphCanvasProps } from "./graph-canvas.js";
+import { NODE_DEFINITION_MIME_TYPE } from "./definition-drop.js";
 
 /* ------------------------------------------------------------------ */
 /*  Test harness                                                       */
@@ -252,6 +253,103 @@ describe("T9 audit round 2 fixes", () => {
       expect(engine.graph.nodeCount).toBe(1);
  expect(engine.graph.getNode(createNodeId("n1"))).toBeUndefined();
     });
+    cleanup();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Palette → canvas drop (D7)                                         */
+/* ------------------------------------------------------------------ */
+
+describe("GraphCanvas node definition drop", () => {
+  /** The element that owns the drop handlers (the canvas wrapper). */
+  function dropTarget(container: HTMLElement): HTMLElement {
+    const target = container.querySelector("[data-color-mode]");
+    if (!(target instanceof HTMLElement)) {
+      throw new Error("canvas wrapper not rendered");
+    }
+    return target;
+  }
+
+  /**
+   * Build a drop event carrying a payload and pointer coordinates.
+   *
+   * jsdom has no `DragEvent`, so `fireEvent.drop` falls back to a plain
+   * `Event` that ignores the MouseEvent init (no clientX/clientY). The
+   * coordinates are therefore defined on the event explicitly.
+   */
+  function dropEvent(
+    target: HTMLElement,
+    dataTransfer: { types: readonly string[]; getData(type: string): string },
+    position: { readonly clientX: number; readonly clientY: number } = {
+      clientX: 120,
+      clientY: 80,
+    },
+  ) {
+    const event = createEvent.drop(target, { dataTransfer });
+    Object.defineProperty(event, "clientX", { value: position.clientX });
+    Object.defineProperty(event, "clientY", { value: position.clientY });
+    return event;
+  }
+
+  it("calls onDropNodeDefinition with the payload definition id and a canvas position", () => {
+    const engine = makeEngine();
+    const onDropNodeDefinition = vi.fn();
+    const { container } = renderCanvas(engine, { onDropNodeDefinition });
+
+    const target = dropTarget(container);
+    const event = dropEvent(target, {
+      types: [NODE_DEFINITION_MIME_TYPE],
+      getData: () => "acme.node",
+    });
+    fireEvent(target, event);
+
+    expect(onDropNodeDefinition).toHaveBeenCalledTimes(1);
+    const call = onDropNodeDefinition.mock.calls[0] as unknown as [
+      string,
+      { x: number; y: number },
+    ];
+    expect(call[0]).toBe("acme.node");
+    expect(call[1]).toEqual({ x: 120, y: 80 });
+    cleanup();
+  });
+
+  it("ignores a drop carrying an unknown payload", () => {
+    const engine = makeEngine();
+    const onDropNodeDefinition = vi.fn();
+    const { container } = renderCanvas(engine, { onDropNodeDefinition });
+
+    fireEvent.drop(dropTarget(container), {
+      dataTransfer: { types: ["text/plain"], getData: () => "" },
+      clientX: 10,
+      clientY: 10,
+    });
+
+    expect(onDropNodeDefinition).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("prevents the default dragover for a node definition drag when a drop handler exists", () => {
+    const engine = makeEngine();
+    const { container } = renderCanvas(engine, { onDropNodeDefinition: vi.fn() });
+
+    const notPrevented = fireEvent.dragOver(dropTarget(container), {
+      dataTransfer: { types: [NODE_DEFINITION_MIME_TYPE] },
+    });
+
+    expect(notPrevented).toBe(false);
+    cleanup();
+  });
+
+  it("does not prevent the default dragover when no drop handler exists", () => {
+    const engine = makeEngine();
+    const { container } = renderCanvas(engine);
+
+    const notPrevented = fireEvent.dragOver(dropTarget(container), {
+      dataTransfer: { types: [NODE_DEFINITION_MIME_TYPE] },
+    });
+
+    expect(notPrevented).toBe(true);
     cleanup();
   });
 });

@@ -6,6 +6,7 @@ import {
   type FC,
   type ComponentType,
   type MouseEvent,
+  type DragEvent as ReactDragEvent,
 } from "react";
 
 import {
@@ -24,6 +25,7 @@ import {
   type NodeTypes,
   type EdgeTypes,
   type OnNodeDrag,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 
 import type { EditorEngine } from "@nodera/application";
@@ -41,6 +43,7 @@ import {
 
 import { useEditorGraph } from "./use-editor-graph.js";
 import { useNodeTypes } from "./custom-node.js";
+import { isNodeDefinitionDrag, nodeDefinitionFromDataTransfer } from "./definition-drop.js";
 import { DEFAULT_NODE_RENDERER_ID } from "../registries/renderer-registries.js";
 import {
   nodePositionFromReactFlow,
@@ -49,7 +52,7 @@ import {
   applyMeasuredDimensions,
   hasNewDimensions,
 } from "../map/react-flow-mapper.js";
-import type { NodeRendererRegistry, EdgeRendererRegistry } from "../registries/renderer-registries.js";
+import type { NodeRendererRegistry, EdgeRendererRegistry, PortRendererRegistry } from "../registries/renderer-registries.js";
 import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
 import { DefaultEdgeRenderer } from "../renderers/default-edge-renderer.js";
 import type { NoderaNodeData } from "../renderers/node-renderer-props.js";
@@ -105,6 +108,8 @@ export interface GraphCanvasProps {
   readonly nodeRenderers?: NodeRendererRegistry;
   /** Optional edge renderer registry. When provided, registered renderers are used. */
   readonly edgeRenderers?: EdgeRendererRegistry;
+  /** Optional port renderer registry. When provided, ports use registered renderers. */
+  readonly portRenderers?: PortRendererRegistry;
   /** CSS class for the outer container. */
   readonly className?: string;
   /** Show the minimap. */
@@ -125,6 +130,14 @@ export interface GraphCanvasProps {
   readonly onEdgeClick?: (event: MouseEvent, edge: RfEdge) => void;
   /** Optional callback after a connection is validated (non-persisting probe). */
   readonly onLinkValidate?: (valid: boolean, issues: readonly import("@nodera/contracts").ValidationIssue[]) => void;
+  /**
+   * Optional callback for a node definition dropped on the canvas (D7).
+   *
+   * The adapter only translates the drop into a definition id plus a flow
+   * position; creating the node stays a host decision. Without this
+   * callback the canvas ignores drops entirely.
+   */
+  readonly onDropNodeDefinition?: (definitionId: string, position: XYPosition) => void;
 }
 
 /**
@@ -146,6 +159,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   editor,
   nodeRenderers,
   edgeRenderers,
+  portRenderers,
   className,
   showMinimap = true,
   showControls = true,
@@ -156,13 +170,14 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   onNodeClick: externalOnNodeClick,
   onEdgeClick: externalOnEdgeClick,
   onLinkValidate: externalOnLinkValidate,
+  onDropNodeDefinition: externalOnDropNodeDefinition,
 }) => {
   // Derive RF nodes/edges/selection from engine via event-driven hook.
   const { nodes, edges, refresh } = useEditorGraph(editor);
 
   // nodeTypes: wrapper components that resolve the definition renderer
   // and ALWAYS render the port handles (via useNodeTypes/createNodeType).
-  const nodeTypes = useNodeTypes(nodeRenderers);
+  const nodeTypes = useNodeTypes(nodeRenderers, portRenderers);
 
   // Measured node dimensions are canvas state (never domain state): RF
   // reports them through `dimensions` node changes and both the minimap
@@ -201,6 +216,54 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     types[DEFAULT_EDGE_RENDERER_ID] = DefaultEdgeRenderer;
     return types;
   }, [edgeRenderers]);
+
+  // React Flow instance, captured through `onInit`. Kept in a ref (canvas
+  // state, never domain state) so `screenToFlowPosition` is available to
+  // the drop handler without re-rendering the whole canvas.
+  const flowInstance = useRef<ReactFlowInstance | null>(null);
+
+  const handleInit = useCallback((instance: ReactFlowInstance) => {
+    flowInstance.current = instance;
+  }, []);
+
+  // Drag over: accept the drag only when a drop handler exists AND the
+  // payload announces the node definition MIME type (D7).
+  const handleDragOver = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!externalOnDropNodeDefinition) {
+        return;
+      }
+      if (!isNodeDefinitionDrag(event.dataTransfer)) {
+        return;
+      }
+      event.preventDefault();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [externalOnDropNodeDefinition],
+  );
+
+  // Drop: screen coordinates → flow coordinates through the instance, so
+  // the host creates the node where the user dropped it. Falls back to raw
+  // client coordinates when no instance is available yet.
+  const handleDrop = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!externalOnDropNodeDefinition) {
+        return;
+      }
+      const definitionId = nodeDefinitionFromDataTransfer(event.dataTransfer);
+      if (definitionId === undefined) {
+        return;
+      }
+      event.preventDefault();
+      const screenPosition = { x: event.clientX, y: event.clientY };
+      const position = flowInstance.current
+        ? flowInstance.current.screenToFlowPosition(screenPosition)
+        : screenPosition;
+      externalOnDropNodeDefinition(definitionId, position);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [externalOnDropNodeDefinition],
+  );
 
   // Invalidate connection validation: probe without persisting.
   const isValidConnection = useCallback<IsValidConnection>(
@@ -365,10 +428,13 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       className={className}
       style={{ width: "100%", height: "100%" }}
       data-color-mode={colorMode}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       <ReactFlow
         nodes={nodesWithTypes}
         edges={edges}
+        onInit={handleInit}
         nodeTypes={nodeTypes as unknown as NodeTypes}
         edgeTypes={edgeTypes}
         deleteKeyCode={["Delete", "Backspace"]}
