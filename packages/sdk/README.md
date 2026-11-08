@@ -446,10 +446,10 @@ const report = builder.graph.validate();
 (`examples/phase6-demo/src/builder.ts` and `demo-app.tsx`, trimmed.)
 
 Members: `addNode`, `removeNode`, `moveNode`, `updateProperties`, `connect`,
-`disconnect`, `nodes`, `edges`, `select`, `clearSelection`, `undo`, `redo`,
-`canUndo`, `canRedo`, `validate`, `nodeCount`, `edgeCount`, `selectedNodes`,
-`selectedEdges`. `sourcePort` / `targetPort` default to the node's first output /
-input port.
+`disconnect`, `arrange`, `nodes`, `edges`, `select`, `clearSelection`, `undo`,
+`redo`, `canUndo`, `canRedo`, `validate`, `nodeCount`, `edgeCount`,
+`selectedNodes`, `selectedEdges`. `sourcePort` / `targetPort` default to the
+node's first output / input port.
 
 Every mutation and every read answers in the §9 instance vocabulary
 (`NodeInstanceView`, `EdgeInstanceView`), so a host can read the whole graph
@@ -486,19 +486,72 @@ createBuilder({
 
 Members: `mode` (`"free" | "auto"`, default `"free"`), `direction`
 (`"horizontal" | "vertical"`, default `"horizontal"`; horizontal fills
-row-major, vertical column-major) and `spacing` (distance between adjacent
-slots in document units, default `240`).
+row-major and arranges the ranks along `x`, vertical fills column-major and
+arranges them along `y`), `spacing` (distance between adjacent slots, and the
+in-rank distance of an arrangement, in document units, default `240`),
+`strategy` (globally qualified id of the strategy [`arrange()`](#graph-layout-strategies--buildergraphlayout)
+runs, default `nodera.graph-layout.layered`) and `rankSpacing` (distance between
+consecutive ranks of an arrangement, default: the declared `spacing`).
 
 The assigned position belongs to the same history unit as the creation: `undo()`
 removes the node, `redo()` restores it where it was. A value outside these
-unions, or a spacing that is not a positive finite number, is a configuration
-problem reported as `sdk.invalid-input` with path `graph.layout.<field>`, and the
-builder is not created: nothing is guessed and no geometry is invented.
+unions, a spacing or rank spacing that is not a positive finite number, or a
+`strategy` id no register holds, is a configuration problem reported as
+`sdk.invalid-input` with path `graph.layout.<field>`, and the builder is not
+created: nothing is guessed and no geometry is invented.
 
-Re-laying out an existing graph is **not** part of this configuration. Adding an
-edge or a node never recalculates the whole graph; that is an explicit `Arrange`
-action, requested by the host, and it will be its own command over a layout
-strategy port.
+Re-laying out an existing graph is **not** part of the add: adding an edge or a
+node never recalculates the whole graph. That is `graph.arrange()`, the explicit
+`Arrange` command described below.
+
+### Graph layout strategies — `builder.graphLayout`
+
+`builder.graph.arrange()` is explicit and all-or-nothing: it asks the selected
+strategy where every node goes, and applies the whole answer as one history unit,
+so one `undo()` restores every previous position. The strategy sees plain data
+(instance ids, current positions and edges), never a graph instance or a canvas,
+so it can be replaced without touching any other layer.
+
+```ts
+const arranged = assertOk(builder.graph.arrange());
+// the moved instances, in the §9 vocabulary: [{ id, type, position, ... }]
+
+builder.graph.undo(); // every previous position, in one step
+```
+
+A strategy answer that carries no position at all is an honest no-op: the `free`
+strategy and an empty graph both return an empty list and push no history entry.
+A strategy that answers a diagnostic makes `arrange()` return that diagnostic as
+`"sdk.invalid-input"` (its own code stays in `metadata.strategyCode`) and moves
+nothing.
+
+Members of `builder.graphLayout`: `register(strategy)`, `setDefault(id)`,
+`active()` (the selected id) and `all()` (every registered strategy). The
+built-ins are `nodera.graph-layout.free` (no-op) and
+`nodera.graph-layout.layered` (rank by longest path, in-rank order by node id,
+no crossing minimization); a used id is a `sdk.duplicate-id` and an unknown one
+is refused, so a plugin never shadows the host's selection.
+
+A third-party layouter is a host-side adapter over this port: register it, then
+select it by id — in configuration or with `setDefault`. The framework ships no
+external layout dependency.
+
+```ts
+import type { GraphLayoutStrategy } from "@nodera/sdk";
+
+const dagre: GraphLayoutStrategy = {
+  id: "acme.dagre",
+  place: (input) => dagreAdapter(input), // your adapter, your dependency
+};
+
+assertValid(builder.graphLayout.register(dagre));
+assertValid(builder.graphLayout.setDefault(dagre.id));
+builder.graphLayout.active(); // "acme.dagre" — the next arrange() runs it
+```
+
+There is no runtime toggle for any of this: mode, direction, spacing and
+strategy are host configuration, never a control the framework puts in front of
+a user.
 
 ### Document — `builder.document`
 

@@ -24,6 +24,9 @@
  * - `@nodera/node-registry` / `@nodera/edge-registry` own the definitions.
  * - `@nodera/validation` owns the validation report and its levels;
  *   `@nodera/contracts` owns the diagnostic unit they are made of.
+ * - `@nodera/graph-layout` owns the placement strategy port, so a host can
+ *   write an adapter (`builder.graphLayout.register`) without naming an
+ *   internal module.
  *
  * `LayoutDefinition` is deliberately not re-exported from
  * `@nodera/layout-engine`: that package consumes the type, `@nodera/ui-core`
@@ -69,3 +72,17 @@ export type { EdgeDefinition } from "@nodera/edge-registry";
 
 export type { ValidationLevel, ValidationReport } from "@nodera/validation";
 export type { ValidationIssue } from "@nodera/contracts";
+
+export type {
+  GraphLayoutDiagnostic,
+  GraphLayoutDiagnosticCode,
+  GraphLayoutDirection,
+  GraphLayoutEdgeInput,
+  GraphLayoutInput,
+  GraphLayoutNodeInput,
+  GraphLayoutOptions,
+  GraphLayoutPlacedNode,
+  GraphLayoutResult,
+  GraphLayoutScope,
+  GraphLayoutStrategy,
+} from "@nodera/graph-layout";

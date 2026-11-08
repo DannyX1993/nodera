@@ -17,6 +17,7 @@
     "@nodera/document": "workspace:*",
     "@nodera/domain": "workspace:*",
     "@nodera/edge-registry": "workspace:*",
+    "@nodera/graph-layout": "workspace:*",
     "@nodera/graph-model": "workspace:*",
     "@nodera/layout-engine": "workspace:*",
     "@nodera/node-registry": "workspace:*",

@@ -284,6 +284,42 @@ const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }))
 // placed.position === { x: 0, y: 0 }; the next unpositioned node lands at { x: 0, y: 240 }
 ```
 
+### Arranging an existing graph
+
+`Arrange` is a command, never a side effect. Nothing arranges on an add, on an
+edge change or on a read: the host asks for it.
+
+```ts
+const moved = assertOk(builder.graph.arrange()); // one history unit, all-or-nothing
+builder.graph.undo(); // one undo: every previous position is back
+```
+
+`arrange()` reads the graph, asks the strategy selected by `graph.layout.strategy`
+with the host's `direction`, `spacing` (in-rank distance) and `rankSpacing`
+(between ranks, default `spacing`), and applies the answer through the
+application layer. A strategy that answers a diagnostic makes it fail with
+`sdk.invalid-input` and moves nothing; `nodera.graph-layout.free` and an empty
+graph both return an empty list and push no history entry.
+
+**The strategy is host configuration, and it is replaceable.** `builder.graphLayout`
+registers implementations, selects one by id and reports what is installed:
+
+```ts
+assertValid(builder.graphLayout.register(myDagreAdapter)); // id: "acme.dagre"
+assertValid(builder.graphLayout.setDefault("acme.dagre"));
+builder.graphLayout.active(); // "acme.dagre"
+builder.graphLayout.all().map((strategy) => strategy.id); // built-ins + "acme.dagre"
+```
+
+The in-house `nodera.graph-layout.layered` is the default: ranks by longest path
+from the source nodes, in-rank order by node id, no crossing minimization. A
+host that wants something else writes an adapter over the same port — plain
+input, plain output — and selects it by id, in configuration
+(`graph.layout.strategy`) or with `setDefault`. The framework ships no external
+layout dependency; the adapter's own dependency belongs to the host's build.
+There is no runtime toggle in any of this: a user never chooses the strategy, the
+host does.
+
 ### Reading a graph
 
 A host that only displays state never has to touch `builder.editor`: the graph
@@ -401,7 +437,8 @@ below are the complete lists:
 | `bindRenderer`, `use`, `createEditor` | `builder.events.on` / `once` / `off` / `emitSdk` |
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
-| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `connect`, `disconnect`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
+| `graphLayout.register`, `graphLayout.setDefault` | `graphLayout.active`, `graphLayout.all` |
+| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
 | `graph.undo`, `graph.redo` — nothing is undone, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |
 

@@ -21,6 +21,7 @@ import { err, isValidIdShape, ok, type Result } from "@nodera/contracts";
 import type { NodePosition, PortDirection } from "@nodera/graph-model";
 import {
   addNode,
+  arrangeGraph,
   clearSelection,
   createEdge,
   moveNode,
@@ -34,6 +35,10 @@ import {
   type EditorEngine,
   type UseCaseError,
 } from "@nodera/application";
+import type {
+  GraphLayoutDiagnostic,
+  LayoutStrategyRegistry,
+} from "@nodera/graph-layout";
 import type { ValidationLevel, ValidationReport } from "@nodera/validation";
 import {
   disposedIssue,
@@ -79,6 +84,20 @@ export interface SelectRequest {
 }
 
 /**
+ * What an explicit `Arrange` reads from the composition: the registry the
+ * selected strategy is resolved from, and the rank distance the host declared.
+ *
+ * The registry is passed instead of a resolved strategy so a host that selects
+ * another strategy after construction (`builder.graphLayout.setDefault`) changes
+ * what the very next `arrange()` runs, with no re-composition.
+ */
+export interface ArrangeSettings {
+  readonly strategies: LayoutStrategyRegistry;
+  /** Distance between consecutive ranks; `graph.layout.rankSpacing ?? spacing`. */
+  readonly rankSpacing: number;
+}
+
+/**
  * The graph surface of the builder.
  *
  * Mutation is reported as `Result` so the host branches once per call; the
@@ -96,6 +115,16 @@ export interface BuilderGraphApi {
   ): Result<NodeInstanceView, SdkIssues>;
   connect(request: ConnectRequest): Result<EdgeInstanceView, SdkIssues>;
   disconnect(edgeId: string): Result<EdgeInstanceView, SdkIssues>;
+  /**
+   * Lays the whole graph out with the strategy the host selected.
+   *
+   * Explicit only: no add, edge change or read ever calls it. One history unit
+   * (`arrange-graph`), all-or-nothing: a strategy diagnostic or a rejected
+   * position moves nothing. An answer with no position at all — the `free`
+   * strategy, an empty graph — is an honest no-op that pushes no history entry.
+   * Returns the moved nodes in the §9 instance vocabulary.
+   */
+  arrange(): Result<readonly NodeInstanceView[], SdkIssues>;
   /** Every node of the graph, in the §9 instance vocabulary. */
   nodes(): readonly NodeInstanceView[];
   /** Every edge of the graph, flat, in the §9 instance vocabulary. */
@@ -276,6 +305,50 @@ function missingNodeIssue(nodeId: string): SdkIssue {
 }
 
 /**
+ * Issue for a layout strategy id no registry entry matches.
+ *
+ * The composition root reports an unregistered `graph.layout.strategy` with it
+ * and so does `arrange`, which is why the message and the code live in one
+ * place: a host reads the same diagnosis whichever boundary found the id.
+ */
+export function unknownLayoutStrategyIssue(
+  strategyId: string,
+  known: readonly string[],
+  path: readonly string[],
+): SdkIssue {
+  return {
+    ...sdkError(
+      "sdk.invalid-input",
+      `No graph layout strategy registered with id "${strategyId}"`,
+      { path, metadata: { value: strategyId, known } },
+    ),
+    severity: "error",
+  };
+}
+
+/**
+ * Issue for a strategy that answered a structured diagnostic.
+ *
+ * The strategy code is kept in `metadata.strategyCode` so a host can branch on
+ * the geometry's own diagnosis while handling one SDK error shape.
+ */
+function strategyDiagnosticIssue(
+  diagnostic: GraphLayoutDiagnostic,
+  strategyId: string,
+): SdkIssue {
+  return {
+    ...sdkError("sdk.invalid-input", diagnostic.message, {
+      metadata: {
+        strategyId,
+        strategyCode: diagnostic.code,
+        ...(diagnostic.nodeId === undefined ? {} : { elementId: diagnostic.nodeId }),
+      },
+    }),
+    severity: "error",
+  };
+}
+
+/**
  * Builds the graph facade of a builder over its editing session.
  *
  * The editor owns the graph, the history and the events; this API owns only
@@ -283,7 +356,9 @@ function missingNodeIssue(nodeId: string): SdkIssue {
  * Placement is decided before the use case runs: the API assigns a position
  * only when the host configured `graph.layout.mode: "auto"` and the request
  * carries none, so the position lands inside the same history unit as the
- * creation and an undo removes it with the node.
+ * creation and an undo removes it with the node. `arrange` is the explicit
+ * opposite of that: it asks the selected strategy about the whole graph and
+ * applies the answer as one history unit.
  * `isDisposed` is the builder's own lifecycle flag: a disposed builder refuses
  * every mutation with `sdk.disposed` and keeps every read working, because the
  * state the host already received must stay renderable.
@@ -292,6 +367,7 @@ export function createGraphApi(
   editor: EditorEngine,
   isDisposed: () => boolean,
   graphLayout: ResolvedGraphLayout,
+  arrangeSettings: ArrangeSettings,
 ): BuilderGraphApi {
   return {
     addNode(request: AddNodeRequest): Result<NodeInstanceView, SdkIssues> {
@@ -446,6 +522,56 @@ export function createGraphApi(
 
     nodes(): readonly NodeInstanceView[] {
       return editor.graph.getNodes().map(toNodeInstanceView);
+    },
+
+    arrange(): Result<readonly NodeInstanceView[], SdkIssues> {
+      const closed = closedIssues(isDisposed, "graph.arrange");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const strategyId = arrangeSettings.strategies.defaultStrategyId;
+      const strategy = arrangeSettings.strategies.get(strategyId);
+      if (strategy === undefined) {
+        return err([
+          unknownLayoutStrategyIssue(
+            strategyId,
+            arrangeSettings.strategies.all().map((registered) => registered.id),
+            ["graph", "layout", "strategy"],
+          ),
+        ]);
+      }
+      // The graph is read here, not passed in: the strategy never sees a graph
+      // instance, a node class or a canvas, only plain data (S11).
+      const placed = strategy.place({
+        nodes: editor.graph.getNodes().map((node) => ({
+          id: node.id,
+          ...(node.position === undefined ? {} : { position: node.position }),
+        })),
+        edges: editor.graph.getEdges().map((edge) => ({
+          source: edge.connection.source.nodeId,
+          target: edge.connection.target.nodeId,
+        })),
+        options: {
+          direction: graphLayout.direction,
+          nodeSpacing: graphLayout.spacing,
+          rankSpacing: arrangeSettings.rankSpacing,
+          scope: "all",
+        },
+      });
+      if (!placed.ok) {
+        return err([strategyDiagnosticIssue(placed.error, strategyId)]);
+      }
+      // One use case, one history unit, all-or-nothing: the answer is applied
+      // entirely or not at all, so one undo restores every previous position.
+      const applied = arrangeGraph(editor, {
+        moves: placed.value.positions.map((entry) => ({
+          nodeId: entry.nodeId,
+          position: entry.position,
+        })),
+      });
+      return applied.ok
+        ? ok(applied.value.map(toNodeInstanceView))
+        : err([useCaseIssue(applied.error)]);
     },
 
     edges(): readonly EdgeInstanceView[] {

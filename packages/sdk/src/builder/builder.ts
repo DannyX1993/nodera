@@ -21,6 +21,7 @@ import { ok, err, RegistryStore, type RegistryError, type Result } from "@nodera
 import { DEFAULT_FORMAT_VERSION, GGD_FORMAT } from "@nodera/document";
 import { EditorEngine, type EditorEngineOptions } from "@nodera/application";
 import { NoderaDomain } from "@nodera/domain";
+import { LayoutStrategyRegistry, type GraphLayoutStrategy } from "@nodera/graph-layout";
 import { NodeRegistry, type NodeDefinition } from "@nodera/node-registry";
 import { EdgeRegistry, type EdgeDefinition } from "@nodera/edge-registry";
 import { ValidatorRegistry } from "@nodera/validation";
@@ -52,7 +53,11 @@ import {
 } from "../adapter/adapter.js";
 import { toEdgeDefinition, type EdgeDefinitionInput } from "../authoring/edges.js";
 import { createDocumentApi, type BuilderDocumentApi } from "../document/document-api.js";
-import { createGraphApi, type BuilderGraphApi } from "../graph/graph-api.js";
+import {
+  createGraphApi,
+  unknownLayoutStrategyIssue,
+  type BuilderGraphApi,
+} from "../graph/graph-api.js";
 import { resolveGraphLayout, type ResolvedGraphLayout } from "../graph/placement.js";
 import { toNodeDefinition, type NodeDefinitionInput } from "../authoring/nodes.js";
 import { toPropertyDefinition, type PropertyInput } from "../authoring/properties.js";
@@ -153,6 +158,32 @@ export interface BuilderLayoutApi {
   all(): readonly LayoutDefinition[];
 }
 
+/**
+ * Graph placement surface of the builder: the strategy registry plus the
+ * selection `builder.graph.arrange()` reads.
+ *
+ * This is how a host installs its own adapter — a `@dagrejs/dagre` wrapper or
+ * any other algorithm — and selects it by id. The framework ships the `free`
+ * no-op and the in-house layered strategy; it ships no external layouter. There
+ * is deliberately no runtime toggle a user could flip: the selection is host
+ * configuration, exactly like the mode and the direction.
+ */
+export interface BuilderGraphLayoutApi {
+  /**
+   * Registers one strategy implementation.
+   *
+   * A used id is a `sdk.duplicate-id`, never a silent override: a plugin cannot
+   * shadow the strategy the host already selected.
+   */
+  register(strategy: GraphLayoutStrategy): Result<GraphLayoutStrategy, SdkIssues>;
+  /** Selects the strategy `arrange` runs; an unknown id is an explicit diagnostic. */
+  setDefault(strategyId: string): Result<GraphLayoutStrategy, SdkIssues>;
+  /** Globally qualified id of the strategy `arrange` runs today. */
+  active(): string;
+  /** Every registered strategy, in registration order. */
+  all(): readonly GraphLayoutStrategy[];
+}
+
 /** The assembled builder: the only object a host needs after configuration. */
 export interface Builder {
   /** Globally qualified builder id. */
@@ -198,6 +229,14 @@ export interface Builder {
   readonly theme: BuilderThemeApi;
   /** Layout contributions, bound to the builder's UI state store. */
   readonly layout: BuilderLayoutApi;
+  /**
+   * Placement strategies, and the one an explicit `graph.arrange()` runs.
+   *
+   * The extension point for a third-party layouter: register it here, select it
+   * by id here (or declare it in `graph.layout.strategy`), and `arrange` uses it
+   * without any other layer changing.
+   */
+  readonly graphLayout: BuilderGraphLayoutApi;
   /** Registers one node definition and returns it in the public vocabulary. */
   registerNode(input: NodeDefinitionInput): Result<NodeDefinitionView, SdkIssues>;
   /** Registers one edge definition and returns it in the public vocabulary. */
@@ -338,11 +377,16 @@ function registerTheme(
 /**
  * Structural checks of the graph layout configuration.
  *
- * The host declares who owns placement; a value outside the declared unions, or
- * a spacing that is not a positive finite number, is a configuration problem the
- * builder reports instead of guessing a geometry.
+ * The host declares who owns placement and which strategy an explicit
+ * `Arrange` runs; a value outside the declared unions, a spacing that is not a
+ * positive finite number or a strategy id no registry entry matches is a
+ * configuration problem the builder reports instead of guessing a geometry.
  */
-function graphLayoutIssues(layout: unknown, path: readonly string[]): SdkIssue[] {
+function graphLayoutIssues(
+  layout: unknown,
+  path: readonly string[],
+  strategies: LayoutStrategyRegistry,
+): SdkIssue[] {
   if (!isPlainObject(layout)) {
     return [
       shapeIssue(
@@ -380,6 +424,73 @@ function graphLayoutIssues(layout: unknown, path: readonly string[]): SdkIssue[]
         spacing,
         [...path, "spacing"],
       ),
+    );
+  }
+  const strategy: unknown = Reflect.get(layout, "strategy");
+  if (strategy !== undefined) {
+    if (typeof strategy !== "string") {
+      issues.push(
+        shapeIssue(
+          "Builder graph layout strategy must be a globally qualified strategy id",
+          strategy,
+          [...path, "strategy"],
+        ),
+      );
+    } else if (!strategies.has(strategy)) {
+      issues.push(
+        unknownLayoutStrategyIssue(
+          strategy,
+          strategies.all().map((registered) => registered.id),
+          [...path, "strategy"],
+        ),
+      );
+    }
+  }
+  const rankSpacing: unknown = Reflect.get(layout, "rankSpacing");
+  if (
+    rankSpacing !== undefined &&
+    !(typeof rankSpacing === "number" && Number.isFinite(rankSpacing) && rankSpacing > 0)
+  ) {
+    issues.push(
+      shapeIssue(
+        "Builder graph layout rankSpacing must be a positive finite number",
+        rankSpacing,
+        [...path, "rankSpacing"],
+      ),
+    );
+  }
+  return issues;
+}
+
+/**
+ * Structural checks of one placement strategy the host hands in.
+ *
+ * `LayoutStrategyRegistry` owns duplicate and unknown ids only; a strategy
+ * without an id or without a `place` function would be stored under an unusable
+ * key, so the SDK checks the shape before the registry sees it.
+ */
+function strategyIssues(strategy: unknown, path: readonly string[]): SdkIssue[] {
+  if (!isPlainObject(strategy)) {
+    return [
+      shapeIssue(
+        "A layout strategy must be an object declaring an id and a place function",
+        strategy,
+        path,
+      ),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  const id: unknown = Reflect.get(strategy, "id");
+  if (typeof id !== "string" || id.trim().length === 0) {
+    issues.push(identifierFieldIssue("Layout strategy", "id", id, [...path, "id"]));
+  }
+  const place: unknown = Reflect.get(strategy, "place");
+  if (typeof place !== "function") {
+    issues.push(
+      shapeIssue("A layout strategy must declare a place function", place, [
+        ...path,
+        "place",
+      ]),
     );
   }
   return issues;
@@ -764,6 +875,10 @@ interface BuilderAssemblerOptions {
   readonly domain: NoderaDomain;
   readonly editor: EditorEngine;
   readonly graphLayout: ResolvedGraphLayout;
+  /** Strategies `arrange` can run; the composition root seeds the built-ins. */
+  readonly strategies: LayoutStrategyRegistry;
+  /** Distance between consecutive `Arrange` ranks, resolved from configuration. */
+  readonly rankSpacing: number;
 }
 
 /** Concrete builder. Hosts only ever see the {@link Builder} contract. */
@@ -782,10 +897,12 @@ class SdkBuilder implements Builder {
   readonly events: BuilderEventApi;
   readonly theme: BuilderThemeApi;
   readonly layout: BuilderLayoutApi;
+  readonly graphLayout: BuilderGraphLayoutApi;
 
   private readonly domain: NoderaDomain;
   private readonly nodeRegistry: NodeRegistry;
   private readonly edgeRegistry: EdgeRegistry;
+  private readonly strategyRegistry: LayoutStrategyRegistry;
   private bindings: RendererBindings;
   private disposedFlag = false;
 
@@ -802,6 +919,7 @@ class SdkBuilder implements Builder {
     this.nodeRegistry = options.registries.nodes;
     this.edgeRegistry = options.registries.edges;
     this.bindings = options.renderers;
+    this.strategyRegistry = options.strategies;
     // One adapter object per builder, so a host can hold on to it across reads.
     this.registries = {
       nodes: createNodeDefinitionRegistryView(this.nodeRegistry, () => this.disposedFlag),
@@ -812,7 +930,10 @@ class SdkBuilder implements Builder {
       panels: options.registries.panels,
       tools: options.registries.tools,
     };
-    this.graph = createGraphApi(this.editor, () => this.disposedFlag, options.graphLayout);
+    this.graph = createGraphApi(this.editor, () => this.disposedFlag, options.graphLayout, {
+      strategies: this.strategyRegistry,
+      rankSpacing: options.rankSpacing,
+    });
     this.document = createDocumentApi(this.editor, this.documentFormat, () => this.disposedFlag);
     this.events = createBuilderEvents(this.editor.events);
     this.theme = {
@@ -826,6 +947,12 @@ class SdkBuilder implements Builder {
       setDefault: (layoutId) => this.selectLayout(layoutId),
       active: () => this.activeLayout(),
       all: () => this.registries.layouts.all(),
+    };
+    this.graphLayout = {
+      register: (strategy) => this.addStrategy(strategy),
+      setDefault: (strategyId) => this.selectStrategy(strategyId),
+      active: () => this.strategyRegistry.defaultStrategyId,
+      all: () => this.strategyRegistry.all(),
     };
   }
 
@@ -949,12 +1076,13 @@ class SdkBuilder implements Builder {
    * Disposing is idempotent and closes every operation that would mutate the
    * graph or extend the composition: `register*`, `bindRenderer`, `use`,
    * `createEditor`, `theme.register`/`setDefault`,
-   * `layout.register`/`setDefault`, `registries.nodes.unregister`,
+   * `layout.register`/`setDefault`, `graphLayout.register`/`setDefault`,
+   * `registries.nodes.unregister`,
    * `registries.edges.unregister`, every mutating `graph.*` call and
    * `document.import` fail with `sdk.disposed`. Reads keep working — `graph`
    * counts, selections, history flags and validation, `document` creation,
-   * export, serialization and validation, events and the theme/layout queries —
-   * because they observe state the host already received.
+   * export, serialization and validation, events and the theme/layout/strategy
+   * queries — because they observe state the host already received.
    */
   dispose(): void {
     this.disposedFlag = true;
@@ -1021,6 +1149,42 @@ class SdkBuilder implements Builder {
   private activeLayout(): LayoutDefinition {
     const layoutId = this.store.getState().layoutId;
     return this.registries.layouts.get(layoutId) ?? this.registries.layouts.getDefault();
+  }
+
+  private addStrategy(strategy: GraphLayoutStrategy): Result<GraphLayoutStrategy, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("graphLayout.register")]);
+    }
+    const issues = strategyIssues(strategy, ["graph", "layout", "strategy"]);
+    if (issues.length > 0) {
+      return err(issues);
+    }
+    const registered = this.strategyRegistry.register(strategy);
+    return registered.ok
+      ? ok(registered.value)
+      : err([registryIssue(registered.error, ["graph", "layout", "strategy"])]);
+  }
+
+  /**
+   * Selects the strategy `arrange` runs.
+   *
+   * The registry stays the owner of the default id — an unknown id is its
+   * decision — so the selection can never point at a strategy nobody holds.
+   */
+  private selectStrategy(strategyId: string): Result<GraphLayoutStrategy, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("graphLayout.setDefault")]);
+    }
+    const selected = this.strategyRegistry.setDefault(strategyId);
+    return selected.ok
+      ? ok(selected.value)
+      : err([
+          unknownLayoutStrategyIssue(
+            strategyId,
+            this.strategyRegistry.all().map((registered) => registered.id),
+            ["graph", "layout", "strategy"],
+          ),
+        ]);
   }
 }
 
@@ -1099,8 +1263,12 @@ export function createBuilder(
   }
 
   const declaredGraphLayout = configuration.graph?.layout;
+  // The strategy registry exists before validation: an id no entry matches is a
+  // configuration problem reported at `graph.layout.strategy`, not a strategy
+  // the builder selects blindly.
+  const strategies = new LayoutStrategyRegistry();
   if (declaredGraphLayout !== undefined) {
-    issues.push(...graphLayoutIssues(declaredGraphLayout, ["graph", "layout"]));
+    issues.push(...graphLayoutIssues(declaredGraphLayout, ["graph", "layout"], strategies));
   }
 
   if (configuration.plugins !== undefined && !Array.isArray(configuration.plugins)) {
@@ -1230,6 +1398,16 @@ export function createBuilder(
 
   const graph = configuration.graph;
   const graphLayout = resolveGraphLayout(declaredGraphLayout);
+  // The gate above proves a declared strategy id is registered, so selecting it
+  // cannot fail here; the selection is what every `arrange` resolves at call
+  // time, so a later `builder.graphLayout.setDefault` takes effect immediately.
+  if (declaredGraphLayout?.strategy !== undefined) {
+    const selected = strategies.setDefault(declaredGraphLayout.strategy);
+    if (!selected.ok) {
+      return err(issues);
+    }
+  }
+  const rankSpacing = declaredGraphLayout?.rankSpacing ?? graphLayout.spacing;
   const editorOptions: EditorEngineOptions = {
     ...(graph?.graphId === undefined ? {} : { graphId: graph.graphId }),
     ...(graph?.settings === undefined ? {} : { graphSettings: graph.settings }),
@@ -1257,6 +1435,8 @@ export function createBuilder(
     domain,
     editor: new EditorEngine(editorOptions),
     graphLayout,
+    strategies,
+    rankSpacing,
   });
 
   // Configured plugins run last, once every declarative registry is populated,

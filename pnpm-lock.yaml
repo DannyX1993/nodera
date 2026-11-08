@@ -472,6 +472,9 @@ importers:
       '@nodera/edge-registry':
         specifier: workspace:*
         version: link:../edge-registry
+      '@nodera/graph-layout':
+        specifier: workspace:*
+        version: link:../graph-layout
       '@nodera/graph-model':
         specifier: workspace:*
         version: link:../graph-model

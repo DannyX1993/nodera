@@ -49,19 +49,36 @@ export interface BuilderUiConfiguration {
 }
 
 /**
- * How the builder places the nodes a host left unpositioned.
+ * How the builder places nodes: on add, and on an explicit `Arrange`.
  *
- * Configuration only, never a behaviour on its own: the placement is read when
- * a node is added without a position, and it never moves a node a host already
- * positioned. `"free"` keeps the host in charge of every position.
+ * Configuration only, never a behaviour on its own and never a runtime toggle
+ * the framework invents: the host declares the policy. `mode` decides what an
+ * add does with a node that carries no position; `strategy` decides which
+ * placement implementation an explicit `builder.graph.arrange()` runs. Neither
+ * moves a node on its own, and no add, edge change or read re-lays out an
+ * existing graph.
  */
 export interface GraphLayoutConfiguration {
   /** `"free"` (default): the host positions every node. `"auto"`: the builder places the ones left unpositioned. */
   readonly mode?: "free" | "auto";
-  /** Direction the automatic placement grows in. Defaults to `"horizontal"`. */
+  /** Direction the automatic placement grows in, and the axis `Arrange` advances the ranks along. Defaults to `"horizontal"`. */
   readonly direction?: "horizontal" | "vertical";
-  /** Distance between adjacent automatic slots, in document units. Defaults to 240. */
+  /**
+   * Distance between adjacent automatic slots, in document units, and the
+   * `Arrange` in-rank spacing. Defaults to 240.
+   */
   readonly spacing?: number;
+  /**
+   * Globally qualified id of the strategy `Arrange` runs, e.g.
+   * `nodera.graph-layout.layered` (the default) or an adapter the host
+   * registered with `builder.graphLayout.register`.
+   */
+  readonly strategy?: string;
+  /**
+   * Distance between consecutive ranks of an `Arrange`, in document units.
+   * Defaults to the declared `spacing`.
+   */
+  readonly rankSpacing?: number;
 }
 
 /** Initial graph of the builder's own editing session. */
