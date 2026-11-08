@@ -126,10 +126,10 @@ function regionContent(panelIds: readonly string[]): ReactNode {
  * the context menu as its overlay.
  *
  * Every prop comes from the binding or from the builder: the editor session,
- * the registries the provider resolved, the interaction mode of the UI state,
- * the color scheme of the applied theme and the feature flags. A palette drop
- * becomes `builder.graph.addNode`, so the drop path is the SDK's use case and
- * not a second mutation route.
+ * the registries the provider resolved, the interaction mode and the drag policy
+ * of the UI state, the color scheme of the applied theme and the feature flags.
+ * A palette drop becomes `builder.graph.addNode`, so the drop path is the SDK's
+ * use case and not a second mutation route.
  */
 function DefaultCanvasRegion(props: { readonly builder: Builder }): ReactNode {
   const builder = props.builder;
@@ -146,6 +146,7 @@ function DefaultCanvasRegion(props: { readonly builder: Builder }): ReactNode {
           edgeRenderers={renderers.edgeRenderers}
           portRenderers={renderers.portRenderers}
           interactionMode={ui.interactionMode}
+          dragPolicy={ui.dragPolicy}
           colorMode={theme.colorScheme ?? "light"}
           showMinimap={builder.features.minimap}
           showControls={builder.adapter?.capabilities.controls ?? true}

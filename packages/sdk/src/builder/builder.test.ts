@@ -19,8 +19,8 @@ import type { PropertyInput } from "../authoring/properties.js";
 import type { SdkIssues } from "../errors.js";
 import type { PluginRegisteredEvent } from "../events/events-api.js";
 import type { BuilderPlugin } from "../plugin/plugin.js";
-import { createBuilder, type Builder } from "./builder.js";
-import type { BuilderConfiguration } from "./configuration.js";
+import { createBuilder, type Builder, type DragPolicy } from "./builder.js";
+import type { BuilderConfiguration, GraphLayoutConfiguration } from "./configuration.js";
 
 const NodeRenderer = (): null => null;
 const OtherNodeRenderer = (): null => null;
@@ -961,5 +961,88 @@ describe("theme and layout registry configuration", () => {
       ["registry", "layouts", "acme.layout"],
       ["ui", "theme"],
     ]);
+  });
+});
+
+describe("graph layout drag policy", () => {
+  it("locks a manual drag when the layout owns the positions", () => {
+    const builder = create({ graph: { layout: { mode: "auto" } } });
+
+    expect(builder.graphLayout.dragPolicy()).toBe("locked");
+    expect(builder.store.getState().dragPolicy).toBe("locked");
+  });
+
+  it("declares the snap-back policy from configuration", () => {
+    const builder = create({
+      graph: { layout: { mode: "auto", drag: "snap-back" } },
+    });
+
+    expect(builder.graphLayout.dragPolicy()).toBe("snap-back");
+    expect(builder.store.getState().dragPolicy).toBe("snap-back");
+  });
+
+  it("keeps today's drag behaviour when the host owns the positions", () => {
+    expect(create().graphLayout.dragPolicy()).toBe("free");
+    expect(
+      create({ graph: { layout: { mode: "free", drag: "locked" } } }).graphLayout.dragPolicy(),
+    ).toBe("free");
+  });
+
+  const refusedPolicies: readonly unknown[] = ["bounce", "", "free", 42, null];
+  it.each(refusedPolicies)(
+    "refuses the drag policy %s at graph.layout.drag and creates no builder",
+    (drag) => {
+      const issues = fail({
+        graph: { layout: { mode: "auto", drag } as unknown as GraphLayoutConfiguration },
+      });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({
+        code: "sdk.invalid-input",
+        path: ["graph", "layout", "drag"],
+      });
+    },
+  );
+
+  it("changes the policy at runtime and reflects it in the UI state", () => {
+    const builder = create({ graph: { layout: { mode: "auto" } } });
+
+    const changed = builder.graphLayout.setDragPolicy("free");
+
+    expect(changed.ok).toBe(true);
+    expect(changed.ok && changed.value).toBe("free");
+    expect(builder.graphLayout.dragPolicy()).toBe("free");
+    expect(builder.store.getState().dragPolicy).toBe("free");
+  });
+
+  it("refuses an unknown policy at runtime and keeps the previous one", () => {
+    const builder = create({
+      graph: { layout: { mode: "auto", drag: "snap-back" } },
+    });
+    const before = builder.store.getState();
+    let notifications = 0;
+    builder.store.subscribe(() => notifications++);
+
+    const refused = builder.graphLayout.setDragPolicy("bounce" as DragPolicy);
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["graph", "layout", "drag"],
+    });
+    expect(builder.graphLayout.dragPolicy()).toBe("snap-back");
+    expect(builder.store.getState()).toBe(before);
+    expect(notifications).toBe(0);
+  });
+
+  it("refuses a policy change on a disposed builder", () => {
+    const builder = create({ graph: { layout: { mode: "auto" } } });
+    builder.dispose();
+
+    const refused = builder.graphLayout.setDragPolicy("free");
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
+    expect(builder.graphLayout.dragPolicy()).toBe("locked");
   });
 });

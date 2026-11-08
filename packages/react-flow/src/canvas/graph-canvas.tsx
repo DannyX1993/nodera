@@ -30,6 +30,7 @@ import {
 } from "@xyflow/react";
 
 import type { EditorEngine } from "@nodera/application";
+import type { DragPolicy } from "@nodera/ui-core";
 import {
   moveNode,
   createEdge,
@@ -138,17 +139,30 @@ export function canvasEdgeTypes(edgeRenderers?: EdgeRendererRegistry): EdgeTypes
 /* ------------------------------------------------------------------ */
 
 /**
- * Commit the final positions of a node drag to the engine.
+ * Commit the final positions of a node drag to the engine, honouring the drag
+ * policy the host declared.
  *
- * Each node is committed through `moveNode`, so it becomes its own undo
- * unit. Grouping a whole multi-node drag into ONE history unit requires
+ * The policy is what tells a manual drag apart from a placement the host owns:
+ *
+ * - `"free"`: every dragged node is committed through `moveNode`, so it becomes
+ *   its own undo unit (today's behaviour).
+ * - `"locked"`: nothing is committed — the layout owns the positions, so the
+ *   canvas never writes one.
+ * - `"snap-back"`: nothing is committed either; the caller re-derives the
+ *   nodes, which paints the assigned position again after the release.
+ *
+ * Grouping a whole multi-node drag into ONE history unit requires
  * application-core support (use cases refuse `history.push` inside an
  * open transaction) and is a documented phase-4 limitation.
  */
 export function commitDraggedNodes(
   editor: EditorEngine,
   draggedNodes: ReadonlyArray<{ readonly id: string; readonly position: XYPosition }>,
+  dragPolicy: DragPolicy = "free",
 ): void {
+  if (dragPolicy !== "free") {
+    return;
+  }
   for (const node of draggedNodes) {
     const { nodeId, position } = nodePositionFromReactFlow(
       node as unknown as Parameters<typeof nodePositionFromReactFlow>[0],
@@ -194,6 +208,15 @@ export interface GraphCanvasProps {
    * `canvasInteractionSettings`. Defaults to `"select"`.
    */
   readonly interactionMode?: CanvasInteractionMode;
+  /**
+   * What a manual drag does with the positions the layout assigned.
+   *
+   * The host owns the value (it is UI state in `@nodera/ui-core`, seeded from
+   * `graph.layout.drag`); the canvas only maps it onto React Flow's
+   * `nodesDraggable` prop and the drag commit path. Defaults to `"free"`, the
+   * behaviour of a canvas whose host owns placement.
+   */
+  readonly dragPolicy?: DragPolicy;
   /** CSS class for the outer container. */
   readonly className?: string;
   /** Show the minimap. */
@@ -235,7 +258,8 @@ export interface GraphCanvasProps {
  *     (guarded by `hasNewDimensions` so identical re-measurements never
  *     trigger a re-render — otherwise the controlled flow loops forever).
  *   - Drag positions are committed to the engine on drag stop
- *     (`onNodeDragStop`) as per-node undo units.
+ *     (`onNodeDragStop`) as per-node undo units, and only under the `"free"`
+ *     drag policy: `"locked"` and `"snap-back"` write no position at all.
  *   - Position changes arriving through `onNodesChange` are never
  *     committed (they carry no final state in this design).
  */
@@ -245,6 +269,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   edgeRenderers,
   portRenderers,
   interactionMode = "select",
+  dragPolicy = "free",
   className,
   showMinimap = true,
   showControls = true,
@@ -401,16 +426,23 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [editor, refresh],
   );
 
-  // Drag stop: commit final positions of every dragged node.
+  // Drag stop: commit final positions of every dragged node, or discard them.
+  // Only `"free"` commits; `"snap-back"` re-derives the nodes so React Flow
+  // paints the assigned position again instead of the pointer position it
+  // tracked during the drag; `"locked"` never even starts a drag.
   const handleNodeDragStop = useCallback<OnNodeDrag>(
     (_event, _node, draggedNodes) => {
       commitDraggedNodes(
         editor,
         draggedNodes.map((node) => ({ id: node.id, position: node.position })),
+        dragPolicy,
       );
+      if (dragPolicy === "snap-back") {
+        refresh();
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor],
+    [editor, dragPolicy, refresh],
   );
 
   // Edge change handler: removals → removeEdge.
@@ -536,7 +568,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         selectionOnDrag={interaction.selectionOnDrag}
         colorMode={colorMode}
         fitView
-        nodesDraggable
+        nodesDraggable={dragPolicy !== "locked"}
       >
         <Background {...canvasBackgroundOptions()} />
         {showMinimap && <MiniMap nodeColor={minimapNodeColor} pannable zoomable />}

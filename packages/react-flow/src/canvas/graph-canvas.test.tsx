@@ -515,3 +515,93 @@ describe("GraphCanvas edge renderer replacement", () => {
     expect(screen.getAllByText("App Node")).toHaveLength(2);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  B: drag policy (S5)                                                */
+/* ------------------------------------------------------------------ */
+
+describe("GraphCanvas drag policy", () => {
+  /** The React Flow node wrapper, which carries its own `draggable` class. */
+  function nodeElement(container: HTMLElement, nodeId: string): HTMLElement {
+    const element = container.querySelector(`[data-testid="rf__node-${nodeId}"]`);
+    if (!(element instanceof HTMLElement)) {
+      throw new Error(`node ${nodeId} was not rendered`);
+    }
+    return element;
+  }
+
+  function seededEngine(): EditorEngine {
+    const engine = makeEngine();
+    addNode(engine, {
+      definitionId: "test.app-node",
+      nodeId: "n1",
+      position: { x: 0, y: 0 },
+    });
+    return engine;
+  }
+
+  it("refuses the drag itself under the locked policy", () => {
+    const engine = seededEngine();
+    const { container } = renderCanvas(engine, { dragPolicy: "locked" });
+
+    // React Flow only adds the `draggable` class to a node it will drag.
+    expect(nodeElement(container, "n1").classList.contains("draggable")).toBe(false);
+  });
+
+  it("does not commit a drag under the locked policy", () => {
+    const engine = seededEngine();
+    const historyBefore = engine.history.size();
+
+    commitDraggedNodes(engine, [{ id: "n1", position: { x: 120, y: 80 } }], "locked");
+
+    expect(engine.graph.getNode(createNodeId("n1"))?.position).toEqual({ x: 0, y: 0 });
+    expect(engine.history.size()).toBe(historyBefore);
+  });
+
+  it("lets the node follow the pointer but discards the drag under the snap-back policy", () => {
+    const engine = seededEngine();
+    const { container } = renderCanvas(engine, { dragPolicy: "snap-back" });
+    const historyBefore = engine.history.size();
+
+    expect(nodeElement(container, "n1").classList.contains("draggable")).toBe(true);
+
+    commitDraggedNodes(engine, [{ id: "n1", position: { x: 120, y: 80 } }], "snap-back");
+
+    // The document keeps its assigned position and no history entry is pushed.
+    expect(engine.graph.getNode(createNodeId("n1"))?.position).toEqual({ x: 0, y: 0 });
+    expect(engine.history.size()).toBe(historyBefore);
+  });
+
+  it("commits one position and one history unit under the free policy", () => {
+    const engine = seededEngine();
+    const historyBefore = engine.history.size();
+
+    commitDraggedNodes(engine, [{ id: "n1", position: { x: 120, y: 80 } }], "free");
+
+    expect(engine.graph.getNode(createNodeId("n1"))?.position).toEqual({ x: 120, y: 80 });
+    expect(engine.history.size()).toBe(historyBefore + 1);
+  });
+
+  it("keeps today's drag behaviour when the host declares no policy", () => {
+    const engine = seededEngine();
+    const { container } = renderCanvas(engine);
+    const historyBefore = engine.history.size();
+
+    expect(nodeElement(container, "n1").classList.contains("draggable")).toBe(true);
+
+    commitDraggedNodes(engine, [{ id: "n1", position: { x: 120, y: 80 } }]);
+
+    expect(engine.graph.getNode(createNodeId("n1"))?.position).toEqual({ x: 120, y: 80 });
+    expect(engine.history.size()).toBe(historyBefore + 1);
+  });
+
+  it("follows a policy the host switches without rebuilding the canvas", () => {
+    const engine = seededEngine();
+    const { container, rerender } = renderCanvas(engine, { dragPolicy: "free" });
+    expect(nodeElement(container, "n1").classList.contains("draggable")).toBe(true);
+
+    rerender(createElement(Canvas, { editor: engine, dragPolicy: "locked" }));
+
+    expect(nodeElement(container, "n1").classList.contains("draggable")).toBe(false);
+  });
+});

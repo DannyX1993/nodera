@@ -28,6 +28,7 @@ rankSpacing: 280 }`, so the seed nodes are first placed on a deterministic grid.
 | Spacing      | passed to `builder.graph.arrange({ spacing })`                        |
 | Rank spacing | passed to `builder.graph.arrange({ rankSpacing })`                    |
 | Arrange      | `builder.graph.arrange({ direction, spacing, rankSpacing })`          |
+| Drag         | `builder.graphLayout.setDragPolicy(policy)` — `locked`, `snap-back`, `free` |
 | "+"          | `CreateNodeButton` → the built-in node-creation dialog               |
 
 Pressing **Arrange** is the only thing that re-places nodes. It is one explicit
@@ -46,15 +47,24 @@ definitions the host registered. The host handles the selection itself and adds
 the node with `builder.graph.addNode`, so `mode: "auto"` gives it a free slot;
 the status line reports where it landed. Press Arrange to rank it with the rest.
 
+The **Drag** select calls `builder.graphLayout.setDragPolicy` and starts from
+`builder.graphLayout.dragPolicy()`, so it always shows the policy the canvas is
+applying. The demo configures `mode: "auto"` without a `drag` value, which means
+`locked`: try to move a node and the canvas refuses. `snap-back` lets it follow
+the pointer and returns it to its placed position on release, and `free` restores
+the drag-and-commit behaviour. None of them changes a position by itself, so an
+`Arrange` after switching behaves exactly as before.
+
 ## The switching belongs to the host
 
 There is no framework toggle for placement. The Nodera SDK ships configuration
 (`graph.layout`) and one explicit command (`graph.arrange(options?)`), and the
 React Flow binding renders the canvas from the document. The strategy select,
-the direction select, the two number fields, the Arrange button and the "+"
-affordance in `src/app.tsx` are plain host HTML/CSS **above** the canvas — never
-inside it — and every one of them calls the public SDK. A host that wants its
-own placement UI writes exactly this page; the framework still adds none.
+the direction select, the drag select, the two number fields, the Arrange button
+and the "+" affordance in `src/app.tsx` are plain host HTML/CSS **above** the
+canvas — never inside it — and every one of them calls the public SDK. A host
+that wants its own placement UI writes exactly this page; the framework still
+adds none.
 
 ## Files
 

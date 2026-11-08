@@ -32,6 +32,7 @@ import {
   UiStateStore,
   createDefaultPanelRegistry,
   createDefaultToolRegistry,
+  type DragPolicy,
   type LayoutDefinition,
   type LayoutPanelPlacement,
   type PanelDefinition,
@@ -39,6 +40,7 @@ import {
   type ToolDefinition,
   type ToolRegistry,
 } from "@nodera/ui-core";
+
 import type { PropertyDefinition } from "@nodera/property-system";
 import {
   EMPTY_RENDERER_BINDINGS,
@@ -95,8 +97,15 @@ import type {
   BuilderConfiguration,
   BuilderDocumentConfiguration,
   BuilderDocumentFormat,
+  GraphLayoutConfiguration,
 } from "./configuration.js";
 import { resolveFeatures, type ResolvedFeatures } from "./features.js";
+
+/**
+ * Drag policy of a manual node drag, re-exported from `@nodera/ui-core` because
+ * it is part of what `builder.graphLayout` reads and writes.
+ */
+export type { DragPolicy } from "@nodera/ui-core";
 
 /** Id of a builder the host did not name. */
 export const DEFAULT_BUILDER_ID = "nodera.builder";
@@ -182,6 +191,25 @@ export interface BuilderGraphLayoutApi {
   active(): string;
   /** Every registered strategy, in registration order. */
   all(): readonly GraphLayoutStrategy[];
+  /**
+   * Drag policy the canvas applies today.
+   *
+   * It is the policy declared in `graph.layout.drag` when the layout owns the
+   * positions (`mode: "auto"`, default `"locked"`), and `"free"` when the host
+   * owns them, unless the host changed it at runtime with
+   * {@link BuilderGraphLayoutApi.setDragPolicy}.
+   */
+  dragPolicy(): DragPolicy;
+  /**
+   * Changes what a manual drag does, and reflects it in the UI state the canvas
+   * reads, so a presentation binding re-renders without a rebuild.
+   *
+   * It never rewrites a document position by itself: `"free"` keeps today's
+   * drag-and-commit, `"locked"` and `"snap-back"` leave every assigned position
+   * alone. A value outside the union is refused with `sdk.invalid-input` at
+   * `graph.layout.drag` and the previous policy stays.
+   */
+  setDragPolicy(policy: DragPolicy): Result<DragPolicy, SdkIssues>;
 }
 
 /** The assembled builder: the only object a host needs after configuration. */
@@ -459,7 +487,35 @@ function graphLayoutIssues(
       ),
     );
   }
+  const drag: unknown = Reflect.get(layout, "drag");
+  if (drag !== undefined && drag !== "locked" && drag !== "snap-back") {
+    issues.push(
+      shapeIssue(
+        'Builder graph layout drag policy must be "locked" or "snap-back"',
+        drag,
+        [...path, "drag"],
+      ),
+    );
+  }
   return issues;
+}
+
+/**
+ * Resolves the drag policy a validated configuration declares.
+ *
+ * The policy describes what a manual drag does with the positions the **layout**
+ * assigned, so it only applies when the layout owns placement: `"free"` mode
+ * means the host owns them, and a drag keeps committing (today's behaviour)
+ * whatever `drag` says. In `"auto"` mode the declared policy wins and `"locked"`
+ * is the default — a graph the layout controls is not draggable unless the host
+ * says otherwise. Fail-closed like the rest of the configuration: an unknown
+ * value can never unlock a drag.
+ */
+function resolveDragPolicy(configuration: GraphLayoutConfiguration | undefined): DragPolicy {
+  if (configuration?.mode !== "auto") {
+    return "free";
+  }
+  return configuration.drag === "snap-back" ? "snap-back" : "locked";
 }
 
 /**
@@ -953,6 +1009,8 @@ class SdkBuilder implements Builder {
       setDefault: (strategyId) => this.selectStrategy(strategyId),
       active: () => this.strategyRegistry.defaultStrategyId,
       all: () => this.strategyRegistry.all(),
+      dragPolicy: () => this.store.getState().dragPolicy,
+      setDragPolicy: (policy) => this.selectDragPolicy(policy),
     };
   }
 
@@ -1076,7 +1134,8 @@ class SdkBuilder implements Builder {
    * Disposing is idempotent and closes every operation that would mutate the
    * graph or extend the composition: `register*`, `bindRenderer`, `use`,
    * `createEditor`, `theme.register`/`setDefault`,
-   * `layout.register`/`setDefault`, `graphLayout.register`/`setDefault`,
+   * `layout.register`/`setDefault`, `graphLayout.register`/`setDefault`/
+   * `setDragPolicy`,
    * `registries.nodes.unregister`,
    * `registries.edges.unregister`, every mutating `graph.*` call and
    * `document.import` fail with `sdk.disposed`. Reads keep working — `graph`
@@ -1185,6 +1244,30 @@ class SdkBuilder implements Builder {
             ["graph", "layout", "strategy"],
           ),
         ]);
+  }
+
+  /**
+   * Applies a drag policy to the UI state the canvas reads.
+   *
+   * The union is checked here because the value comes from a host, and a
+   * refused policy leaves both the state and its subscribers untouched: the
+   * store is written only after the value proved valid.
+   */
+  private selectDragPolicy(policy: DragPolicy): Result<DragPolicy, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("graphLayout.setDragPolicy")]);
+    }
+    if (policy !== "free" && policy !== "locked" && policy !== "snap-back") {
+      return err([
+        shapeIssue(
+          'Builder graph layout drag policy must be "free", "locked" or "snap-back"',
+          policy,
+          ["graph", "layout", "drag"],
+        ),
+      ]);
+    }
+    this.store.setDragPolicy(policy);
+    return ok(policy);
   }
 }
 
@@ -1394,6 +1477,7 @@ export function createBuilder(
     themeId,
     layoutId,
     layout: createLayoutState(layoutDefinition, { panels: panels.all() }),
+    dragPolicy: resolveDragPolicy(declaredGraphLayout),
   });
 
   const graph = configuration.graph;

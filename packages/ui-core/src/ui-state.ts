@@ -7,6 +7,24 @@ import type { LayoutState } from "./layout.js";
 /** Interaction mode of the editor surface. */
 export type InteractionMode = "select" | "pan";
 
+/**
+ * What a manual node drag does when the layout owns the node positions.
+ *
+ * Host configuration, reflected in the UI state so the canvas re-renders when
+ * the host changes it — never a control the framework invents, and never a
+ * document write by itself:
+ *
+ * - `"locked"`: the canvas refuses the drag, so the assigned positions stay.
+ * - `"snap-back"`: the canvas lets the node follow the pointer and paints the
+ *   assigned position again when the drag ends. Nothing is committed.
+ * - `"free"`: the host owns placement, so a drag commits the dropped position
+ *   as one history unit (today's behaviour).
+ *
+ * `"free"` is also the state a store starts from when a host seeds no policy,
+ * which keeps a canvas without a policy behaving exactly as before.
+ */
+export type DragPolicy = "free" | "locked" | "snap-back";
+
 /** Element a context menu was opened for. */
 export type MenuTargetKind = "node" | "edge" | "pane" | "canvas";
 
@@ -52,6 +70,15 @@ export interface UiState {
    * `DialogRegistry` can be set (see {@link UiStateStore.openDialog}).
    */
   readonly activeDialogId: string | undefined;
+  /**
+   * What a manual drag does with the positions the layout assigned.
+   *
+   * The canvas adapter reads it reactively (a policy change re-renders without
+   * a rebuild); the builder seeds it from `graph.layout` and changes it through
+   * `builder.graphLayout.setDragPolicy`. It never rewrites a document position
+   * on its own.
+   */
+  readonly dragPolicy: DragPolicy;
 }
 
 /** Initial values accepted by {@link UiStateStore}. */
@@ -68,6 +95,11 @@ export interface UiStateStoreOptions {
    * an id that is not registered is refused instead of rendered.
    */
   readonly dialogRegistry?: DialogRegistry;
+  /**
+   * Drag policy of the canvas. Defaults to `"free"`, the behaviour of a canvas
+   * whose host owns placement.
+   */
+  readonly dragPolicy?: DragPolicy;
 }
 
 /** Listener notified after every state change. */
@@ -96,6 +128,7 @@ export class UiStateStore {
       interactionMode: options.interactionMode ?? "select",
       activePanelId: undefined,
       activeDialogId: undefined,
+      dragPolicy: options.dragPolicy ?? "free",
     };
   }
 
@@ -230,6 +263,20 @@ export class UiStateStore {
       return;
     }
     this.commit({ ...this.state, activeDialogId: undefined });
+  }
+
+  /**
+   * Applies the drag policy of the canvas.
+   *
+   * The builder is what validates the value (`builder.graphLayout
+   * .setDragPolicy`), so an invalid policy never reaches the store; setting the
+   * policy already applied notifies nobody.
+   */
+  setDragPolicy(dragPolicy: DragPolicy): void {
+    if (dragPolicy === this.state.dragPolicy) {
+      return;
+    }
+    this.commit({ ...this.state, dragPolicy });
   }
 
   private commit(next: UiState): void {

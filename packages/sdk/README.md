@@ -491,8 +491,10 @@ row-major and arranges the ranks along `x`, vertical fills column-major and
 arranges them along `y`), `spacing` (distance between adjacent slots, and the
 in-rank distance of an arrangement, in document units, default `240`),
 `strategy` (globally qualified id of the strategy [`arrange()`](#graph-layout-strategies--buildergraphlayout)
-runs, default `nodera.graph-layout.layered`) and `rankSpacing` (distance between
-consecutive ranks of an arrangement, default: the declared `spacing`).
+runs, default `nodera.graph-layout.layered`), `rankSpacing` (distance between
+consecutive ranks of an arrangement, default: the declared `spacing`) and `drag`
+(`"locked" | "snap-back"`, default `"locked"`: what a manual drag does when the
+layout owns the positions — see [Manual drags](#manual-drags--graphlayoutdrag--setdragpolicy)).
 
 The assigned position belongs to the same history unit as the creation: `undo()`
 removes the node, `redo()` restores it where it was. A value outside these
@@ -543,6 +545,39 @@ the storage order and how often the host repeats the call for the same state. Th
 chosen slot belongs to the same history unit as the creation: one `undo()`
 removes the node, `redo()` puts it back where it was.
 
+#### Manual drags — `graph.layout.drag` / `setDragPolicy`
+
+When the layout owns the positions (`mode: "auto"`), a manual drag is what would
+silently contradict them. `graph.layout.drag` declares what the canvas does
+instead:
+
+| Policy | Declared as | What the canvas does |
+| --- | --- | --- |
+| `"locked"` | `graph.layout.drag: "locked"` (default under `mode: "auto"`) | Refuses the drag: `nodesDraggable={false}` and no commit path, so the document never changes. |
+| `"snap-back"` | `graph.layout.drag: "snap-back"` | The node follows the pointer while dragging; the release commits nothing, pushes no history entry and the assigned position is painted again. |
+| `"free"` | never declared; it is what `mode: "free"` resolves to | Today's behaviour, byte for byte: one drag commits one position as one history unit. |
+
+The policy is host configuration with a runtime setter, so a host can offer its
+own control without the framework inventing one:
+
+```ts
+builder.graphLayout.dragPolicy();        // "locked" | "snap-back" | "free"
+assertOk(builder.graphLayout.setDragPolicy("snap-back"));
+builder.graphLayout.dragPolicy();        // "snap-back"
+```
+
+`setDragPolicy` writes the UI state (`builder.store.getState().dragPolicy`), so a
+presentation binding re-renders the canvas without a rebuild. It also accepts
+`"free"`, which restores the drag-and-commit behaviour even in `"auto"` mode.
+Neither the configuration nor the setter ever writes a document position on its
+own.
+
+A value outside the union is refused and the previous policy stays: at
+construction it is `sdk.invalid-input` at `graph.layout.drag` and the builder is
+not created (`"free"` is not a configuration value; it is what `mode: "free"`
+resolves to); at runtime it is the same code and path, with the UI state and its
+subscribers untouched.
+
 ### Graph layout strategies — `builder.graphLayout`
 
 `builder.graph.arrange()` is explicit and all-or-nothing: it asks the selected
@@ -581,7 +616,8 @@ A strategy that answers a diagnostic makes `arrange()` return that diagnostic as
 nothing.
 
 Members of `builder.graphLayout`: `register(strategy)`, `setDefault(id)`,
-`active()` (the selected id) and `all()` (every registered strategy). The
+`active()` (the selected id), `all()` (every registered strategy), and the drag
+policy pair `dragPolicy()` / `setDragPolicy(policy)` described above. The
 built-ins are `nodera.graph-layout.free` (no-op) and
 `nodera.graph-layout.layered` (rank by longest path, in-rank order by node id,
 no crossing minimization); a used id is a `sdk.duplicate-id` and an unknown one
@@ -607,8 +643,8 @@ builder.graphLayout.active(); // "acme.dagre" — the next arrange() runs it
 There is no runtime toggle for any of this: mode, direction, spacing and
 strategy are host configuration, never a control the framework puts in front of
 a user. A host that wants a control of its own passes per-call overrides to
-`arrange()` and selects the strategy with `builder.graphLayout.setDefault`; see
-`examples/layout-switch-demo`.
+`arrange()`, selects the strategy with `builder.graphLayout.setDefault`, and
+changes the drag policy with `setDragPolicy`; see `examples/layout-switch-demo`.
 
 ### Document — `builder.document`
 

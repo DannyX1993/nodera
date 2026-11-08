@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { UiStateStore } from "./ui-state.js";
+import { UiStateStore, type DragPolicy } from "./ui-state.js";
 import type { LayoutState } from "./layout.js";
 import { DialogRegistry } from "./dialog-registry.js";
 import type { DialogDefinition } from "./dialog-definition.js";
@@ -55,7 +55,42 @@ describe("UiStateStore", () => {
       interactionMode: "select",
       activePanelId: undefined,
       activeDialogId: undefined,
+      dragPolicy: "free",
     });
+  });
+
+  it("seeds the drag policy the host declares", () => {
+    const store = new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      layout: emptyLayout,
+      dragPolicy: "snap-back",
+    });
+
+    expect(store.getState().dragPolicy).toBe("snap-back");
+  });
+
+  it("changes the drag policy and notifies its subscribers once", () => {
+    const store = createStore();
+    const seen: DragPolicy[] = [];
+    store.subscribe((state) => seen.push(state.dragPolicy));
+
+    store.setDragPolicy("locked");
+
+    expect(store.getState().dragPolicy).toBe("locked");
+    expect(seen).toEqual(["locked"]);
+  });
+
+  it("notifies nobody when the drag policy already matches", () => {
+    const store = createStore();
+    const before = store.getState();
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.setDragPolicy("free");
+
+    expect(notifications).toBe(0);
+    expect(store.getState()).toBe(before);
   });
 
   it("returns a stable snapshot while nothing changes", () => {

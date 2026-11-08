@@ -29,8 +29,11 @@ Three invariants hold in every mode:
 - **A position that exists is never overwritten implicitly.** `auto` places only
   the absent ones; replacing existing positions is the explicit `Arrange`.
 - **There is no runtime toggle.** Mode, direction and spacings are configuration
-  the host writes, never a control the framework puts in front of a user. A host
-  that wants controls writes them itself, as the example does.
+  the host writes, never a control the framework puts in front of a user. The one
+  runtime setter, `builder.graphLayout.setDragPolicy`, writes what a manual drag
+  does (see [Manual drags](#manual-drags-and-the-positions-the-layout-owns)) and
+  never a position. A host that wants controls writes them itself, as the example
+  does.
 
 ### Where an added node lands
 
@@ -79,6 +82,7 @@ puts it (AGENTS.md §4, §12; odd task S5):
 | Add-time placement | `@nodera/sdk` | `resolveGraphLayout`, `placeUnpositionedNode` and `nextFreeSlot` decide a position **before** the `add-node` use case runs, so it belongs to the same history unit as the creation. The anchor (`AddNodeRequest.after`) is a node id the host chose; the rule reads its position and the graph's, nothing else. |
 | Configuration and command | `@nodera/sdk` | `graph.layout`, `builder.graphLayout` and `builder.graph.arrange(request?)`. The SDK reads the graph as plain data, asks the selected strategy and applies the answer through the use case above. |
 | Rendering and affordances | `@nodera/react-flow`, `@nodera/ui-*` | The canvas renders positions **from the document**; the node-creation dialog and its "+" affordance (which is how a node enters the graph in the first place) live in `ui-react`/`ui-core`. Neither calls `arrange`, and neither ships a placement control. |
+| Drag policy | `@nodera/sdk` → `@nodera/ui-core` → `@nodera/react-flow` | `graph.layout.drag` and `builder.graphLayout.setDragPolicy` write `UiState.dragPolicy`; the canvas maps it onto `nodesDraggable` plus the drag-commit path. Reading and writing the policy moves nothing: only a `"free"` drag commits a position. |
 
 Two consequences worth stating, because they are easy to break:
 
@@ -99,6 +103,7 @@ Two consequences worth stating, because they are easy to break:
 | `spacing` | positive finite number, document units: distance between adjacent automatic slots, and the in-rank distance of an `Arrange` | `240` |
 | `rankSpacing` | positive finite number, document units: distance between consecutive `Arrange` ranks | the declared `spacing` |
 | `strategy` | globally qualified strategy id | `nodera.graph-layout.layered` |
+| `drag` | `"locked"` or `"snap-back"`: what a manual drag does when the layout owns the positions (inert under `mode: "free"`) | `"locked"` |
 
 ```ts
 import { assertOk, assertValid, createBuilder } from "@nodera/sdk";
@@ -115,6 +120,7 @@ const builder = assertValid(
         spacing: 160,                            // default 240
         rankSpacing: 320,                        // default: spacing
         strategy: "nodera.graph-layout.layered", // the built-in default
+        drag: "locked",                          // default; or "snap-back"
       },
     },
   }),
@@ -130,6 +136,29 @@ const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }))
 An invalid value is a configuration problem and fails closed: `createBuilder`
 returns `err` with `sdk.invalid-input` at `graph.layout.<field>` and no builder is
 created. Nothing is guessed.
+
+### Manual drags and the positions the layout owns
+
+A position the layout assigned is not a suggestion: a manual drag that silently
+moved it would contradict the arrangement the host just applied. `graph.layout.drag`
+says what the canvas does instead, and `builder.graphLayout.setDragPolicy` changes
+it at runtime.
+
+| Policy | What a drag does | Document and history |
+| --- | --- | --- |
+| `"locked"` (default under `mode: "auto"`) | The canvas refuses it: `nodesDraggable={false}` and no commit path. | Nothing changes; no history entry. |
+| `"snap-back"` | The node follows the pointer while dragging; the release re-derives the nodes from the document. | Nothing changes; the assigned position is painted again; no history entry. |
+| `"free"` (what `mode: "free"` resolves to) | Today's behaviour, unchanged: one drag commits the dropped position through `moveNode`. | One position, one history unit per dragged node. |
+
+The policy is host configuration reflected in the UI state
+(`builder.store.getState().dragPolicy`), so the canvas re-renders when the host
+changes it — no rebuild, no module-level variable and no React-only context. It
+never rewrites a position by itself: only a `"free"` drag writes the document.
+At construction an unknown `drag` is `sdk.invalid-input` at `graph.layout.drag`
+and no builder is created; at runtime `setDragPolicy` refuses the same way and the
+previous policy stays, with the store and its subscribers untouched. `"free"` is
+accepted at runtime (a host can hand placement back to its own drag handling) but
+not in configuration, where it is what `mode: "free"` already means.
 
 ### `builder.graph.arrange(request?)`
 
@@ -184,6 +213,8 @@ pipeline **without positions** with `graph.layout` declaring `mode: "auto"`,
 every layout action in its own toolbar **above** the canvas:
 
 - a strategy select calling `builder.graphLayout.setDefault(id)`;
+- a drag-policy select calling `builder.graphLayout.setDragPolicy(policy)`, seeded
+  from `builder.graphLayout.dragPolicy()`;
 - direction, spacing and rank-spacing fields passed per call to
   `builder.graph.arrange({ direction, spacing, rankSpacing })`;
 - one explicit Arrange button running that call;

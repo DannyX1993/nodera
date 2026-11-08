@@ -77,7 +77,8 @@ the registry, reducers and geometry live in `layout-engine`.
 
 `UiStateStore` is the single presentation-state container: `themeId`,
 `layoutId`, `layout` (panel state), `menu` (open context/panel menu),
-`searchQuery`, `interactionMode`, `activePanelId` and `activeDialogId`.
+`searchQuery`, `interactionMode`, `activePanelId`, `activeDialogId` and
+`dragPolicy`.
 
 - Immutable snapshots: `getState()` keeps its identity until something really
   changes, and a no-op mutation notifies nobody (that is what keeps panels from
@@ -86,7 +87,16 @@ the registry, reducers and geometry live in `layout-engine`.
   `useSyncExternalStore`.
 - Mutators: `setTheme`, `setLayout(layoutId, layout)`, `updateLayout(updater)`,
   `openMenu`, `closeMenu`, `setSearchQuery`, `setInteractionMode`,
-  `setActivePanel`, `openDialog(dialogId)`, `closeDialog`.
+  `setActivePanel`, `openDialog(dialogId)`, `closeDialog`, `setDragPolicy`.
+- Drag policy: `DragPolicy` (`"free" | "locked" | "snap-back"`) says what a
+  manual drag does with the positions the layout assigned. `"free"` (the store
+  default, and today's behaviour) commits the dropped position, `"locked"` makes
+  the canvas refuse the drag and `"snap-back"` returns the node to its assigned
+  position when the drag ends without committing anything. The store only holds
+  the value — `@nodera/sdk` validates it and seeds it from `graph.layout.drag`
+  (`builder.graphLayout.dragPolicy()` / `setDragPolicy`), and the canvas
+  re-renders from the state, so no module-level variable or React-only context
+  carries it.
 - Dialogs: the store takes an optional `dialogRegistry`, and `openDialog(id)`
   resolves the id through it. It returns the definition or the registry's
   `not-found` error and, when it refuses, neither the state nor its subscribers

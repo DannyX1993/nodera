@@ -13,6 +13,7 @@
  * | Spacing        | `builder.graph.arrange({ spacing, … })`                    |
  * | Rank spacing   | `builder.graph.arrange({ rankSpacing, … })`                |
  * | Arrange        | `builder.graph.arrange({ … })` — one explicit history unit |
+ * | Drag policy    | `builder.graphLayout.setDragPolicy(policy)`                |
  * | "+"            | `CreateNodeButton` → the built-in node-creation dialog,    |
  * |                | whose selection the host adds with `builder.graph.addNode` |
  *
@@ -46,6 +47,19 @@ const DIRECTIONS = ["horizontal", "vertical"] as const;
 
 /** One placement direction. */
 type Direction = (typeof DIRECTIONS)[number];
+
+/** What a manual drag does with the positions the layout assigned. */
+type DragPolicy = ReturnType<Builder["graphLayout"]["dragPolicy"]>;
+
+/** Drag policies the host offers, in the order it shows them. */
+const DRAG_POLICIES = ["free", "locked", "snap-back"] as const satisfies readonly DragPolicy[];
+
+/** What each policy does, in the host's own words. */
+const DRAG_POLICY_LABEL: Readonly<Record<DragPolicy, string>> = {
+  free: "a manual drag moves the node and commits one position",
+  locked: "the canvas refuses a manual drag, so the placed positions stay",
+  "snap-back": "the node follows the pointer and returns to its assigned position",
+};
 
 /** The values the host's controls hold for one arrangement. */
 interface Arrangement {
@@ -91,6 +105,11 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   const [spacing, setSpacing] = useState(String(DEMO_LAYOUT.spacing));
   const [rankSpacing, setRankSpacing] = useState(String(DEMO_LAYOUT.rankSpacing));
   const [status, setStatus] = useState(INITIAL_STATUS);
+  // Seeded from the builder's configuration, so the control always shows the
+  // policy the canvas is really applying.
+  const [dragPolicy, setDragPolicy] = useState<DragPolicy>(
+    () => builder.graphLayout.dragPolicy(),
+  );
 
   /**
    * Selects the strategy the next `arrange()` runs.
@@ -135,6 +154,28 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
 
   const arrange = (): void => {
     applyArrangement({ direction, spacing, rankSpacing, strategyId });
+  };
+
+  /**
+   * Changes what a manual drag does.
+   *
+   * The policy is host configuration, so this is a configuration change and not
+   * a placement: the canvas re-renders from the UI state the SDK wrote, nothing
+   * in the document moves, and a refused value leaves the previous policy in
+   * place (the select keeps showing it).
+   */
+  const selectDragPolicy = (next: string): void => {
+    const policy = DRAG_POLICIES.find((candidate) => candidate === next);
+    if (policy === undefined) {
+      return;
+    }
+    const changed = builder.graphLayout.setDragPolicy(policy);
+    if (!changed.ok) {
+      setStatus(`Drag policy "${next}" was not applied — ${issueSummary(changed.error)}`);
+      return;
+    }
+    setDragPolicy(changed.value);
+    setStatus(`Drag policy "${changed.value}": ${DRAG_POLICY_LABEL[changed.value]}.`);
   };
 
   /**
@@ -251,6 +292,24 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
               });
             }}
           />
+        </label>
+
+        <label className="demo-control">
+          Drag
+          <select
+            className="demo-select"
+            aria-label="Manual drag policy"
+            value={dragPolicy}
+            onChange={(event) => {
+              selectDragPolicy(event.target.value);
+            }}
+          >
+            {DRAG_POLICIES.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {candidate}
+              </option>
+            ))}
+          </select>
         </label>
 
         <button type="button" className="demo-button" onClick={arrange}>

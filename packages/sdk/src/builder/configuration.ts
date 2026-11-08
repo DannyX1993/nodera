@@ -79,6 +79,18 @@ export interface GraphLayoutConfiguration {
    * Defaults to the declared `spacing`.
    */
   readonly rankSpacing?: number;
+  /**
+   * What a manual drag does with the positions the layout assigned.
+   *
+   * Only meaningful when the layout owns placement (`mode: "auto"`): `"locked"`
+   * (the default) makes the canvas refuse the drag, `"snap-back"` lets the node
+   * follow the pointer and paints the assigned position again when the drag
+   * ends. Neither ever rewrites a document position. In `"free"` mode the host
+   * owns placement, so the effective policy is `"free"` and this field places
+   * nothing. The policy can be changed at runtime with
+   * `builder.graphLayout.setDragPolicy`.
+   */
+  readonly drag?: "locked" | "snap-back";
 }
 
 /** Initial graph of the builder's own editing session. */
