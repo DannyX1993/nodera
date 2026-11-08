@@ -9,6 +9,12 @@
  * every definition goes through the authoring translation layer, every registry
  * through its own duplicate detection, and every presentation value stays
  * opaque so no framework leaks into the SDK.
+ *
+ * Error policy: the public surface has exactly one error shape. Every operation
+ * reports its failures as `SdkIssues` — a list of `SdkIssue` values — so a host
+ * handles one type no matter which call failed, and collects every issue of an
+ * input that has several. `SdkError` is the internal single-failure form; the
+ * builder converts it with `toIssue` before it can reach a caller.
  */
 
 import { ok, err, RegistryStore, type RegistryError, type Result } from "@nodera/contracts";
@@ -52,6 +58,7 @@ import type { RendererBinding } from "../authoring/renderer-binding.js";
 import {
   isQualifiedId,
   sdkError,
+  toIssues,
   type SdkError,
   type SdkIssue,
   type SdkIssues,
@@ -152,10 +159,17 @@ export interface Builder {
   registerProperty(input: PropertyInput): Result<PropertyDefinition, SdkIssues>;
   registerPanel(panel: PanelDefinition): Result<PanelDefinition, SdkIssues>;
   registerTool(tool: ToolDefinition): Result<ToolDefinition, SdkIssues>;
-  bindRenderer(kind: RendererKind, id: string, value: unknown): Result<Builder, SdkError>;
+  /**
+   * Binds one opaque presentation value to a renderer slot.
+   *
+   * Failures are `SdkIssues`, like every other builder operation: the value is
+   * never inspected, so the only failures are a malformed or already-bound id.
+   */
+  bindRenderer(kind: RendererKind, id: string, value: unknown): Result<Builder, SdkIssues>;
   /** Installs one plugin and reports what it contributed. */
   use(plugin: BuilderPlugin): Result<PluginInstallation, SdkIssues>;
-  createEditor(options?: EditorEngineOptions): Result<EditorEngine, SdkError>;
+  /** Opens a new editing session over the builder's registries. */
+  createEditor(options?: EditorEngineOptions): Result<EditorEngine, SdkIssues>;
   dispose(): void;
 }
 
@@ -633,21 +647,21 @@ class SdkBuilder implements Builder {
     kind: RendererKind,
     id: string,
     value: unknown,
-  ): Result<Builder, SdkError> {
+  ): Result<Builder, SdkIssues> {
     if (this.disposedFlag) {
-      return err(disposed("bindRenderer"));
+      return err([toIssue(disposed("bindRenderer"))]);
     }
     const next = withRendererBinding(this.bindings, kind, { id, value });
     if (!next.ok) {
-      return next;
+      return err(toIssues(next.error));
     }
     this.bindings = next.value;
     return ok(this);
   }
 
-  createEditor(options: EditorEngineOptions = {}): Result<EditorEngine, SdkError> {
+  createEditor(options: EditorEngineOptions = {}): Result<EditorEngine, SdkIssues> {
     if (this.disposedFlag) {
-      return err(disposed("createEditor"));
+      return err([toIssue(disposed("createEditor"))]);
     }
     return ok(new EditorEngine({ ...options, domain: this.domain }));
   }

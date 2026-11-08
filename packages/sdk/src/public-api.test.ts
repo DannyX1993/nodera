@@ -1,5 +1,34 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  Connection,
+  CreateThemeInput,
+  DesignTokens,
+  DocumentValidationReport,
+  Edge,
+  EdgeDefinition,
+  Graph,
+  GraphDocument,
+  GraphSettings,
+  LayoutDefinition,
+  LayoutState,
+  Node,
+  NodeDefinition,
+  NodePosition,
+  PanelDefinition,
+  PanelRegion,
+  PortDeclaration,
+  PropertyDefinition,
+  PropertyOption,
+  PropertyType,
+  ThemeDefinition,
+  ToolAvailability,
+  ToolCommand,
+  ToolDefinition,
+  ValidationIssue,
+  ValidationLevel,
+  ValidationReport,
+} from "./index.js";
 import {
   DEFAULT_BUILDER_ID,
   SDK_EVENT_NAMES,
@@ -59,6 +88,42 @@ describe("public SDK surface", () => {
         "withRendererBinding",
       ]),
     );
+  });
+
+  it("publishes the vocabulary its own signatures use", () => {
+    // `PublicVocabulary` names one re-exported type per entry, so the guard only
+    // compiles while the barrel publishes every one of them; the count is its
+    // runtime side and is itself checked against the tuple length.
+    expect(VOCABULARY_TYPE_COUNT).toBe(27);
+  });
+
+  it("lets a host type a theme input and a layout with the exported names", () => {
+    const tokens: DesignTokens = {
+      colors: {},
+      spacing: {},
+      typography: {},
+      borders: {},
+      shadows: {},
+      icons: {},
+      node: {},
+      edge: {},
+      handle: {},
+      selection: {},
+      canvas: {},
+    };
+    const themeInput: CreateThemeInput = { id: "acme.brand", name: "Acme brand", tokens };
+    const layout: LayoutDefinition = {
+      id: "acme.layout",
+      panels: [{ panelId: "palette", region: "left" }],
+    };
+
+    const builder = assertValid(createBuilder());
+    const theme: ThemeDefinition = assertValid(builder.theme.register(themeInput));
+    const registered: LayoutDefinition = assertValid(builder.layout.register(layout));
+
+    expect(theme.name).toBe("Acme brand");
+    expect(builder.theme.all().map((entry) => entry.id)).toContain("acme.brand");
+    expect(registered.panels).toEqual([{ panelId: "palette", region: "left" }]);
   });
 
   it("exposes a closed diagnostic vocabulary a host can render", () => {
@@ -179,6 +244,47 @@ describe("a host integrates through the entry point only", () => {
     expect(DEFAULT_BUILDER_ID).toBe("nodera.builder");
   });
 });
+
+/**
+ * Every type name a host must be able to write.
+ *
+ * One tuple entry per published vocabulary name: naming them is the whole
+ * assertion, because this file stops compiling the moment the entry point stops
+ * exporting one of them. A host never has to recover one of these types with
+ * `Parameters<Builder["theme"]["register"]>[0]` or any other derivation.
+ */
+type PublicVocabulary = readonly [
+  PanelDefinition,
+  PanelRegion,
+  ToolDefinition,
+  ToolCommand,
+  ToolAvailability,
+  LayoutDefinition,
+  LayoutState,
+  ThemeDefinition,
+  CreateThemeInput,
+  DesignTokens,
+  Graph,
+  Node,
+  Edge,
+  Connection,
+  NodePosition,
+  GraphSettings,
+  PortDeclaration,
+  PropertyDefinition,
+  PropertyOption,
+  PropertyType,
+  GraphDocument,
+  DocumentValidationReport,
+  NodeDefinition,
+  EdgeDefinition,
+  ValidationReport,
+  ValidationLevel,
+  ValidationIssue,
+];
+
+/** Entry count of {@link PublicVocabulary}, typed against the tuple itself. */
+const VOCABULARY_TYPE_COUNT: PublicVocabulary["length"] = 27;
 
 /** Names this guard expects the entry point to publish. */
 const SUPPORTED_EXPORTS = [

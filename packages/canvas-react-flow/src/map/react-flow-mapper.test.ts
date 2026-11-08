@@ -2,6 +2,9 @@ import type {
   EdgeChange,
   NodeChange,
 } from "@xyflow/react";
+import { Position } from "@xyflow/react";
+import { createElement } from "react";
+import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { Connection, Edge, Graph, Node } from "@nodera/graph-model";
@@ -20,6 +23,7 @@ import {
   toReactFlowEdges,
   toReactFlowNodes,
 } from "./react-flow-mapper.js";
+import { DefaultEdgeRenderer } from "../renderers/default-edge-renderer.js";
 
 // --- Test helpers ---
 
@@ -498,6 +502,79 @@ describe("toReactFlowEdges", () => {
 
     // RF edge label is ReactNode; we store it as text
     expect(result[0]!.label).toBe("My Connection");
+  });
+});
+
+describe("toReactFlowEdges renderer-only style hints", () => {
+  function hintedGraph(style: Readonly<Record<string, unknown>>) {
+    const node1 = buildNode("n1", "d", [buildPortInstance("p1", "output")]);
+    const node2 = buildNode("n2", "d", [buildPortInstance("p2", "input")]);
+    const edge = makeEdge("e1", "n1", "p1", "n2", "p2", "edge-def");
+    return {
+      graph: buildGraph([node1, node2], [edge]),
+      definition: mockEdgeDefinition({ visual: { metadata: { style } } }),
+    };
+  }
+
+  it("carries the honoured metadata.style hints into the edge data", () => {
+    const { graph, definition } = hintedGraph({ strokeWidth: 3, dashArray: "4 2" });
+
+    const result = toReactFlowEdges(graph, () => definition);
+
+    expect(result[0]!.data).toEqual({
+      styleHints: { strokeWidth: 3, dashArray: "4 2" },
+    });
+  });
+
+  it("leaves the edge data absent when the definition declares no renderer-only hints", () => {
+    const { graph, definition } = hintedGraph({});
+
+    const result = toReactFlowEdges(graph, () => definition);
+
+    expect(result[0]!.data).toBeUndefined();
+  });
+
+  it("keeps the phase-4 style mapping for an edge that only declares visual keys", () => {
+    const node1 = buildNode("n1", "d", [buildPortInstance("p1", "output")]);
+    const node2 = buildNode("n2", "d", [buildPortInstance("p2", "input")]);
+    const edge = makeEdge("e1", "n1", "p1", "n2", "p2", "edge-def");
+    const graph = buildGraph([node1, node2], [edge]);
+
+    const result = toReactFlowEdges(graph, () =>
+      mockEdgeDefinition({ visual: { lineStyle: "dashed", color: "red" } }),
+    );
+
+    expect(result[0]!.style).toEqual({ strokeDasharray: "6 6", stroke: "red" });
+    expect(result[0]!.data).toBeUndefined();
+  });
+
+  it("draws an SDK-authored strokeWidth hint on the rendered default edge", () => {
+    // Integration: definition → mapped React Flow edge → DefaultEdgeRenderer.
+    const { graph, definition } = hintedGraph({ strokeWidth: 3, dashArray: "4 2" });
+    const mapped = toReactFlowEdges(graph, () => definition)[0]!;
+    const data = mapped.data;
+    if (data === undefined) {
+      throw new Error("expected the mapped edge to carry the definition's style hints");
+    }
+
+    const { container } = render(
+      createElement(DefaultEdgeRenderer, {
+        id: "e1",
+        source: "n1",
+        target: "n2",
+        sourceX: 0,
+        sourceY: 0,
+        targetX: 100,
+        targetY: 100,
+        sourcePosition: Position.Bottom,
+        targetPosition: Position.Top,
+        data,
+      }),
+    );
+
+    const path = container.querySelector("path");
+    expect((path as SVGPathElement).style.strokeWidth).toBe("3");
+    expect((path as SVGPathElement).style.strokeDasharray).toBe("4 2");
   });
 });
 

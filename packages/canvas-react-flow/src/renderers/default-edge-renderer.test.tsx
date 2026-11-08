@@ -86,6 +86,111 @@ describe("defaultEdgeOptionsFromVisual", () => {
       markerEnd: expect.anything(),
     });
   });
+
+  /* Renderer-only style hints, stored by the SDK under `metadata.style`. */
+
+  it("metadata.style.strokeWidth → strokeWidth", () => {
+    const opts = defaultEdgeOptionsFromVisual({
+      metadata: { style: { strokeWidth: 2 } },
+    });
+    expect(opts?.strokeWidth).toBe(2);
+  });
+
+  it("metadata.style.dashArray as string → strokeDasharray", () => {
+    const opts = defaultEdgeOptionsFromVisual({
+      metadata: { style: { dashArray: "4 2" } },
+    });
+    expect(opts?.strokeDasharray).toBe("4 2");
+  });
+
+  it("metadata.style.dashArray as number[] → strokeDasharray", () => {
+    const opts = defaultEdgeOptionsFromVisual({
+      metadata: { style: { dashArray: [4, 2] } },
+    });
+    expect(opts?.strokeDasharray).toBe("4 2");
+  });
+
+  it("ignores an unknown metadata.style key", () => {
+    const opts = defaultEdgeOptionsFromVisual({
+      metadata: { style: { glow: "strong", strokeWidth: 2 } },
+    });
+    expect(opts).toEqual({ strokeWidth: 2 });
+  });
+
+  it("ignores a wrong-typed metadata.style.strokeWidth instead of coercing it", () => {
+    const opts = defaultEdgeOptionsFromVisual({
+      metadata: { style: { strokeWidth: "4", dashArray: 4 } },
+    });
+    expect(opts).toBeUndefined();
+  });
+
+  it("ignores a metadata.style that is not an object", () => {
+    const opts = defaultEdgeOptionsFromVisual({ metadata: { style: "stroke:2" } });
+    expect(opts).toBeUndefined();
+  });
+
+  it("keeps the lineStyle shorthand when a style hint is absent", () => {
+    const opts = defaultEdgeOptionsFromVisual({ lineStyle: "dashed", metadata: {} });
+    expect(opts?.strokeDasharray).toBe("6 6");
+    expect(opts?.strokeWidth).toBeUndefined();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  DefaultEdgeRenderer style hints                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The definition's renderer-only style hints reach a renderer as
+ * `data.styleHints`, mapped by `toReactFlowEdges` from `visual.metadata.style`.
+ * The renderer applies a hint when it is present and keeps the token fallback
+ * (`var(--ndr-edge-*)`) otherwise.
+ */
+describe("DefaultEdgeRenderer renderer-only style hints", () => {
+  function renderEdge(data: Record<string, unknown> = {}) {
+    return render(
+      <DefaultEdgeRenderer
+        id="e1"
+        source="n1"
+        target="n2"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={data}
+      />,
+    );
+  }
+
+  it("keeps the token fallbacks when the definition declares no hints", () => {
+    const path = renderEdge().container.querySelector("path");
+    expect((path as SVGPathElement).style.strokeWidth).toBe(
+      "var(--ndr-edge-stroke-width, 1.5)",
+    );
+    expect((path as SVGPathElement).style.strokeDasharray).toBe("");
+  });
+
+  it("draws with a strokeWidth hint from the edge data", () => {
+    const path = renderEdge({ styleHints: { strokeWidth: 3 } }).container.querySelector("path");
+    expect((path as SVGPathElement).style.strokeWidth).toBe("3");
+  });
+
+  it("draws with a dashArray hint from the edge data", () => {
+    const path = renderEdge({ styleHints: { dashArray: "4 2" } }).container.querySelector("path");
+    expect((path as SVGPathElement).style.strokeDasharray).toBe("4 2");
+  });
+
+  it("ignores a wrong-typed hint and keeps the token fallbacks", () => {
+    const path = renderEdge({ styleHints: { strokeWidth: "3", dashArray: 4 } }).container.querySelector(
+      "path",
+    );
+    expect((path as SVGPathElement).style.strokeWidth).toBe(
+      "var(--ndr-edge-stroke-width, 1.5)",
+    );
+    expect((path as SVGPathElement).style.strokeDasharray).toBe("");
+  });
 });
 
 /* ------------------------------------------------------------------ */

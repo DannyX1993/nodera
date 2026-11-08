@@ -441,7 +441,7 @@ describe("post-construction registration", () => {
     const rebound = builder.bindRenderer("panels", "demo.panel", Component);
     expect(rebound.ok).toBe(false);
     if (rebound.ok) return;
-    expect(rebound.error).toMatchObject({ code: "sdk.duplicate-id" });
+    expect(rebound.error[0]).toMatchObject({ code: "sdk.duplicate-id" });
   });
 });
 
@@ -470,7 +470,7 @@ describe("editor sessions", () => {
     const editor = builder.createEditor();
     expect(editor.ok).toBe(false);
     if (editor.ok) return;
-    expect(editor.error).toMatchObject({ code: "sdk.disposed" });
+    expect(editor.error[0]).toMatchObject({ code: "sdk.disposed" });
 
     const node = builder.registerNode(nodeInput());
     expect(node.ok).toBe(false);
@@ -489,7 +489,35 @@ describe("editor sessions", () => {
     const binding = builder.bindRenderer("panels", "demo.panel", null);
     expect(binding.ok).toBe(false);
     if (binding.ok) return;
-    expect(binding.error).toMatchObject({ code: "sdk.disposed" });
+    expect(binding.error[0]).toMatchObject({ code: "sdk.disposed" });
+  });
+});
+
+describe("public error shape", () => {
+  it("reports bindRenderer and createEditor failures as SdkIssues lists", () => {
+    const builder = create();
+    const Component = (): null => null;
+    expect(builder.bindRenderer("panels", "demo.panel", Component).ok).toBe(true);
+
+    const rebound = builder.bindRenderer("panels", "demo.panel", Component);
+    expect(rebound.ok).toBe(false);
+    if (rebound.ok) return;
+    const reboundIssues: SdkIssues = rebound.error;
+    expect(Array.isArray(reboundIssues)).toBe(true);
+    expect(reboundIssues[0]).toMatchObject({
+      code: "sdk.duplicate-id",
+      severity: "error",
+      path: ["renderers", "panels", "demo.panel"],
+    });
+
+    builder.dispose();
+    const created = builder.createEditor();
+    expect(created.ok).toBe(false);
+    if (created.ok) return;
+    const createdIssues: SdkIssues = created.error;
+    expect(Array.isArray(createdIssues)).toBe(true);
+    expect(createdIssues[0]).toMatchObject({ code: "sdk.disposed", severity: "error" });
+    expect(createdIssues).toHaveLength(1);
   });
 });
 

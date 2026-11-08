@@ -1,6 +1,8 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, Position } from "@xyflow/react";
 import type { EdgeProps } from "@xyflow/react";
-import type { FC } from "react";
+import type { CSSProperties, FC } from "react";
+
+import { edgeStyleHintsFromData } from "./edge-options.js";
 
 /* ------------------------------------------------------------------ */
 /*  Token-driven edge styles (D2/D8)                                   */
@@ -23,6 +25,24 @@ const SELECTED_EDGE_STYLE = {
   stroke: "var(--ndr-edge-stroke-color-selected, #2563eb)",
   strokeWidth: "var(--ndr-edge-stroke-width-selected, 2.5)",
 } as const;
+
+/**
+ * Style the renderer draws an unselected edge with.
+ *
+ * The token values are the fallback of every field, so an edge that declares no
+ * renderer-only hint is drawn exactly as before. The definition's own
+ * `metadata.style.strokeWidth` / `dashArray` (published by `toReactFlowEdges` as
+ * `data.styleHints`) replace the width and the dash pattern when present; the
+ * stroke colour stays token-driven so the theme keeps control of the palette.
+ */
+function edgeStyle(data: unknown): CSSProperties {
+  const hints = edgeStyleHintsFromData(data);
+  return {
+    stroke: EDGE_STYLE.stroke,
+    strokeWidth: hints?.strokeWidth ?? EDGE_STYLE.strokeWidth,
+    ...(hints?.dashArray === undefined ? {} : { strokeDasharray: hints.dashArray }),
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /*  DefaultEdgeRenderer                                                */
@@ -66,7 +86,7 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
     <>
       <BaseEdge
         path={path}
-        style={selected ? SELECTED_EDGE_STYLE : EDGE_STYLE}
+        style={selected ? SELECTED_EDGE_STYLE : edgeStyle(data)}
         className={selected ? "nodera-edge-selected" : undefined}
       />
       {text && (

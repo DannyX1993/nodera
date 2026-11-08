@@ -5,7 +5,14 @@
  * mounts the demo. There is no second wiring step: the React binding reads the
  * builder's state, registries and renderers, so nothing has to be handed to the
  * UI besides the builder itself.
+ *
+ * The canvas engine's stylesheet is a host concern, exactly as it is for any
+ * other host: the demo imports it here and keeps no copy of it in `index.html`.
+ * The stylesheet is the only thing this demo takes from `@xyflow/react` — never
+ * a component, and never an internal `@nodera/*` package.
  */
+
+import "@xyflow/react/dist/style.css";
 
 import { createRoot } from "react-dom/client";
 

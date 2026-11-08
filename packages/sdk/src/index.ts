@@ -8,9 +8,14 @@
  * `Result`-based diagnostic model. Nothing in this barrel imports React, React
  * Flow or any other presentation engine: the SDK composes the framework-free
  * core, and a presentation binding selects the engine.
+ *
+ * The published vocabulary (`./vocabulary.js`) is the set of names a host must
+ * be able to write to use this API: they are type-only re-exports of the module
+ * that owns each one, never a re-declaration.
  */
 
 export * from "./errors.js";
+export * from "./vocabulary.js";
 export * from "./authoring/renderer-binding.js";
 export * from "./authoring/ports.js";
 export * from "./authoring/properties.js";

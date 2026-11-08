@@ -21,6 +21,8 @@
  *
  * Renderer bindings are not contributions: `renderers.bind` attaches an opaque
  * value to an existing slot and therefore never appears in `contributionIds`.
+ * Its failures are `SdkIssues`, exactly like the builder method it delegates to,
+ * so a plugin author sees the one error shape of the public surface.
  */
 
 import { err, ok, type Result } from "@nodera/contracts";
@@ -37,7 +39,6 @@ import type { Builder } from "../builder/builder.js";
 import {
   isQualifiedId,
   sdkError,
-  toIssues,
   type SdkIssue,
   type SdkIssues,
   type SdkIssueCode,
@@ -218,10 +219,11 @@ function createPluginApi(
         if (bound.ok) {
           return ok(undefined);
         }
-        const issues = toIssues(bound.error);
-        recorder.failures.push(...issues);
-        emitFailure(builder, plugin.id, issues);
-        return err(issues);
+        // `bindRenderer` already reports `SdkIssues`, the single error shape of
+        // the public surface, so the plugin api never exposes `SdkError`.
+        recorder.failures.push(...bound.error);
+        emitFailure(builder, plugin.id, bound.error);
+        return err(bound.error);
       },
     },
   };

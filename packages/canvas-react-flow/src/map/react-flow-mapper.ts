@@ -10,6 +10,7 @@ import type { Edge, Graph, Node } from "@nodera/graph-model";
 import type { NodeDefinition, NodeVisual } from "@nodera/node-registry";
 import type { EdgeDefinition, EdgeVisual } from "@nodera/edge-registry";
 import type { PortDeclaration, PortDirection, PortInstance, PortVisual } from "@nodera/graph-model";
+import { edgeStyleHints } from "../renderers/edge-options.js";
 
 /**
  * React Flow Handle type mapping for Nodera port directions.
@@ -218,6 +219,14 @@ export const toReactFlowEdges = (
       }
       if (visual.arrowStart) {
         rfEdge.markerStart = "arrow";
+      }
+
+      // Renderer-only style hints → the edge data the renderer receives.
+      // They stay apart from `style`, where a `strokeDasharray` derived from
+      // `lineStyle` and one declared as a hint would be indistinguishable.
+      const hints = edgeStyleHints(visual);
+      if (hints !== undefined) {
+        rfEdge.data = { ...rfEdge.data, styleHints: hints };
       }
     }
 
