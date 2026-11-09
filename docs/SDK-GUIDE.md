@@ -458,7 +458,8 @@ builder.graphLayout.all().map((strategy) => strategy.id); // built-ins + "acme.d
 ```
 
 The in-house `nodera.graph-layout.layered` is the default: ranks by longest path
-from the source nodes, in-rank order by node id, no crossing minimization. A
+from the source nodes, in-rank order by the mean position of the parents, crossings
+reduced but not guaranteed. A
 host that wants something else writes an adapter over the same port — plain
 input, plain output — and selects it by id, in configuration
 (`graph.layout.strategy`) or with `setDefault`. The framework ships no external

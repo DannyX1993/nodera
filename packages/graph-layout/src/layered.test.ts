@@ -75,7 +75,10 @@ describe("createLayeredStrategy", () => {
     ]);
   });
 
-  it("orders the nodes of a rank by node id, never by input order", () => {
+  it("keeps a tie in the barycenter in node-id order, never in input order", () => {
+    // Retargeted: in-rank order by node id is now the *tie-breaker* of the
+    // barycenter rule (S10's "order by id" clause is superseded), and the
+    // expectation is unchanged because both children share the same mean.
     const result = layered.place({
       nodes: [node("c"), node("b"), node("a")],
       edges: [edge("a", "c"), edge("a", "b")],
@@ -87,6 +90,83 @@ describe("createLayeredStrategy", () => {
       { nodeId: "b", x: 100, y: 0 },
       { nodeId: "c", x: 100, y: 40 },
     ]);
+  });
+
+  it("orders a rank by the mean position of its parents, removing the sibling crossing", () => {
+    // `a` forks into `b` and `c`; `b` feeds `e` and `c` feeds `d`. In id order the
+    // last rank is `[d, e]`, so `c -> d` and `b -> e` cross. The barycenter of
+    // `d` is 1 (its parent `c` sits second) and the one of `e` is 0, so the
+    // crossing disappears.
+    const result = placed(
+      layered.place({
+        nodes: [node("a"), node("b"), node("c"), node("d"), node("e")],
+        edges: [edge("a", "b"), edge("a", "c"), edge("b", "e"), edge("c", "d")],
+        options: options(),
+      }),
+    );
+
+    expect(result).toEqual([
+      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "b", x: 100, y: 0 },
+      { nodeId: "c", x: 100, y: 40 },
+      // Crossed as [d, e]; the barycenter keeps each child under its own parent.
+      { nodeId: "e", x: 200, y: 0 },
+      { nodeId: "d", x: 200, y: 40 },
+    ]);
+  });
+
+  it("leaves the ranks themselves untouched and only permutes inside them", () => {
+    const result = placed(
+      layered.place({
+        nodes: [node("a"), node("b"), node("c"), node("d"), node("e")],
+        edges: [edge("a", "b"), edge("a", "c"), edge("b", "e"), edge("c", "d")],
+        options: options({ rankSpacing: 250, nodeSpacing: 40 }),
+      }),
+    );
+
+    // The ordering chooses an in-rank index; it never moves a node's rank.
+    expect(new Map(result.map((entry) => [entry.nodeId, entry.x]))).toEqual(
+      new Map([
+        ["a", 0],
+        ["b", 250],
+        ["c", 250],
+        ["d", 500],
+        ["e", 500],
+      ]),
+    );
+    expect(new Map(result.map((entry) => [entry.nodeId, entry.y]))).toEqual(
+      new Map([
+        ["a", 0],
+        ["b", 0],
+        ["c", 40],
+        ["e", 0],
+        ["d", 40],
+      ]),
+    );
+  });
+
+  it("orders by the barycenter independently of the input order", () => {
+    const nodes = [node("a"), node("b"), node("c"), node("d"), node("e")];
+    const edges = [edge("a", "b"), edge("a", "c"), edge("b", "e"), edge("c", "d")];
+
+    const forward = placed(layered.place({ nodes, edges, options: options() }));
+    const reversed = placed(
+      layered.place({
+        nodes: [...nodes].reverse(),
+        edges: [...edges].reverse(),
+        options: options(),
+      }),
+    );
+    const shuffled = placed(
+      layered.place({
+        nodes: [node("c"), node("e"), node("a"), node("d"), node("b")],
+        edges: [edge("c", "d"), edge("b", "e"), edge("a", "c"), edge("a", "b")],
+        options: options(),
+      }),
+    );
+
+    expect(reversed).toEqual(forward);
+    expect(shuffled).toEqual(forward);
   });
 
   it("places cycle-locked nodes after every resolved rank", () => {

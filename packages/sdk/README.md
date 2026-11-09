@@ -961,7 +961,8 @@ the automatic arrangement pair `arrangeOnChange()` /
 `setArrangeOnChange(policy)` and the removal pair `removalPolicy()` /
 `setRemovalPolicy(policy)`, all described above. The built-ins are
 `nodera.graph-layout.free` (no-op) and `nodera.graph-layout.layered` (rank by
-longest path, in-rank order by node id, no crossing minimization); a used id is a
+longest path, in-rank order by the mean position of the parents, crossings reduced but
+not guaranteed); a used id is a
 `sdk.duplicate-id` and an unknown one is refused, so a plugin never shadows the
 host's selection.
 

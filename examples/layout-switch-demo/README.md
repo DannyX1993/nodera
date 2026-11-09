@@ -224,6 +224,7 @@ own placement UI writes exactly this page; the framework still adds none.
 - No node renderers are registered: the binding's default node renderer draws
   the three definitions. This demo is about placement, not drawing.
 - The layered strategy ranks by longest path and orders each rank by node id. It
-  does no crossing minimization and produces no edge bend points.
+  reduces crossing edges by ordering each rank around its parents, but does not guarantee a
+  crossing-free drawing, and produces no edge bend points.
 - The status line is the only observability: the host reports its own
   diagnostics instead of relying on a console.

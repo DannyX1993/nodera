@@ -20,13 +20,17 @@ const SCOPES: readonly string[] = ["all", "unpositioned"];
 /**
  * In-house layered placement (odd task T2, S9/S10).
  *
- * Every node is ranked by longest path from the source nodes (nodes with no
- * incoming edge and at least one outgoing edge), then each rank is laid out in
- * node-id order; a node with no edge at all joins the cycle-locked bucket after
- * every resolved rank, so it never lands at the origin. There is no
- * crossing minimization and there are no edge bend points: a ranked, evenly
+ * Every node is ranked by longest path from the source nodes; the nodes of each
+ * rank are then ordered by a **barycenter** sweep, and a node with no edge at all
+ * joins the cycle-locked bucket after every resolved rank, so it never lands at
+ * the origin. There is no edge routing and no edge bend point: a ranked, evenly
  * spaced grid is what the `Arrange` scope needs, and a dependency that hands the
  * same obligations back is not worth adding (S9).
+ *
+ * The barycenter ordering **reduces** crossings — it removes the sibling
+ * crossings a plain id order produced — but it does **not** guarantee a
+ * crossing-free drawing: minimising crossings is NP-hard, and a heuristic that
+ * claims a guarantee would be lying to its host.
  *
  * The answer depends only on the *set* of nodes and edges, never on the order
  * the caller listed them in, so the same graph always arranges the same way.
@@ -66,7 +70,7 @@ export function createLayeredStrategy(): GraphLayoutStrategy {
       }
 
       const rankByNode = rankNodes(input.nodes, input.edges);
-      const ranks = groupByRank(input.nodes, rankByNode);
+      const ranks = groupByRank(input.nodes, input.edges, rankByNode);
       return ok<GraphLayoutResult>({ positions: placeRanks(ranks, input.nodes, options) });
     },
   } satisfies GraphLayoutStrategy;
@@ -193,9 +197,14 @@ function rankNodes(
   return rankByNode;
 }
 
-/** The node ids of each rank, ordered by node id. */
+/**
+ * The node ids of each rank, ordered by a barycenter sweep.
+ *
+ * The ranking itself is untouched: this only chooses the in-rank index.
+ */
 function groupByRank(
   nodes: readonly GraphLayoutNodeInput[],
+  edges: readonly GraphLayoutEdgeInput[],
   rankByNode: ReadonlyMap<NodeId, number>,
 ): Map<number, NodeId[]> {
   const groups = new Map<number, NodeId[]>();
@@ -214,11 +223,80 @@ function groupByRank(
   for (const group of groups.values()) {
     group.sort(compareIds);
   }
+  orderByBarycenter(groups, parentsByNode(edges));
   return groups;
 }
 
+/** Each node's distinct parents, keyed by the node they point at. */
+function parentsByNode(
+  edges: readonly GraphLayoutEdgeInput[],
+): ReadonlyMap<NodeId, readonly NodeId[]> {
+  const parents = new Map<NodeId, NodeId[]>();
+  for (const edge of edges) {
+    const of = parents.get(edge.target);
+    if (of === undefined) {
+      parents.set(edge.target, [edge.source]);
+    } else if (!of.includes(edge.source)) {
+      of.push(edge.source);
+    }
+  }
+  return parents;
+}
+
 /**
- * Turns the ranks into positions, in rank order and then node-id order.
+ * Reorders each rank by the barycenter of its nodes: the **mean** in-rank index
+ * of the node's distinct parents in the previous rank (median was the other
+ * candidate; the mean is what makes a node sit under the centre of its parents
+ * and costs one pass).
+ *
+ * One deterministic sweep, over the ranks in ascending order: each rank is
+ * ordered only after the previous one is final, so every node reads the same
+ * parent indices no matter how the caller listed the nodes or the edges. A
+ * second identical sweep cannot change anything — the pass is idempotent — so
+ * "one or two sweeps" is answered with one.
+ *
+ * A node with no parent in the previous rank (a source, an isolated node, or a
+ * node of the cycle-locked bucket) has no mean; it keeps its own current index,
+ * which is where the id-ordered base put it. Equal keys fall back to node id.
+ */
+function orderByBarycenter(
+  groups: Map<number, NodeId[]>,
+  parents: ReadonlyMap<NodeId, readonly NodeId[]>,
+): void {
+  /** In-rank index of every ranked node, filled rank by rank. */
+  const indexInRank = new Map<NodeId, number>();
+
+  for (const rank of [...groups.keys()].sort((left, right) => left - right)) {
+    const ids = groups.get(rank) ?? [];
+    const key = new Map<NodeId, number>();
+    for (const id of ids) {
+      let sum = 0;
+      let count = 0;
+      for (const parent of parents.get(id) ?? []) {
+        const index = indexInRank.get(parent);
+        if (index !== undefined) {
+          sum += index;
+          count += 1;
+        }
+      }
+      key.set(id, count === 0 ? indexInRank.get(id) ?? 0 : sum / count);
+    }
+    ids.sort((left, right) => {
+      const leftKey = key.get(left) ?? 0;
+      const rightKey = key.get(right) ?? 0;
+      if (leftKey !== rightKey) {
+        return leftKey < rightKey ? -1 : 1;
+      }
+      return compareIds(left, right);
+    });
+    ids.forEach((id, index) => {
+      indexInRank.set(id, index);
+    });
+  }
+}
+
+/**
+ * Turns the ranks into positions, in rank order and then in-rank order.
  *
  * `horizontal` puts the rank on `x` and the in-rank index on `y`; `vertical`
  * swaps the axes. With `scope: "unpositioned"` the nodes the document already

@@ -84,7 +84,7 @@ nodes that are answered.
 | Factory | Id | Behaviour |
 | --- | --- | --- |
 | `createFreeStrategy()` | `nodera.graph-layout.free` | places nothing (`positions: []`); every position stays in the host's hands |
-| `createLayeredStrategy()` | `nodera.graph-layout.layered` | ranks by longest path from the source nodes, places the isolated and cycle-locked nodes after every resolved rank, and lays the ranks out in node-id order |
+| `createLayeredStrategy()` | `nodera.graph-layout.layered` | ranks by longest path from the source nodes, places the isolated and cycle-locked nodes after every resolved rank, and orders each rank by the barycenter of its parents in the previous rank (ties by node id) |
 
 The free strategy never inspects its input, so it ignores the options and cannot
 fail: an empty placement answer is the honest one, and the caller applies no write
@@ -100,8 +100,9 @@ at all.
    endpoint must be a known node id. The source endpoint of an edge is checked
    before its target.
 3. **Sorts** the nodes by id and the edges by `(source, target)` before building
-   the ranks, and sorts every rank by id afterwards, so the answer depends on the
-   *set* of nodes and edges and never on the order the caller listed them in.
+   the ranks, and starts every rank in id order before the barycenter sweep, so
+   the answer depends on the *set* of nodes and edges and never on the order the
+   caller listed them in.
 4. **Ranks by longest path from the sources.** A source is a node with no incoming
    edge **and** at least one outgoing edge, and starts at rank `0`. Ranks are
    relaxed edge by edge, repeating over the sorted edge list; the number of
@@ -116,16 +117,29 @@ at all.
      all, so it is not a source either; without this rule it would keep rank `0`
      and any recalculation would drop it at the origin (the hole the demo
      reported when a node added from the palette landed top-left).
-6. **Orders each rank by node id** and then applies the axes:
+6. **Orders each rank by a barycenter sweep** and then applies the axes:
    `horizontal` puts the rank on `x` (`rank × rankSpacing`) and the in-rank index
-   on `y` (`index × nodeSpacing`); `vertical` swaps them.
+   on `y` (`index × nodeSpacing`); `vertical` swaps them. The sweep visits the
+   ranks in ascending order and orders each one by the **mean** in-rank index of
+   a node's distinct parents in the previous rank (median was the alternative;
+   the mean is what puts a node under the centre of its parents); equal keys fall
+   back to node id, and a node with no parent in the previous rank — a source, an
+   isolated node, a cycle-locked node — keeps its own current index. One sweep is
+   enough because each rank is ordered only after the previous one is final, so a
+   second identical sweep cannot change anything.
+
+   This **reduces** crossings: it removes the sibling crossing an id order
+   produces when a child's id sorts before its sibling's. It does **not**
+   guarantee a crossing-free drawing — minimising crossings is NP-hard, and no
+   rank-permutation heuristic can promise that. The ranking itself is never
+   touched: the sweep only chooses in-rank indices.
 7. **Filters by `scope`** last: `all` answers for every node, `unpositioned` drops
    the nodes the document positions but keeps their in-rank index, so the slots of
    the answered nodes do not move.
 
 The answer is a ranked, evenly spaced grid, which is what an explicit `Arrange`
-action needs. There is no crossing minimization, no edge bend point and no edge
-routing (see [Stated limitations](#stated-limitations)).
+action needs. There is no edge routing and no edge bend point (see
+[Stated limitations](#stated-limitations)).
 
 ## Defaults
 
@@ -309,12 +323,16 @@ above the threshold, as the sketch does.
 
 ## Stated limitations
 
-No crossing minimization, no edge bend points and no edge routing. The result is
-a ranked, evenly spaced grid, which is what an explicit `Arrange` action needs,
-with no knowledge of node sizes or edge geometry: it never reads a node width, a
-port position or an edge path, and it returns positions only, so nothing but the
-node ids, the edges and the declared options influences the answer. A quality bar
-that asks for fewer crossings or for routed edges belongs behind this same port.
+**Crossing reduction, never elimination.** The barycenter sweep of the placement
+rule removes the crossings an id order produces between siblings, and it is a
+heuristic: it **reduces** crossings, it does not guarantee a crossing-free
+drawing (minimising crossings is NP-hard), and a host must not read a
+`place()` answer as one. There are no edge bend points and no edge routing
+either. The result is a ranked, evenly spaced grid, which is what an explicit
+`Arrange` action needs, with no knowledge of node sizes or edge geometry: it
+never reads a node width, a port position or an edge path, and it returns
+positions only, so nothing but the node ids, the edges and the declared options
+influences the answer.
 
 ## See also
 

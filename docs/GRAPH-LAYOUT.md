@@ -337,9 +337,9 @@ fails the removal — `builder.graph.lastAutoArrangement()` reports it. With
 `"detach"` nothing is arranged, exactly as before.
 
 The placement rule behind the answer (longest-path ranks, the relaxation cap, the
-rank of the isolated and cycle-locked nodes, in-rank order by node id, the two
-axes, `all` vs `unpositioned`) is documented once, in
-`packages/graph-layout/README.md`.
+rank of the isolated and cycle-locked nodes, the barycenter ordering of each rank
+with node id as its tie-break, the two axes, `all` vs `unpositioned`) is
+documented once, in `packages/graph-layout/README.md`.
 
 ### `builder.graph.insertNode(request)`
 
@@ -444,7 +444,7 @@ like every other control the framework paints):
 | The graph | What the canvas draws |
 | --- | --- |
 | No node at all | A dashed, muted **phantom node** — `data-nodera-phantom-node="inactive"` — carrying the same "`+`" (`aria-label="Insert node"`). |
-| Exactly one node | The same phantom node one visual step past it, plus a dashed **phantom edge** from the real node to the placeholder, with the "`+`" at its midpoint. |
+| Exactly one node | The same phantom node one visual step past it, plus a dashed **phantom edge** from the real node to the placeholder; the "`+`" sits **inside the dashed box**, centred, in both cases. |
 | Two nodes or more | No empty-state phantom. Every leaf gets its own [successor placeholder](#successor-placeholders-s21) instead — never both for the same node. |
 
 The phantoms are **presentation only**, and that is enforced, not promised:
@@ -471,7 +471,13 @@ The phantoms are **presentation only**, and that is enforced, not promised:
   cannot look like a placed node — there is nothing extra to filter;
 - inactivity is expressed with the **dashed border and the muted palette**, never
   by colour alone, and both are theme tokens with literal fallbacks
-  (`--ndr-phantom-node-*`, `--ndr-phantom-edge-*`).
+  (`--ndr-phantom-node-*`, `--ndr-phantom-edge-*`). The connector's thickness is
+  its own **length** token, `--ndr-phantom-edge-width` (default `1.5px`), and
+  deliberately *not* `--ndr-edge-stroke-width`: that one is the theme's SVG
+  `stroke-width` (`"1.5"`, unitless), and a unitless number in a CSS `border`
+  width makes the whole declaration invalid — which is exactly why the dashed
+  connector was invisible in the themed demo while its box still positioned the
+  "`+`" on the line it should have drawn.
 
 Activating the "`+`" records the anchor in the UI state
 (`UiState.pendingAppendAnchorId`: the single node's id, or absent on an empty
@@ -499,9 +505,10 @@ atomicity.
 From two nodes on, the same affordance answers "where can I continue the
 hierarchy?". Every node with **no outgoing edge** — a leaf, the step where the
 hierarchy ends — gets one dashed phantom successor one step past it along the
-axis the host declares, joined by a dashed phantom edge carrying the "`+`" at its
-midpoint. It is the image the feature was asked for: a node, a dashed edge down,
-a dashed placeholder below.
+axis the host declares, joined by a dashed phantom edge, with the "`+`" inside the
+dashed box, centred — one control in one place, whether or not a connector joins
+it. It is the image the feature was asked for: a node, a dashed edge down, a
+dashed placeholder below carrying the "`+`".
 
 | The graph | What the canvas draws |
 | --- | --- |
@@ -666,8 +673,12 @@ too.
 
 Stated, not hidden:
 
-- No crossing minimization, no edge bend points, no edge routing. The layered
-  strategy produces a ranked, evenly spaced grid.
+- **Crossing reduction, not elimination.** The barycenter sweep orders each rank
+  by the mean position of a node's parents in the previous rank (ties by node id),
+  which removes the sibling crossings a plain id order produced. It **reduces**
+  crossings; it does not guarantee a crossing-free drawing, because minimising
+  crossings is NP-hard. There are no edge bend points and no edge routing either:
+  the layered strategy produces a ranked, evenly spaced grid.
 - The branching "+" records the parent in the UI state and the **host** runs
   `insertNodeBeforeBranching`. The framework's built-in dialog command
   (`{ kind: "insert-node" }`) covers the per-edge insertion only, so a host that
