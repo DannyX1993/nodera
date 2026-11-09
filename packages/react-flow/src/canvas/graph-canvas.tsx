@@ -838,14 +838,68 @@ export function branchingNodeIds(
 }
 
 /**
+ * Distance the branching "+" keeps from both things it must not sit on.
+ *
+ * One affordance button (`--ndr-edge-insert-size`, 20 flow units, the circle's
+ * diameter) plus a small clearance: along the axis it separates the handle from
+ * the parent's own box, and across the axis it separates it from every per-edge
+ * `"+"` of the same rank, whose coordinates are edge midpoints. Sharing either
+ * line makes the two circles read as a duplicate (user report).
+ */
+const BRANCH_HANDLE_OFFSET = 24;
+
+/**
+ * Cross-axis centre of a node: the row it sits on, or the column it sits in.
+ *
+ * The axis coordinate (the one the layout steps along) is never used here: the
+ * branching handle is placed past the parent **along** it, and between the
+ * successors **across** it.
+ */
+function crossCentre(node: PlaceholderNodeInput, axis: PlaceholderAxis): number {
+  return axis === "vertical"
+    ? node.position.x + (node.width ?? PLACEHOLDER_NODE_SIZE.width) / 2
+    : node.position.y + (node.height ?? PLACEHOLDER_NODE_SIZE.height) / 2;
+}
+
+/** Successor ids of every source, in edge order (the document's, so stable). */
+function successorsBySource(
+  edges: ReadonlyArray<{ readonly source: string; readonly target: string }>,
+): ReadonlyMap<string, readonly string[]> {
+  const bySource = new Map<string, string[]>();
+  for (const edge of edges) {
+    const targets = bySource.get(edge.source);
+    if (targets === undefined) {
+      bySource.set(edge.source, [edge.target]);
+    } else {
+      targets.push(edge.target);
+    }
+  }
+  return bySource;
+}
+
+/**
  * Derives every branching "+" the canvas draws, in flow coordinates.
  *
- * One handle per parent with at least two outgoing edges, one documented step
- * past the node along the declared axis and centred on its row — i.e. on the
- * parent's outgoing side, before the edges split. Like the phantom placeholders
- * the result is geometry, not graph elements: the canvas paints it through
- * `ViewportPortal`, so it can never reach the React Flow `nodes` / `edges`
- * arrays, the document, an event or a history entry.
+ * One handle per parent with at least two outgoing edges, placed **at the fork
+ * the edges make**, not on the way to it:
+ *
+ * - along the axis, just past the parent's own box (its measured size plus
+ *   {@link BRANCH_HANDLE_OFFSET}), so it is nearer the parent than any child —
+ *   the split happens here, at the parent's outgoing side;
+ * - across the axis, at the centroid of the successors' centres (their mean row
+ *   for a horizontal layout, their mean column for a vertical one), moved
+ *   {@link BRANCH_HANDLE_OFFSET} to the "before" side: above the row, to the
+ *   left of the column. The centroid is what makes several branches read as one
+ *   split, and the offset is what keeps the handle off the line the per-edge
+ *   `"+"` of those edges sits on, so the two are never mistaken for twins.
+ *
+ * A successor that carries no position yet (or is not among `nodes` at all)
+ * contributes the parent's own centre instead of a guess, which keeps the answer
+ * defined while a graph is still being laid out. The computation is pure
+ * arithmetic over the document — no randomness, no ordering dependence beyond
+ * the edge order — and the result is geometry, not graph elements: the canvas
+ * paints it through `ViewportPortal`, so it can never reach the React Flow
+ * `nodes` / `edges` arrays, the document, an event or a history entry.
  */
 export function canvasBranchHandles(
   input: CanvasBranchHandleInput,
@@ -855,6 +909,8 @@ export function canvasBranchHandles(
   }
   const axis = input.axis ?? "horizontal";
   const branching = branchingNodeIds(input.edges);
+  const successors = successorsBySource(input.edges);
+  const byId = new Map(input.nodes.map((node) => [node.id, node]));
   const handles: BranchHandle[] = [];
   for (const node of input.nodes) {
     if (!branching.has(node.id)) {
@@ -862,11 +918,26 @@ export function canvasBranchHandles(
     }
     const width = node.width ?? PLACEHOLDER_NODE_SIZE.width;
     const height = node.height ?? PLACEHOLDER_NODE_SIZE.height;
-    const { x, y } = node.position;
+    const ownCentre = crossCentre(node, axis);
+    const targets = successors.get(node.id) ?? [];
+    const centroid =
+      targets.reduce((sum, targetId) => {
+        const successor = byId.get(targetId);
+        return sum + (successor === undefined ? ownCentre : crossCentre(successor, axis));
+      }, 0) / Math.max(1, targets.length);
+    const cross = centroid - BRANCH_HANDLE_OFFSET;
     handles.push(
       axis === "vertical"
-        ? { nodeId: node.id, x: x + width / 2, y: y + PHANTOM_NODE_OFFSET }
-        : { nodeId: node.id, x: x + PHANTOM_NODE_OFFSET, y: y + height / 2 },
+        ? {
+            nodeId: node.id,
+            x: cross,
+            y: node.position.y + height + BRANCH_HANDLE_OFFSET,
+          }
+        : {
+            nodeId: node.id,
+            x: node.position.x + width + BRANCH_HANDLE_OFFSET,
+            y: cross,
+          },
     );
   }
   return handles;

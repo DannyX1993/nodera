@@ -1694,24 +1694,122 @@ describe("GraphCanvas insert-handle placement (S23)", () => {
     ).toEqual([]);
   });
 
-  it("places the handle one step along the axis, on the parent's row", () => {
-    const horizontal = canvasBranchHandles({
+  /**
+   * Layered geometry with measured boxes, so the placement can be read as
+   * numbers: ranks 240 flow units apart, two rows 200 apart.
+   *
+   * `n1 --> { n2, n3 }`, and a vertical twin where the successors sit below the
+   * parent in two columns 240 apart.
+   */
+  const HORIZONTAL_FORK = {
+    nodes: [
+      { id: "n1", position: { x: 0, y: 0 }, width: 140, height: 40 },
+      { id: "n2", position: { x: 240, y: 0 }, width: 140, height: 40 },
+      { id: "n3", position: { x: 240, y: 200 }, width: 140, height: 40 },
+    ],
+    edges: [
+      { source: "n1", target: "n2" },
+      { source: "n1", target: "n3" },
+    ],
+  } as const;
+
+  const VERTICAL_FORK = {
+    nodes: [
+      { id: "n1", position: { x: 0, y: 0 }, width: 140, height: 40 },
+      { id: "n2", position: { x: -60, y: 240 }, width: 140, height: 40 },
+      { id: "n3", position: { x: 180, y: 240 }, width: 140, height: 40 },
+    ],
+    edges: HORIZONTAL_FORK.edges,
+  } as const;
+
+  function horizontalHandle(): { readonly x: number; readonly y: number } {
+    const [handle] = canvasBranchHandles({
       enabled: true,
       policy: "both",
-      nodes: FORK_NODES,
-      edges: FORK_EDGES,
+      nodes: HORIZONTAL_FORK.nodes,
+      edges: HORIZONTAL_FORK.edges,
     });
-    const vertical = canvasBranchHandles({
+    if (handle === undefined) {
+      throw new Error("expected a branching handle for n1");
+    }
+    return handle;
+  }
+
+  function verticalHandle(): { readonly x: number; readonly y: number } {
+    const [handle] = canvasBranchHandles({
       enabled: true,
       policy: "both",
       axis: "vertical",
-      nodes: FORK_NODES,
-      edges: FORK_EDGES,
+      nodes: VERTICAL_FORK.nodes,
+      edges: VERTICAL_FORK.edges,
+    });
+    if (handle === undefined) {
+      throw new Error("expected a branching handle for n1");
+    }
+    return handle;
+  }
+
+  it("draws the branching + past the parent's edge and off the per-edge row", () => {
+    const horizontal = horizontalHandle();
+    const vertical = verticalHandle();
+
+    // Where the per-edge "+" of the first edge sits: the midpoint between the
+    // two handle coordinates, the same arithmetic `withEdgeInsert` uses. The
+    // parent's output handle is its far edge's centre, the child's input handle
+    // the near edge's centre.
+    const horizontalMidpoint = { x: (140 + 240) / 2, y: (20 + 20) / 2 };
+    const verticalMidpoint = { x: (70 + 10) / 2, y: (40 + 240) / 2 };
+
+    // Both coordinates differ, not just one: a handle sharing the row reads as a
+    // twin of the per-edge one (the reported duplicate).
+    expect(horizontal.x).not.toBe(horizontalMidpoint.x);
+    expect(horizontal.y).not.toBe(horizontalMidpoint.y);
+    expect(vertical.x).not.toBe(verticalMidpoint.x);
+    expect(vertical.y).not.toBe(verticalMidpoint.y);
+
+    // One documented offset (24 flow units) either side of the parent and the
+    // successors' centroid.
+    expect(horizontal).toEqual({ nodeId: "n1", x: 164, y: 96 });
+    expect(vertical).toEqual({ nodeId: "n1", x: 106, y: 64 });
+  });
+
+  it("places the branching + nearer the parent than the first child", () => {
+    const horizontal = horizontalHandle();
+
+    // Past the parent's far edge (140) but short of the child's near edge (240).
+    expect(horizontal.x).toBeGreaterThan(140);
+    expect(horizontal.x).toBeLessThan(240);
+
+    const vertical = verticalHandle();
+    expect(vertical.y).toBeGreaterThan(40);
+    expect(vertical.y).toBeLessThan(240);
+  });
+
+  it("places the branching + between its successors across the axis", () => {
+    const horizontal = horizontalHandle();
+    // n2's row is 20, n3's is 220; the handle is one offset above their centroid.
+    expect(horizontal.y).toBe(20 + (220 - 20) / 2 - 24);
+    expect(horizontal.y).toBeGreaterThan(20);
+    expect(horizontal.y).toBeLessThan(220);
+
+    const vertical = verticalHandle();
+    // n2's column centre is 10, n3's is 250; "left" of the centroid.
+    expect(vertical.x).toBe(10 + (250 - 10) / 2 - 24);
+    expect(vertical.x).toBeGreaterThan(10);
+    expect(vertical.x).toBeLessThan(250);
+  });
+
+  it("falls back to the parent's own centre when a successor has no position", () => {
+    // n3 has not been placed (or measured) yet, so it contributes no row of its
+    // own; the parent's centre row (20) stands in for it.
+    const handles = canvasBranchHandles({
+      enabled: true,
+      policy: "both",
+      nodes: [HORIZONTAL_FORK.nodes[0], HORIZONTAL_FORK.nodes[1]],
+      edges: HORIZONTAL_FORK.edges,
     });
 
-    // One documented step (240 flow units) from the parent, centred on its row.
-    expect(horizontal[0]).toEqual({ nodeId: "n1", x: 240, y: 20 });
-    expect(vertical[0]).toEqual({ nodeId: "n1", x: 70, y: 240 });
+    expect(handles[0]).toEqual({ nodeId: "n1", x: 164, y: 20 - 24 });
   });
 
   it("suppresses the per-edge handle of a branching parent under the branching policy only", () => {

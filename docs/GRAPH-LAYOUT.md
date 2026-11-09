@@ -581,17 +581,34 @@ several successors:
 | --- | --- |
 | `"each-edge"` (default) | Today's behaviour: one "+" per edge, on every edge. |
 | `"before-branching"` | One "+" on a branching parent's outgoing side, before the edges split, and none of its own on those edges. Every other edge keeps its per-edge "+", so a linear chain stays editable. |
-| `"both"` | The branching "+" and the per-edge ones, side by side. |
+| `"both"` | The branching "+" and the per-edge ones, together: the branching one sits off the row (above it, or left of the column), at the fork just past the parent, so the two never overlap. |
 
 "A split" is **two or more outgoing edges**: a single-successor parent always
 keeps the ordinary per-edge affordance, because there is nothing to put a handle
 before. The branching handle is a `ViewportPortal` overlay like the placeholders —
-never a React Flow node or edge, never document state — one documented step (240
-flow units) past the parent along `layoutDirection` and centred on its row, with
-the accessible name `"Insert node before the branches"`. Activating it records the
-parent in `UiState.pendingBranchInsertId` and opens the node-creation dialog; the
-host runs `builder.graph.insertNodeBeforeBranching`, so **one** node covers the
-whole split.
+never a React Flow node or edge, never document state — with the accessible name
+`"Insert node before the branches"`. Activating it records the parent in
+`UiState.pendingBranchInsertId` and opens the node-creation dialog; the host runs
+`builder.graph.insertNodeBeforeBranching`, so **one** node covers the whole split.
+
+**Where it sits.** The branching `"+"` marks the fork, so it is drawn at the fork
+rather than on the way to it, and never on a line a per-edge `"+"` occupies:
+
+- **along the axis**, just past the parent's own box — its measured size plus a
+documented offset of 24 flow units — so the handle is nearer the parent than any
+child and reads as "before the branches";
+- **across the axis**, at the centroid of its successors' centres (their mean row
+for `horizontal`, their mean column for `vertical`), moved the same 24 flow units
+to the *before* side: **above** the rows for `horizontal`, **left** of the column
+for `vertical`.
+
+The centroid is what makes several branches read as one split; the perpendicular
+offset is what keeps the circle off the rows and columns where the per-edge `"+"`
+of those same edges sits at their edge midpoints. Without it the two circles land
+next to each other on one row and look like a duplicate. A successor that carries
+no position yet contributes the parent's own centre instead of a guess, so the
+placement stays defined mid-layout, and the whole derivation is pure arithmetic:
+deterministic, and identical for the same document.
 
 ```ts
 builder.graphLayout.insertHandlesPolicy();       // "each-edge" | "before-branching" | "both"
