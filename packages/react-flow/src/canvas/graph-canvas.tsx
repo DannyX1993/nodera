@@ -333,6 +333,16 @@ export type PlaceholderAxis = "horizontal" | "vertical";
 const PHANTOM_NODE_OFFSET = 240;
 
 /**
+ * Shortest connector the overlay ever draws, in flow units.
+ *
+ * The connector spans the gap between a node's far edge and the placeholder that
+ * follows it, so it is `step - nodeSize` long. A node wider (or taller) than one
+ * step would collapse that gap to zero and leave two boxes touching with no line
+ * joining them, so the step grows instead of the connector shrinking away.
+ */
+const PHANTOM_CONNECTOR_MIN_LENGTH = 24;
+
+/**
  * Box of a node React Flow has not measured yet, in flow units.
  *
  * A real node is measured by React Flow before anyone sees it; this is only the
@@ -371,11 +381,31 @@ const PHANTOM_NODE_STYLE: CSSProperties = {
 };
 
 /**
- * Border of a placeholder connector: dashed and muted, like the placeholder it
- * leads to, and token-driven so a themed host restyles it without re-rendering.
+ * Thickness of a placeholder connector, as a **CSS length**.
+ *
+ * Deliberately not `--ndr-edge-stroke-width`: that token is the theme's SVG
+ * `stroke-width` and its value is a unitless number (`"1.5"`, see the theme
+ * presets). A unitless number in a CSS `border` width is an invalid
+ * declaration, so the whole `border-top` was dropped at computed-value time and
+ * the connector painted nothing in a themed host — while its box still existed
+ * and positioned the `"+"` on the line that should have been drawn. Any host CSS
+ * that defines `--ndr-edge-stroke-width` reproduced the defect; the test suite
+ * never saw it because jsdom applies no theme, so only the `px` fallback was in
+ * play. The connector therefore owns its own length-bearing token.
  */
-const PLACEHOLDER_CONNECTOR_BORDER =
-  "var(--ndr-edge-stroke-width, 1.5px) dashed var(--ndr-phantom-edge-color, #b6c2cf)";
+const PLACEHOLDER_CONNECTOR_WIDTH = "var(--ndr-phantom-edge-width, 1.5px)";
+
+/** Colour of a placeholder connector, muted like the box it leads to. */
+const PLACEHOLDER_CONNECTOR_COLOR = "var(--ndr-phantom-edge-color, #b6c2cf)";
+
+/**
+ * Stacking of the overlay shapes, above React Flow's node layer.
+ *
+ * The node layer (`.react-flow__nodes`) carries no `z-index` of its own, while a
+ * node React Flow selects does; declaring one here keeps the dashed shapes on
+ * top of the layer instead of relying on the portal's DOM position alone.
+ */
+const PLACEHOLDER_Z_INDEX = "var(--ndr-phantom-z-index, 1)";
 
 /** A box in flow coordinates: the placeholder itself, or its connector. */
 export interface PlaceholderBox {
@@ -461,28 +491,31 @@ function placeholderAfter(
   const height = node.height ?? PLACEHOLDER_NODE_SIZE.height;
   const { x, y } = node.position;
 
+  // One step past the node, but never so short that the connector disappears.
   if (axis === "vertical") {
+    const step = Math.max(PHANTOM_NODE_OFFSET, height + PHANTOM_CONNECTOR_MIN_LENGTH);
     return {
       anchorId,
       kind,
-      box: { x, y: y + PHANTOM_NODE_OFFSET, width, height },
+      box: { x, y: y + step, width, height },
       connector: {
         x: x + width / 2,
         y: y + height,
-        length: Math.max(0, PHANTOM_NODE_OFFSET - height),
+        length: step - height,
         axis,
       },
     };
   }
 
+  const step = Math.max(PHANTOM_NODE_OFFSET, width + PHANTOM_CONNECTOR_MIN_LENGTH);
   return {
     anchorId,
     kind,
-    box: { x: x + PHANTOM_NODE_OFFSET, y, width, height },
+    box: { x: x + step, y, width, height },
     connector: {
       x: x + width,
       y: y + height / 2,
-      length: Math.max(0, PHANTOM_NODE_OFFSET - width),
+      length: step - width,
       axis,
     },
   };
@@ -575,10 +608,25 @@ function PlaceholderConnectorView(props: {
   readonly connector: PlaceholderConnector;
 }): ReactNode {
   const { connector } = props;
+  // Longhands, not the `border-top`/`border-left` shorthand: each edge is then a
+  // declaration of its own, so an unreadable token can never discard the style
+  // and the thickness is a CSS length like any other border.
   const across: CSSProperties =
     connector.axis === "horizontal"
-      ? { width: connector.length, height: 0, borderTop: PLACEHOLDER_CONNECTOR_BORDER }
-      : { width: 0, height: connector.length, borderLeft: PLACEHOLDER_CONNECTOR_BORDER };
+      ? {
+          width: connector.length,
+          height: 0,
+          borderTopWidth: PLACEHOLDER_CONNECTOR_WIDTH,
+          borderTopStyle: "dashed",
+          borderTopColor: PLACEHOLDER_CONNECTOR_COLOR,
+        }
+      : {
+          width: 0,
+          height: connector.length,
+          borderLeftWidth: PLACEHOLDER_CONNECTOR_WIDTH,
+          borderLeftStyle: "dashed",
+          borderLeftColor: PLACEHOLDER_CONNECTOR_COLOR,
+        };
 
   return (
     <div
@@ -586,6 +634,7 @@ function PlaceholderConnectorView(props: {
       aria-hidden="true"
       style={{
         position: "absolute",
+        zIndex: PLACEHOLDER_Z_INDEX,
         transform: `translate(${String(connector.x)}px, ${String(connector.y)}px)`,
         pointerEvents: "none",
         ...across,
@@ -598,30 +647,6 @@ function PlaceholderConnectorView(props: {
 const EMPTY_GRAPH_KEY = "nodera.phantom.empty";
 
 /**
- * Where the `"+"` of a placeholder sits, in flow coordinates.
- *
- * On the connector's midpoint when there is a connector — the same place the
- * real edge affordance sits (S6) — and at the box centre when there is none,
- * which is only the empty graph: with no node there is nothing to join.
- */
-function insertButtonPosition(placeholder: PhantomPlaceholder): {
-  readonly x: number;
-  readonly y: number;
-} {
-  const connector = placeholder.connector;
-  if (connector === undefined) {
-    return {
-      x: placeholder.box.x + placeholder.box.width / 2,
-      y: placeholder.box.y + placeholder.box.height / 2,
-    };
-  }
-  const half = connector.length / 2;
-  return connector.axis === "horizontal"
-    ? { x: connector.x + half, y: connector.y }
-    : { x: connector.x, y: connector.y + half };
-}
-
-/**
  * The placeholder overlay: dashed boxes (S7, S21) drawn inside the viewport.
  *
  * `<ViewportPortal>` puts the boxes in the viewport's transform layer, so they
@@ -630,6 +655,11 @@ function insertButtonPosition(placeholder: PhantomPlaceholder): {
  * point: a placeholder appended to either array is a graph element as far as
  * React Flow is concerned, and a node entry without port handles silently empties
  * the edge layer — every real edge disappears. An overlay cannot do that.
+ *
+ * Each placeholder is a dashed box joined to its anchor by a dashed connector,
+ * and the `"+"` sits **inside** the box, centred by the box's own flex layout —
+ * one control in one place, whether or not there is a connector (the empty graph
+ * has none), instead of hanging on the connector's midpoint.
  *
  * Nothing here is selectable, draggable, deletable or connectable, because
  * nothing here is an element React Flow manages: the boxes are plain `div`s with
@@ -644,42 +674,31 @@ export const CanvasPlaceholderOverlay: FC<{
 
   return (
     <ViewportPortal>
-      {placeholders.map((placeholder) => {
-        const at = insertButtonPosition(placeholder);
-        return (
-          <Fragment key={placeholder.anchorId ?? EMPTY_GRAPH_KEY}>
-            {placeholder.connector === undefined ? null : (
-              <PlaceholderConnectorView connector={placeholder.connector} />
-            )}
-            <div
-              data-nodera-phantom-node="inactive"
-              data-nodera-phantom-kind={placeholder.kind}
-              data-nodera-phantom-for={placeholder.anchorId ?? ""}
-              className="nodera-phantom-node"
-              style={{
-                ...PHANTOM_NODE_STYLE,
-                position: "absolute",
-                width: placeholder.box.width,
-                height: placeholder.box.height,
-                transform: `translate(${String(placeholder.box.x)}px, ${String(
-                  placeholder.box.y,
-                )}px)`,
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                transform: `translate(-50%, -50%) translate(${String(at.x)}px, ${String(
-                  at.y,
-                )}px)`,
-                pointerEvents: "none",
-              }}
-            >
-              <PhantomInsertButton anchorId={placeholder.anchorId} />
-            </div>
-          </Fragment>
-        );
-      })}
+      {placeholders.map((placeholder) => (
+        <Fragment key={placeholder.anchorId ?? EMPTY_GRAPH_KEY}>
+          {placeholder.connector === undefined ? null : (
+            <PlaceholderConnectorView connector={placeholder.connector} />
+          )}
+          <div
+            data-nodera-phantom-node="inactive"
+            data-nodera-phantom-kind={placeholder.kind}
+            data-nodera-phantom-for={placeholder.anchorId ?? ""}
+            className="nodera-phantom-node"
+            style={{
+              ...PHANTOM_NODE_STYLE,
+              position: "absolute",
+              zIndex: PLACEHOLDER_Z_INDEX,
+              width: placeholder.box.width,
+              height: placeholder.box.height,
+              transform: `translate(${String(placeholder.box.x)}px, ${String(
+                placeholder.box.y,
+              )}px)`,
+            }}
+          >
+            <PhantomInsertButton anchorId={placeholder.anchorId} />
+          </div>
+        </Fragment>
+      ))}
     </ViewportPortal>
   );
 };

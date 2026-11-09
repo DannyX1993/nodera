@@ -1000,6 +1000,88 @@ describe("GraphCanvas phantom placeholders", () => {
     expect(container.querySelector("[data-nodera-phantom-edge]")).not.toBeNull();
   });
 
+  /** The only placeholder connector currently painted, or `null`. */
+  function connectorOf(container: HTMLElement): HTMLElement | null {
+    return container.querySelector<HTMLElement>("[data-nodera-phantom-edge]");
+  }
+
+  it("paints the connector from the only node in CSS lengths, never the unitless SVG token", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    const { container } = renderPlaceholders(engine, placeholderStore());
+
+    const connector = connectorOf(container);
+    expect(connector).not.toBeNull();
+    expect(connector?.getAttribute("data-nodera-phantom-edge")).toBe("horizontal");
+    // A dashed line is what makes the placeholder read as an inactive edge.
+    expect(connector?.style.borderTopStyle).toBe("dashed");
+    // A positive length: a collapsed connector paints nothing at all.
+    expect(Number.parseFloat(connector?.style.width ?? "0")).toBeGreaterThan(0);
+    // The thickness must be a CSS length. `--ndr-edge-stroke-width` is the SVG
+    // `stroke-width` token (a unitless "1.5" in every theme preset), and a
+    // unitless border width is an invalid declaration the browser drops, so the
+    // connector was invisible in the demo while its box still positioned the
+    // "+" on the line it should have drawn.
+    expect(connector?.style.borderTopWidth).toContain("px");
+    expect(connector?.style.cssText).not.toContain("--ndr-edge-stroke-width");
+    // Above the node layer, which carries no z-index of its own.
+    expect(connector?.style.zIndex).not.toBe("");
+  });
+
+  it("keeps the connector of a successor placeholder visible and the real edges intact", () => {
+    const engine = twoConnectedNodes();
+    const { container } = renderPlaceholders(engine, placeholderStore());
+
+    const connector = connectorOf(container);
+    expect(connector).not.toBeNull();
+    expect(connector?.style.borderTopStyle).toBe("dashed");
+    expect(Number.parseFloat(connector?.style.width ?? "0")).toBeGreaterThan(0);
+    // The connectors are an overlay: they never replace or hide a real edge.
+    expect(flowContents(engine).edges).toHaveLength(1);
+    expect(successorsOf(container)).toHaveLength(1);
+  });
+
+  it("never collapses the connector when a node is wider than one step", () => {
+    const [placeholder] = canvasPlaceholders({
+      enabled: true,
+      nodes: [{ id: "n1", position: { x: 0, y: 0 }, width: 400, height: 40 }],
+      edges: [],
+    });
+
+    // The step grows instead of the connector shrinking to nothing.
+    expect(placeholder?.connector?.length).toBeGreaterThan(0);
+    expect(placeholder?.box.x).toBe(400 + (placeholder?.connector?.length ?? 0));
+  });
+
+  it("puts the \"+\" at the centre of the dashed box, not on the connector", () => {
+    const engine = twoConnectedNodes();
+    const { container } = renderPlaceholders(engine, placeholderStore());
+
+    const button = container.querySelector("[data-nodera-phantom-insert-for='n2']") as HTMLElement;
+    const box = button.closest<HTMLElement>("[data-nodera-phantom-node]");
+
+    // Inside the box, centred by the box's own flex layout (the reference
+    // image), instead of sitting on the connector's midpoint.
+    expect(box).not.toBeNull();
+    expect(button.parentElement).toBe(box);
+    expect(box?.style.justifyContent).toBe("center");
+    expect(box?.style.alignItems).toBe("center");
+    // No midpoint offset any more: the wrapper that carried
+    // `translate(-50%, -50%) translate(<connector midpoint>)` is gone.
+    expect(box?.style.transform).not.toContain("-50%");
+  });
+
+  it("puts the \"+\" of the empty state at the centre of its box too", () => {
+    const { container } = renderPlaceholders(makeEngine(), placeholderStore());
+
+    const button = container.querySelector("[data-nodera-phantom-insert-for='']") as HTMLElement;
+    const box = button.closest<HTMLElement>("[data-nodera-phantom-node]");
+
+    expect(box).not.toBeNull();
+    expect(button.parentElement).toBe(box);
+    expect(box?.getAttribute("data-nodera-phantom-kind")).toBe("empty-state");
+  });
+
   it("draws no placeholder when the affordance is disabled", () => {
     const { container } = renderPlaceholders(makeEngine(), placeholderStore(), {
       edgeInsertion: false,
@@ -1154,8 +1236,9 @@ describe("GraphCanvas phantom placeholders", () => {
 
     const button = container.querySelector("[data-nodera-phantom-insert]") as HTMLButtonElement;
     expect(button.tagName).toBe("BUTTON");
-    // On the connector, the same place the real edge affordance sits.
-    expect(button.closest("[data-nodera-phantom-node]")).toBeNull();
+    // Retargeted: the "+" used to hang on the connector's midpoint; it now sits
+    // inside the dashed box (the reference image), and stays a native button.
+    expect(button.closest("[data-nodera-phantom-node]")).not.toBeNull();
     expect(button.getAttribute("type")).toBe("button");
     expect(button.getAttribute("aria-label")).toBe("Insert node");
     expect(button.getAttribute("aria-haspopup")).toBe("dialog");
@@ -1624,3 +1707,4 @@ describe("GraphCanvas insert-handle placement (S23)", () => {
     expect(container.querySelector("[data-nodera-branch-insert]")).not.toBeNull();
   });
 });
+
