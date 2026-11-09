@@ -33,7 +33,7 @@ commands. React Flow never crosses into the domain or application layers.
 
 ### Public API
 
-- `GraphCanvas` — renders the graph from an `EditorEngine`; subscribes to the engine event bus; translates drag, connect, select and delete interactions back into use cases (`moveNode`, `createEdge`, `removeNode`, `removeEdge`, `selectNode`, `selectEdge`, `selectMultiple`, `clearSelection`). Props: `editor`, optional `nodeRenderers` / `edgeRenderers` / `portRenderers` registries, `interactionMode`, the presentation policies (`dragPolicy`, `nodeTransition`, `connectionsPolicy`, `portsPolicy`), `showMinimap`, `showControls`, `colorMode` ("light" | "dark" | "system"), the insert affordance props (`edgeInsertion`, `insertHandles`, `layoutDirection`, `renderEdgeInsert`, `renderPlaceholder`, `renderBranchInsert`), and passthrough callbacks (`onNodeClick`, `onEdgeClick`, `onConnect`, `onNodesChange`, `onEdgesChange`, `onLinkValidate`, `onDropNodeDefinition`).
+- `GraphCanvas` — renders the graph from an `EditorEngine`; subscribes to the engine event bus; translates drag, connect, select and delete interactions back into use cases (`moveNode`, `createEdge`, `removeNode`, `removeEdge`, `selectNode`, `selectEdge`, `selectMultiple`, `clearSelection`). Props: `editor`, optional `nodeRenderers` / `edgeRenderers` / `portRenderers` registries, `interactionMode`, the presentation policies (`dragPolicy`, `nodeTransition`, `connectionsPolicy`, `portsPolicy`), `showMinimap`, `showControls`, `colorMode` ("light" | "dark" | "system"), the insert affordance props (`edgeInsertion`, `layoutDirection`, `renderEdgeInsert`, `renderPlaceholder`), and passthrough callbacks (`onNodeClick`, `onEdgeClick`, `onConnect`, `onNodesChange`, `onEdgesChange`, `onLinkValidate`, `onDropNodeDefinition`).
 - `NoderaCanvasProvider` / `useNoderaCanvas` — React Flow provider wrapper.
 - `useEditorGraph` — derives `{ nodes, edges, selectedNodeIds, selectedEdgeIds }` from the engine, event-driven.
 - `NodeRendererRegistry` / `EdgeRendererRegistry` — register custom renderers by definition renderer id; duplicates fail loudly; resolution falls back to `nodera-default-node` / `nodera-default-edge`. The mapper carries the definition's `renderer` id in node `data.rendererId`, so a registered renderer is used automatically (see the demo's `transform-card`).
@@ -117,7 +117,6 @@ looks like:
 | --- | --- | --- |
 | `renderEdgeInsert` | the "+" at the midpoint of one edge | `edgeId: string` |
 | `renderPlaceholder` | the dashed phantom box **and** its "+", for both the empty state and the successor placeholders | the whole `PhantomPlaceholder`: `kind` (`"empty-state"` / `"successor"`), `anchorId`, `box` (`x`/`y`/`width`/`height` in flow units) and `connector` |
-| `renderBranchInsert` | the branching "+" of a parent with two or more successors | the `BranchHandle`: `nodeId` plus the `x`/`y` it was placed at |
 
 ```tsx
 import { NoderaEditor } from "@nodera/react-flow";
@@ -132,7 +131,6 @@ import { NoderaEditor } from "@nodera/react-flow";
       box={placeholder.box}
     />
   )}
-  renderBranchInsert={(handle) => <MyBranchPlus nodeId={handle.nodeId} />}
 />;
 ```
 
@@ -141,22 +139,21 @@ Two rules make the replacement honest:
 - **absent means today's rendering, byte for byte.** Each prop is optional and
   the default is the framework's own component, so a host that supplies none of
   them gets exactly the canvas it had before.
-- **the geometry stays the framework's.** The edge "+" stays at the midpoint, the
-  placeholder stays in the slot the derivation chose (and keeps its dashed
-  connector, which is the placeholder's shape rather than its control), and the
-  branching "+" stays at the fork. Only the control is the host's.
+- **the geometry stays the framework's.** The "+" stays at the midpoint of the edge;
+  the placeholder stays in the slot the derivation chose (and keeps its dashed
+  connector, which is the placeholder's shape rather than its control). Only the
+  control is the host's.
 
 What the host replaces along with the look is the **behaviour**: recording
-`UiState.pendingEdgeInsertId` / `pendingAppendAnchorId` / `pendingBranchInsertId`
-and opening the node-creation dialog are what the framework buttons do. A host
-component that wants that flow either calls the UI store (`useNoderaUi()`, or
+`UiState.pendingEdgeInsertId` / `pendingAppendAnchorId` and opening the
+node-creation dialog are what the framework buttons do. A host component that
+wants that flow either calls the UI store (`useNoderaUi()`, or
 `useEdgeInsertActions()` for the edge case) or **wraps the exported default**
 instead of re-implementing it:
 
 - `DefaultEdgeInsertButton` (`{ edgeId }`) — the per-edge "+";
 - `DefaultPlaceholderBox` (`{ placeholder }`) — the dashed box with its
-  "+" inside it;
-- `DefaultBranchInsertButton` (`{ nodeId }`) — the branching "+".
+  "+" inside it.
 
 That is the difference the placeholder needs: a host button wired to
 `useEdgeInsertActions` records an *edge*, so it cannot stand in for a placeholder
@@ -297,7 +294,6 @@ container, canvas and context menu, in one component.
 | `onResizeRegion` | host hook after a region splitter drag |
 | `renderEdgeInsert` | replaces the per-edge "+" (S6) |
 | `renderPlaceholder` | replaces the phantom placeholder box and its "+" (S6) |
-| `renderBranchInsert` | replaces the branching "+" (S6) |
 | `layoutDirection` | axis the placeholders step along (`"horizontal"` by default) |
 | `className` | wrapper class for host styling |
 

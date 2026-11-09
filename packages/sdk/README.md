@@ -125,13 +125,17 @@ not a boolean is `sdk.invalid-input` at `features.<name>`.
 | `minimap` | on | The minimap panel and the canvas minimap. |
 | `history` | on | The undo/redo surface. |
 | `validation` | on | The validation panel and command. |
-| `edgeInsertion` | **off** | The "+" affix on every edge: it opens the node-creation dialog and inserts the chosen definition **on** that edge (`builder.graph.insertNode`). With `graph.layout.insertHandles` it also paints the branching "+", which inserts one node **before** a node's split (`builder.graph.insertNodeBeforeBranching`). |
+| `edgeInsertion` | **off** | The "+" affix on every edge: it opens the node-creation dialog and inserts the chosen definition **on** that edge (`builder.graph.insertNode`). |
 
 `edgeInsertion` is opt-in because it adds a control to the canvas: a host that
 wants it says so. Turning it on is the framework default (`NoderaEditor` renders
 the button and the dialog stays the registered `DialogDefinition`); replacing
 what the control looks like is `NoderaEditor.renderEdgeInsert`, and replacing the
-text or size of the dialog is the registered definition. The SDK composes the
+text or size of the dialog is the registered definition. The affordance is
+runtime state: `builder.features.setEdgeInsertion(enabled)` flips it after the
+builder exists (the store refuses nothing but non-booleans and disposed
+builders), `builder.features.edgeInsertion` always reads the current value, and
+the UI store seeds it from the declared flag. The SDK composes the
 dialog registry and seeds the built-in node-creation dialog, so the store opens
 that dialog out of the box and the "+" is never silent (see
 [Dialogs](#dialogs--builderdialogs)). Location and
@@ -141,6 +145,8 @@ customization are documented in `packages/ui-react/README.md`, the flow itself i
 ```ts
 const builder = assertValid(createBuilder({ features: { edgeInsertion: true } }));
 builder.features.edgeInsertion; // true
+assertValid(builder.features.setEdgeInsertion(false)); // the canvas stops painting it
+builder.features.edgeInsertion; // false
 ```
 
 ## Authoring vocabulary
@@ -479,7 +485,7 @@ const report = builder.graph.validate();
 (`examples/phase6-demo/src/builder.ts` and `demo-app.tsx`, trimmed.)
 
 Members: `addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`,
-`insertNodeBeforeBranching`, `connect`, `disconnect`, `arrange`, `nodes`, `edges`,
+`connect`, `disconnect`, `arrange`, `nodes`, `edges`,
 `select`, `clearSelection`,
 `undo`, `redo`, `canUndo`, `canRedo`, `validate`, `nodeCount`, `edgeCount`,
 `selectedNodes`, `selectedEdges`. `sourcePort` / `targetPort` default to the
@@ -543,59 +549,6 @@ Refusals are structured and write nothing: an unknown `edgeId` is
 definition without a usable input / output port come back with the use case's own
 code in `metadata.useCaseCode` and push no history entry.
 
-#### Inserting a node before a split — `insertNodeBeforeBranching`
-
-When a node has several successors, the relations form a **split**, and inserting
-one shared node before it is one mutation:
-`parent --> s1`, `parent --> s2` becomes `parent --> node --> s1`,
-`node --> s2`. The `insert-node-before-branching` use case creates the node, points
-the parent at it and re-points **every** former successor edge to leave from it,
-as **one** history unit, all-or-nothing.
-
-```ts
-const branched = assertValid(
-  builder.graph.insertNodeBeforeBranching({
-    nodeId: parentId, // the node whose split receives the new one
-    type: "demo.retry", // the definition of the node being inserted
-  }),
-);
-
-branched.node; // the new instance, in the §9 vocabulary
-branched.edge; // parent → node
-branched.edges; // node → each former successor, in edge order
-branched.replacedEdges; // what `undo()` restores
-
-builder.graph.undo(); // one step: the parent's original edges are back, ids included
-```
-
-Three rules make it predictable:
-
-- **Ports come from the edges that were replaced.** The parent keeps the source
-  port its outgoing relation used; each successor keeps its own target port; the
-  inserted node contributes its own first input and first output port. The new
-  relations inherit the replaced edges' definition type (from the first of them).
-- **Duplicates are skipped.** A successor relation whose endpoints and ports are
-  already written is not written twice, so two equivalent successor edges collapse
-  into one relation instead of leaving a duplicate behind.
-- **A parent with no successor degrades.** There is no split to replace, so the
-  call is the ordinary append the rule names — `addNode({ after: nodeId })` plus
-  `connect`, i.e. **two** history units, exactly like the phantom append of the
-  canvas.
-
-The position follows the same add rule as `insertNode`, decided before the use
-case runs so it belongs to the same history unit: in `mode: "auto"` the node
-lands one step past the **parent** along the declared axis, skipping occupied
-slots forward; in `mode: "free"` no position is invented. With
-`graph.layout.arrangeOnChange: "downstream"` and `mode: "auto"` the insertion is
-followed by a **second** history unit that arranges the inserted node and its
-descendants; a refused arrangement never fails the insertion and is reported by
-`builder.graph.lastAutoArrangement()`.
-
-Refusals are structured and write nothing: an unknown parent is
-`sdk.invalid-input` at path `nodeId`; an unknown `type`, a taken `newNodeId` or a
-definition without a usable input / output port come back with the use case's own
-code in `metadata.useCaseCode` and push no history entry.
-
 ### Graph layout mode — `graph.layout`
 
 Who owns node placement is host configuration, never a behaviour the framework
@@ -635,11 +588,7 @@ A third pair declares what a structural change arranges: `arrangeOnChange`
 A fourth declares what removing a node does with the relations it carried:
 `onRemove` (`"detach" | "splice"`, default `"detach"`) — see
 [Removal under a layout-owned graph](#removal-under-a-layout-owned-graph--graphlayoutonremove--setremovalpolicy).
-A fifth declares where the insert "+" sits when a node has several successors:
-`insertHandles` (`"each-edge" | "before-branching" | "both"`, default
-`"each-edge"`) — see
-[Insert-handle placement](#insert-handle-placement--graphlayoutinserthandles--setinserthandlespolicy).
-A sixth declares how a node reaches its position: `nodeTransition` (`"animated" |
+A fifth declares how a node reaches its position: `nodeTransition` (`"animated" |
 "instant"`, default `"instant"`) — see
 [Animated node moves](#animated-node-moves--graphlayoutnodetransition--setnodetransition).
 
@@ -795,39 +744,6 @@ At construction an unknown value is `sdk.invalid-input` at
 `graph.layout.connections` / `graph.layout.ports` and no builder is created; at
 runtime the same code and path is returned and the previous policy stays, with
 the UI state and its subscribers untouched.
-
-#### Insert-handle placement — `graph.layout.insertHandles` / `setInsertHandlesPolicy`
-
-A graph is often edited from its edges, so the framework can paint a "+" on
-them. Where that "+" sits when a node has several successors is host
-configuration (S23):
-
-| Policy | Declared as | What the canvas draws |
-| --- | --- | --- |
-| `"each-edge"` (default) | nothing, or `graph.layout.insertHandles: "each-edge"` | Today's behaviour: one "+" per edge. |
-| `"before-branching"` | `graph.layout.insertHandles: "before-branching"` | One "+" on a branching parent's outgoing side, before the edges split, and **no** per-edge "+" on those edges. Every other edge keeps its own. |
-| `"both"` | `graph.layout.insertHandles: "both"` | The branching "+" and the per-edge ones, side by side. |
-
-```ts
-createBuilder({ graph: { layout: { insertHandles: "before-branching" } } });
-
-builder.graphLayout.insertHandlesPolicy(); // "each-edge" | "before-branching" | "both"
-assertOk(builder.graphLayout.setInsertHandlesPolicy("both"));
-```
-
-The policy is presentation state (`builder.store.getState().insertHandles`), so a
-presentation binding re-renders without a rebuild. It is independent of the
-placement mode and of who owns the positions, and it never writes a node or an
-edge by itself: the branching "+" records what the dialog branches from and the
-host runs `builder.graph.insertNodeBeforeBranching`. A parent with **two or more
-outgoing edges** is what "a split" means, so a single-successor node always keeps
-the ordinary per-edge affordance. The whole placement only applies while
-`features.edgeInsertion` is on.
-
-A value outside the union is refused and the stored one stays: at construction it
-is `sdk.invalid-input` at `graph.layout.insertHandles` and no builder is created;
-at runtime it is the same code and path, with the UI state and its subscribers
-untouched.
 
 #### Automatic downstream arrangement — `graph.layout.arrangeOnChange` / `setArrangeOnChange`
 
@@ -998,7 +914,7 @@ Members of `builder.graphLayout`: `register(strategy)`, `setDefault(id)`,
 pair `dragPolicy()` / `setDragPolicy(policy)`, the transition pair
 `nodeTransition()` / `setNodeTransition(policy)`, the surface pairs
 `connectionsPolicy()` / `setConnectionsPolicy(policy)`, `portsPolicy()` /
-`setPortsPolicy(policy)` and `insertHandlesPolicy()` / `setInsertHandlesPolicy(policy)`,
+`setPortsPolicy(policy)`,
 the automatic arrangement pair `arrangeOnChange()` /
 `setArrangeOnChange(policy)` and the removal pair `removalPolicy()` /
 `setRemovalPolicy(policy)`, all described above. The built-ins are
@@ -1337,7 +1253,7 @@ The closed set, exactly:
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
 | `dialogs.register` | `dialogs.all`, `builder.store` reads |
-| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `insertNodeBeforeBranching`, `connect`, `disconnect`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
+| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
 | `graph.undo`, `graph.redo` — no mutation runs, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |
 

@@ -262,49 +262,47 @@ describe("<NoderaEditor> host composition", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  Insert-handle placement (S23)                                      */
+/*  Edge insertion passthrough                                         */
 /* ------------------------------------------------------------------ */
 
 /**
- * The placement of the insert affordance is host configuration, so the editor's
- * only job is the passthrough: `graph.layout.insertHandles` reaches the UI state
- * and the UI state reaches the canvas. A broken wire would leave the canvas on
- * its own default, which is exactly what these two cases tell apart.
+ * The per-edge "+" is runtime state now: the editor reads it from the UI
+ * store (`builder.features.setEdgeInsertion` writes it), so toggling the
+ * affordance must reach the canvas without a rebuild.
  */
-describe("<NoderaEditor> insert-handle placement", () => {
-  /** Builder with the affordance on and a `n1 --> { n2, n3 }` fork. */
-  function forkingBuilder(insertHandles: "each-edge" | "before-branching"): Builder {
+describe("<NoderaEditor> edge insertion passthrough", () => {
+  it("paints the per-edge \"+\" only while the affordance is enabled", async () => {
     const builder = assertOk(
       createBuilder({
         registry: { nodes: [NODE] },
         features: { edgeInsertion: true },
-        graph: { layout: { insertHandles } },
       }),
     );
-    for (const nodeId of ["n1", "n2", "n3"]) {
-      assertOk(builder.graph.addNode({ type: "acme.http-request", nodeId }));
-    }
+    assertOk(builder.graph.addNode({ type: "acme.http-request", nodeId: "n1" }));
+    assertOk(builder.graph.addNode({ type: "acme.http-request", nodeId: "n2" }));
     assertOk(builder.graph.connect({ source: "n1", target: "n2" }));
-    assertOk(builder.graph.connect({ source: "n1", target: "n3" }));
-    return builder;
-  }
-
-  it("draws the branching + when the configuration asks for it", () => {
-    const builder = forkingBuilder("before-branching");
 
     const { container } = render(editor({ builder }));
 
-    expect(builder.store.getState().insertHandles).toBe("before-branching");
-    expect(container.querySelector("[data-nodera-branch-insert-for='n1']")).not.toBeNull();
-  });
+    expect(
+      container.querySelector('button[aria-label="Insert node"]'),
+    ).not.toBeNull();
 
-  it("draws none when the configuration keeps one handle per edge", () => {
-    const builder = forkingBuilder("each-edge");
+    assertOk(builder.features.setEdgeInsertion(false));
 
-    const { container } = render(editor({ builder }));
+    await waitFor(() => {
+      expect(
+        container.querySelector('button[aria-label="Insert node"]'),
+      ).toBeNull();
+    });
 
-    expect(builder.store.getState().insertHandles).toBe("each-edge");
-    expect(container.querySelector("[data-nodera-branch-insert]")).toBeNull();
+    assertOk(builder.features.setEdgeInsertion(true));
+
+    await waitFor(() => {
+      expect(
+        container.querySelector('button[aria-label="Insert node"]'),
+      ).not.toBeNull();
+    });
   });
 });
 
@@ -349,18 +347,17 @@ describe("<NoderaEditor> node transition", () => {
 /* ------------------------------------------------------------------ */
 
 /**
- * The placeholder and the branching "+" are host-replaceable (S6), so the
- * editor's job is the same passthrough the per-edge "+" already gets: the prop
- * reaches the canvas and the canvas renders it instead of its own control.
+ * The placeholder is host-replaceable (S6), so the editor's job is the same
+ * passthrough the per-edge "+" already gets: the prop reaches the canvas and
+ * the canvas renders it instead of its own control.
  */
 describe("<NoderaEditor> host-rendered affordances", () => {
-  /** Builder with the affordance on, a `n1 --> { n2, n3 }` fork and two leaves. */
+  /** Builder with the affordance on and two leaves. */
   function forkingBuilder(): Builder {
     const builder = assertOk(
       createBuilder({
         registry: { nodes: [NODE] },
         features: { edgeInsertion: true },
-        graph: { layout: { insertHandles: "before-branching" } },
       }),
     );
     for (const nodeId of ["n1", "n2", "n3"]) {
@@ -371,7 +368,7 @@ describe("<NoderaEditor> host-rendered affordances", () => {
     return builder;
   }
 
-  it("forwards renderPlaceholder and renderBranchInsert to the canvas", () => {
+  it("forwards renderPlaceholder to the canvas", () => {
     const builder = forkingBuilder();
 
     const { container } = render(
@@ -384,9 +381,6 @@ describe("<NoderaEditor> host-rendered affordances", () => {
             data-host-anchor={placeholder.anchorId ?? ""}
           />
         ),
-        renderBranchInsert: (handle) => (
-          <div data-testid="host-branch" data-host-node={handle.nodeId} />
-        ),
       }),
     );
 
@@ -394,22 +388,16 @@ describe("<NoderaEditor> host-rendered affordances", () => {
     const placeholders = container.querySelectorAll("[data-testid='host-placeholder']");
     expect(placeholders).toHaveLength(2);
     expect(placeholders[0]?.getAttribute("data-host-kind")).toBe("successor");
-    expect(
-      container.querySelector("[data-testid='host-branch']")?.getAttribute("data-host-node"),
-    ).toBe("n1");
     // Replaced, not doubled: the framework's own controls are gone.
     expect(container.querySelector("[data-nodera-phantom-node]")).toBeNull();
-    expect(container.querySelector("[data-nodera-branch-insert]")).toBeNull();
   });
 
-  it("keeps the framework's placeholder and branching controls when the host supplies none", () => {
+  it("keeps the framework's placeholder when the host supplies none", () => {
     const builder = forkingBuilder();
 
     const { container } = render(editor({ builder }));
 
     expect(container.querySelectorAll("[data-nodera-phantom-node]")).toHaveLength(2);
-    expect(container.querySelector("[data-nodera-branch-insert-for='n1']")).not.toBeNull();
     expect(container.querySelector("[data-testid='host-placeholder']")).toBeNull();
-    expect(container.querySelector("[data-testid='host-branch']")).toBeNull();
   });
 });

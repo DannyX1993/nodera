@@ -310,15 +310,6 @@ it stays unpositioned. The slot is decided before the use case runs, so it
 belongs to the same history unit as the insertion: one `undo()` removes the node
 and both halves and restores the original edge with its id and ports.
 
-`builder.graph.insertNodeBeforeBranching({ nodeId, type })` is the same rule
-anchored on the **parent** of a split: one new node lands one step past it, and
-the insertion itself creates the node, points the parent at it and re-points every
-former successor edge to leave from it — one history unit, so one `undo()`
-restores the parent's original edges with their ids and ports. Ports come from the
-edges that were replaced, duplicate successor relations are skipped, and a parent
-with no successor degrades to the ordinary `addNode({ after })` + `connect`
-append, exactly like the canvas' phantom "+".
-
 The whole feature — the two placement modes, the layer split, the defaults, the
 `Arrange` command and the example — is on one page: `docs/GRAPH-LAYOUT.md`.
 
@@ -362,37 +353,6 @@ a write nobody asked for at that moment. It never fails the mutation: a refused
 arrangement is reported by `graph.lastAutoArrangement()` (`"skipped"`,
 `"arranged"`, `"refused"`). A bare `addNode` arranges nothing, and `"never"` — the
 default — keeps the previous rule that only an explicit `Arrange` moves nodes.
-
-### Where the insert "+" sits — `graph.layout.insertHandles`
-
-A graph is often grown from its edges, and a node with several successors has a
-**split**. `graph.layout.insertHandles` declares where that affordance sits:
-
-| Policy | Declared as | What the canvas draws |
-| --- | --- | --- |
-| `"each-edge"` (default) | nothing, or `graph.layout.insertHandles: "each-edge"` | Today's behaviour: one "+" per edge. |
-| `"before-branching"` | `graph.layout.insertHandles: "before-branching"` | One "+" on a branching parent's outgoing side, before the split, and none of its own on those edges. Every other edge keeps its per-edge "+", so a linear chain stays editable. |
-| `"both"` | `graph.layout.insertHandles: "both"` | Both, side by side. |
-
-```ts
-createBuilder({ graph: { layout: { insertHandles: "before-branching" } } });
-
-builder.graphLayout.insertHandlesPolicy(); // "each-edge" | "before-branching" | "both"
-assertOk(builder.graphLayout.setInsertHandlesPolicy("both"));
-```
-
-It is presentation state (`builder.store.getState().insertHandles`), so a
-presentation binding re-renders without a rebuild, and it applies whatever owns
-the positions. It writes nothing on its own: activating the branching "+" records
-the parent in the UI state and the host runs
-`builder.graph.insertNodeBeforeBranching` — **one** node for the whole split, not
-one per branch. "A split" means two or more outgoing edges, so a
-single-successor node always keeps the ordinary per-edge affordance, and the
-whole placement needs `features.edgeInsertion` to be on.
-
-A value outside the union is refused and the stored one stays: at construction it
-is `sdk.invalid-input` at `graph.layout.insertHandles` and no builder is created;
-at runtime it is the same code and path with the UI state untouched.
 
 ### Removing a node under a layout-owned graph
 
@@ -607,8 +567,8 @@ below are the complete lists:
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
 | `dialogs.register` | `dialogs.all`, `builder.store` reads |
-| `graphLayout.register`, `graphLayout.setDefault`, `setDragPolicy`, `setNodeTransition`, `setConnectionsPolicy`, `setPortsPolicy`, `setInsertHandlesPolicy`, `setArrangeOnChange`, `setRemovalPolicy` | `graphLayout.active`, `graphLayout.all`, `dragPolicy`, `nodeTransition`, `connectionsPolicy`, `portsPolicy`, `insertHandlesPolicy`, `arrangeOnChange`, `removalPolicy`, `lastAutoArrangement` |
-| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `insertNodeBeforeBranching`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo`, `lastAutoArrangement` |
+| `graphLayout.register`, `graphLayout.setDefault`, `setDragPolicy`, `setNodeTransition`, `setConnectionsPolicy`, `setPortsPolicy`, `setArrangeOnChange`, `setRemovalPolicy` | `graphLayout.active`, `graphLayout.all`, `dragPolicy`, `nodeTransition`, `connectionsPolicy`, `portsPolicy`, `arrangeOnChange`, `removalPolicy`, `lastAutoArrangement` |
+| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo`, `lastAutoArrangement` |
 | `graph.undo`, `graph.redo` — nothing is undone, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |
 

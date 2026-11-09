@@ -48,9 +48,6 @@ export const DEMO_LAYOUT = {
   // control applies when the host switches back to `layered`.
   connections: "fixed",
   ports: "hidden",
-  // Both affordances at boot, so the demo shows the per-edge "+" and the one
-  // before a split side by side; the panel switches between the three policies.
-  insertHandles: "both",
   // Animated at boot: the transition is what makes this demo's `snap-back` drag
   // read as a gesture, and an instant canvas puts the node back with a jump
   // between two frames. The panel turns it off to show the difference.

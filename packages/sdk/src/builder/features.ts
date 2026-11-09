@@ -8,7 +8,9 @@
  */
 
 import { err, ok, type Result } from "@nodera/contracts";
+import type { UiStateStore } from "@nodera/ui-core";
 import {
+  disposedIssue,
   isPlainObject,
   sdkError,
   shapeIssue,
@@ -40,6 +42,68 @@ export interface BuilderFeaturesInput {
 
 /** Every supported feature with its resolved flag. */
 export type ResolvedFeatures = Readonly<Record<BuilderFeature, boolean>>;
+
+/**
+ * Runtime feature API of an assembled builder.
+ *
+ * The resolved flags stay readable exactly as declared, but the edge
+ * insertion affordance is presentation state: the getter reads the UI store,
+ * so `builder.features.edgeInsertion` always reflects the current value and
+ * `setEdgeInsertion` flips it without a rebuild.
+ */
+export interface BuilderFeaturesApi {
+  readonly minimap: boolean;
+  readonly history: boolean;
+  readonly validation: boolean;
+  /** Reactive: reads the UI store seeded from the declared flag. */
+  readonly edgeInsertion: boolean;
+  /**
+   * Enables or disables the per-edge "+" at runtime.
+   *
+   * Returns the applied value, or `sdk.disposed` on a disposed builder and
+   * `sdk.invalid-input` at `features.edgeInsertion` for a non-boolean; a
+   * refused call leaves the stored state untouched.
+   */
+  setEdgeInsertion(enabled: boolean): Result<boolean, SdkIssues>;
+}
+
+/**
+ * Binds the resolved flags to the builder's UI store.
+ *
+ * `isDisposed` is the builder's own disposed flag, so the runtime setter
+ * refuses with the same `sdk.disposed` diagnostic as every other mutation
+ * after `dispose`.
+ */
+export function createFeaturesApi(
+  resolved: ResolvedFeatures,
+  store: UiStateStore,
+  isDisposed: () => boolean,
+): BuilderFeaturesApi {
+  return {
+    minimap: resolved.minimap,
+    history: resolved.history,
+    validation: resolved.validation,
+    get edgeInsertion(): boolean {
+      return store.getState().edgeInsertion;
+    },
+    setEdgeInsertion(enabled: boolean): Result<boolean, SdkIssues> {
+      if (isDisposed()) {
+        return err([disposedIssue("features.setEdgeInsertion")]);
+      }
+      if (typeof enabled !== "boolean") {
+        return err([
+          shapeIssue(
+            'Feature "edgeInsertion" must be a boolean',
+            enabled,
+            ["features", "edgeInsertion"],
+          ),
+        ]);
+      }
+      store.setEdgeInsertion(enabled);
+      return ok(enabled);
+    },
+  };
+}
 
 const DEFAULT_FEATURES: ResolvedFeatures = Object.freeze({
   minimap: true,

@@ -37,7 +37,6 @@ import {
   type ConnectionsPolicy,
   type DialogDefinition,
   type DragPolicy,
-  type InsertHandlesPolicy,
   type NodeTransition,
   type LayoutDefinition,
   type LayoutPanelPlacement,
@@ -108,13 +107,24 @@ import type {
   GraphLayoutConfiguration,
   RemovalPolicy,
 } from "./configuration.js";
-import { resolveFeatures, type ResolvedFeatures } from "./features.js";
+import {
+  createFeaturesApi,
+  resolveFeatures,
+  type BuilderFeaturesApi,
+  type ResolvedFeatures,
+} from "./features.js";
 
 /**
  * Drag policy of a manual node drag, re-exported from `@nodera/ui-core` because
  * it is part of what `builder.graphLayout` reads and writes.
  */
 export type { DragPolicy } from "@nodera/ui-core";
+
+/**
+ * Runtime feature API of an assembled builder, resolved and bound by
+ * `createBuilder` (`builder.features`).
+ */
+export type { BuilderFeaturesApi } from "./features.js";
 
 /**
  * Connections policy of the canvas, re-exported from `@nodera/ui-core` because
@@ -128,11 +138,6 @@ export type { ConnectionsPolicy } from "@nodera/ui-core";
  */
 export type { PortsPolicy } from "@nodera/ui-core";
 
-/**
- * Insert-handle placement policy, re-exported from `@nodera/ui-core` because it
- * is part of what `builder.graphLayout` reads and writes.
- */
-export type { InsertHandlesPolicy } from "@nodera/ui-core";
 export type { NodeTransition } from "@nodera/ui-core";
 
 /** Id of a builder the host did not name. */
@@ -300,31 +305,6 @@ export interface BuilderGraphLayoutApi {
    */
   setPortsPolicy(policy: PortsPolicy): Result<PortsPolicy, SdkIssues>;
   /**
-   * Where the insert "+" affordance sits when a node has several successors
-   * (S23).
-   *
-   * It is the policy declared in `graph.layout.insertHandles` (`"each-edge"` by
-   * default), unless the host changed it at runtime with
-   * {@link BuilderGraphLayoutApi.setInsertHandlesPolicy`. `"each-edge"` keeps one
-   * "+" per edge; `"before-branching"` draws a single "+" on a branching parent's
-   * outgoing side, before the edges split; `"both"` draws both. Whatever the
-   * value, activating a handle never touches the document by itself: the canvas
-   * records what the dialog branches from or inserts into, and the host runs the
-   * insertion.
-   */
-  insertHandlesPolicy(): InsertHandlesPolicy;
-  /**
-   * Changes where the insert "+" sits, and reflects it in the UI state the canvas
-   * reads, so a presentation binding re-renders without a rebuild.
-   *
-   * It never writes a node or an edge by itself: the placement of the affordance
-   * is host configuration, and the branching insertion stays
-   * `builder.graph.insertNodeBeforeBranching`. A value outside the union is
-   * refused with `sdk.invalid-input` at `graph.layout.insertHandles` and the
-   * previous policy stays.
-   */
-  setInsertHandlesPolicy(policy: InsertHandlesPolicy): Result<InsertHandlesPolicy, SdkIssues>;
-  /**
    * What a structural change does with the positions the layout owns today.
    *
    * It is the policy declared in `graph.layout.arrangeOnChange` (`"never"` by
@@ -398,7 +378,7 @@ export interface Builder {
   /** Presentation engine the host selected, if any. */
   readonly adapter: BuilderAdapter | undefined;
   /** Feature flags the builder resolved from the configuration. */
-  readonly features: ResolvedFeatures;
+  readonly features: BuilderFeaturesApi;
   /**
    * Non-fatal diagnostics of the composition, currently the capability gaps
    * between the selected adapter and the authored definitions.
@@ -718,21 +698,6 @@ function graphLayoutIssues(
       ),
     );
   }
-  const insertHandles: unknown = Reflect.get(layout, "insertHandles");
-  if (
-    insertHandles !== undefined &&
-    insertHandles !== "each-edge" &&
-    insertHandles !== "before-branching" &&
-    insertHandles !== "both"
-  ) {
-    issues.push(
-      shapeIssue(
-        'Builder graph layout insertHandles policy must be "each-edge", "before-branching" or "both"',
-        insertHandles,
-        [...path, "insertHandles"],
-      ),
-    );
-  }
   const arrangeOnChange: unknown = Reflect.get(layout, "arrangeOnChange");
   if (
     arrangeOnChange !== undefined &&
@@ -818,24 +783,6 @@ function resolveConnectionsPolicy(
  */
 function resolvePortsPolicy(configuration: GraphLayoutConfiguration | undefined): PortsPolicy {
   return configuration?.ports === "hidden" ? "hidden" : "visible";
-}
-
-/**
- * Resolves the insert-handle placement policy a validated configuration declares.
- *
- * Independent of the placement mode and of who owns the positions: where the "+"
- * sits is presentation, so it applies to a layout-owned graph and to a
- * hand-positioned one alike. Fail-closed like the rest of the configuration:
- * `"each-edge"` — today's behaviour — is the default, so an unknown value never
- * moves the affordance anywhere.
- */
-function resolveInsertHandlesPolicy(
-  configuration: GraphLayoutConfiguration | undefined,
-): InsertHandlesPolicy {
-  if (configuration?.insertHandles === "before-branching") {
-    return "before-branching";
-  }
-  return configuration?.insertHandles === "both" ? "both" : "each-edge";
 }
 
 /**
@@ -1364,12 +1311,11 @@ interface BuilderAssemblerOptions {
   /** What removing a node does with the relations it carried. */
   readonly onRemove: RemovalPolicy;
 }
-
 /** Concrete builder. Hosts only ever see the {@link Builder} contract. */
 class SdkBuilder implements Builder {
   readonly id: string;
   readonly adapter: BuilderAdapter | undefined;
-  readonly features: ResolvedFeatures;
+  readonly features: BuilderFeaturesApi;
   readonly diagnostics: SdkIssues;
   readonly registries: BuilderRegistries;
   readonly properties: RegistryStore<PropertyDefinition>;
@@ -1411,7 +1357,7 @@ class SdkBuilder implements Builder {
   constructor(options: BuilderAssemblerOptions) {
     this.id = options.id;
     this.adapter = options.adapter;
-    this.features = options.features;
+    this.features = createFeaturesApi(options.features, options.store, () => this.disposedFlag);
     this.diagnostics = options.diagnostics;
     this.properties = options.properties;
     this.editor = options.editor;
@@ -1473,8 +1419,6 @@ class SdkBuilder implements Builder {
       setConnectionsPolicy: (policy) => this.selectConnectionsPolicy(policy),
       portsPolicy: () => this.store.getState().ports,
       setPortsPolicy: (policy) => this.selectPortsPolicy(policy),
-      insertHandlesPolicy: () => this.store.getState().insertHandles,
-      setInsertHandlesPolicy: (policy) => this.selectInsertHandlesPolicy(policy),
       arrangeOnChange: () => this.arrangeOnChangePolicy,
       setArrangeOnChange: (policy) => this.selectArrangeOnChange(policy),
       removalPolicy: () => this.onRemovePolicy,
@@ -1832,32 +1776,6 @@ class SdkBuilder implements Builder {
   }
 
   /**
-   * Applies an insert-handle placement policy to the UI state the canvas reads.
-   *
-   * Same contract as {@link selectDragPolicy}: the union is checked here because
-   * the value comes from a host, and a refused policy leaves both the state and
-   * its subscribers untouched.
-   */
-  private selectInsertHandlesPolicy(
-    policy: InsertHandlesPolicy,
-  ): Result<InsertHandlesPolicy, SdkIssues> {
-    if (this.disposedFlag) {
-      return err([disposedIssue("graphLayout.setInsertHandlesPolicy")]);
-    }
-    if (policy !== "each-edge" && policy !== "before-branching" && policy !== "both") {
-      return err([
-        shapeIssue(
-          'Builder graph layout insertHandles policy must be "each-edge", "before-branching" or "both"',
-          policy,
-          ["graph", "layout", "insertHandles"],
-        ),
-      ]);
-    }
-    this.store.setInsertHandles(policy);
-    return ok(policy);
-  }
-
-  /**
    * Applies an automatic arrangement policy.
    *
    * Same contract as {@link selectDragPolicy} minus the UI state: the union is
@@ -2120,7 +2038,7 @@ export function createBuilder(
     nodeTransition: resolveNodeTransition(declaredGraphLayout),
     connections: resolveConnectionsPolicy(declaredGraphLayout),
     ports: resolvePortsPolicy(declaredGraphLayout),
-    insertHandles: resolveInsertHandlesPolicy(declaredGraphLayout),
+    edgeInsertion: features.value.edgeInsertion,
   });
 
   const graph = configuration.graph;

@@ -4,7 +4,6 @@ import {
   UiStateStore,
   type ConnectionsPolicy,
   type DragPolicy,
-  type InsertHandlesPolicy,
   type NodeTransition,
   type PortsPolicy,
 } from "./ui-state.js";
@@ -64,12 +63,11 @@ describe("UiStateStore", () => {
       activeDialogId: undefined,
       pendingEdgeInsertId: undefined,
       pendingAppendAnchorId: undefined,
-      pendingBranchInsertId: undefined,
       dragPolicy: "free",
       nodeTransition: "instant",
       connections: "editable",
       ports: "visible",
-      insertHandles: "each-edge",
+      edgeInsertion: false,
     });
   });
 
@@ -153,26 +151,8 @@ describe("UiStateStore", () => {
     expect(store.getState().pendingEdgeInsertId).toBe("edge-1");
   });
 
-  it("records the node a branching insertion is pending for and notifies once per change", () => {
-    const store = createStore();
-    const seen: (string | undefined)[] = [];
-    store.subscribe((state) => seen.push(state.pendingBranchInsertId));
-
-    store.setPendingBranchInsertId("node-1");
-    store.setPendingBranchInsertId("node-1");
-
-    expect(store.getState().pendingBranchInsertId).toBe("node-1");
-    expect(seen).toEqual(["node-1"]);
-
-    store.setPendingBranchInsertId(undefined);
-
-    expect(store.getState().pendingBranchInsertId).toBeUndefined();
-    expect(seen).toEqual(["node-1", undefined]);
-  });
-
-  it("clears the pending branch insertion together with every other session when the dialog closes", () => {
+  it("clears the pending insertion session together when the dialog closes", () => {
     const store = createDialogStore();
-    store.setPendingBranchInsertId("node-1");
     store.setPendingEdgeInsertId("edge-1");
     store.setPendingAppendAnchorId("node-2");
     store.openDialog("acme.dialog.create-node");
@@ -181,7 +161,6 @@ describe("UiStateStore", () => {
 
     store.closeDialog();
 
-    expect(store.getState().pendingBranchInsertId).toBeUndefined();
     expect(store.getState().pendingEdgeInsertId).toBeUndefined();
     expect(store.getState().pendingAppendAnchorId).toBeUndefined();
     // One commit: a closed dialog never leaves half of its session behind.
@@ -491,41 +470,49 @@ describe("UiStateStore connections and ports policies", () => {
   });
 });
 
-describe("UiStateStore insert handles policy", () => {
-  it("defaults to one handle per edge", () => {
-    expect(createStore().getState().insertHandles).toBe("each-edge");
+/* ------------------------------------------------------------------ */
+/*  Edge insertion affordance                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The per-edge "+" is presentation state: the builder seeds it from
+ * `features.edgeInsertion` and a host flips it at runtime through
+ * `builder.features.setEdgeInsertion`, which lands here.
+ */
+describe("UiStateStore edge insertion", () => {
+  it("defaults the edge insertion affordance to off", () => {
+    expect(createStore().getState().edgeInsertion).toBe(false);
   });
 
-  it("seeds the policy the host declares", () => {
+  it("seeds the edge insertion affordance from the builder features", () => {
     const store = new UiStateStore({
       themeId: "nodera.light",
       layoutId: "nodera.editor",
       layout: emptyLayout,
-      insertHandles: "before-branching",
+      edgeInsertion: true,
     });
 
-    expect(store.getState().insertHandles).toBe("before-branching");
+    expect(store.getState().edgeInsertion).toBe(true);
   });
 
-  it("changes the policy and notifies its subscribers once", () => {
+  it("toggles the edge insertion affordance and notifies once", () => {
     const store = createStore();
-    const seen: InsertHandlesPolicy[] = [];
-    store.subscribe((state) => seen.push(state.insertHandles));
+    const seen: boolean[] = [];
+    store.subscribe((state) => seen.push(state.edgeInsertion));
 
-    store.setInsertHandles("both");
-    store.setInsertHandles("both");
+    store.setEdgeInsertion(true);
 
-    expect(store.getState().insertHandles).toBe("both");
-    expect(seen).toEqual(["both"]);
+    expect(store.getState().edgeInsertion).toBe(true);
+    expect(seen).toEqual([true]);
   });
 
-  it("notifies nobody when the policy already matches", () => {
+  it("notifies nobody when the edge insertion affordance already matches", () => {
     const store = createStore();
     const before = store.getState();
     let notifications = 0;
     store.subscribe(() => notifications++);
 
-    store.setInsertHandles("each-edge");
+    store.setEdgeInsertion(false);
 
     expect(notifications).toBe(0);
     expect(store.getState()).toBe(before);
