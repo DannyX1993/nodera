@@ -639,6 +639,9 @@ A fifth declares where the insert "+" sits when a node has several successors:
 `insertHandles` (`"each-edge" | "before-branching" | "both"`, default
 `"each-edge"`) — see
 [Insert-handle placement](#insert-handle-placement--graphlayoutinserthandles--setinserthandlespolicy).
+A sixth declares how a node reaches its position: `nodeTransition` (`"animated" |
+"instant"`, default `"instant"`) — see
+[Animated node moves](#animated-node-moves--graphlayoutnodetransition--setnodetransition).
 
 The assigned position belongs to the same history unit as the creation: `undo()`
 removes the node, `redo()` restores it where it was. A value outside these
@@ -723,6 +726,44 @@ construction it is `sdk.invalid-input` at `graph.layout.drag` and the builder is
 not created (`"free"` is not a configuration value; it is what `mode: "free"`
 resolves to); at runtime it is the same code and path, with the UI state and its
 subscribers untouched.
+
+#### Animated node moves — `graph.layout.nodeTransition` / `setNodeTransition`
+
+A `"snap-back"` drag ends by painting the assigned position again, and by default
+that happens between two frames: the node jumps. `graph.layout.nodeTransition`
+decides how any node reaches a position the canvas derives from the document — a
+committed drag, an `arrange`, or the assigned position a `"snap-back"` release
+returns to:
+
+| Transition | Declared as | What the canvas does |
+| --- | --- | --- |
+| `"instant"` (default) | nothing, or `graph.layout.nodeTransition: "instant"` | Today's behaviour: the position change is painted at once, so a snap-back is a jump. |
+| `"animated"` | `graph.layout.nodeTransition: "animated"` | The node glides to its position with a CSS `transform` transition, so the return is visible. |
+
+```ts
+createBuilder({ graph: { layout: { nodeTransition: "animated" } } });
+
+builder.graphLayout.nodeTransition();            // "animated" | "instant"
+assertOk(builder.graphLayout.setNodeTransition("instant"));
+```
+
+It is presentation policy: no document write, no history entry and no event, and
+it applies whatever owns the positions, so it also animates a node the host moved
+with a `"free"` drag and one `arrange()` re-positioned. The value is presentation
+state (`builder.store.getState().nodeTransition`), so a presentation binding
+re-renders without a rebuild.
+
+An **active** drag is never animated: React Flow marks the node it is dragging and
+the canvas leaves that node out of the transition, so the node still follows the
+pointer with no lag. The motion is token-driven, like the rest of the canvas —
+`--ndr-node-transition-duration` (default `200ms`) and
+`--ndr-node-transition-easing` (default `ease`) — and `prefers-reduced-motion:
+reduce` turns it off whatever the configuration says.
+
+A value outside the union is refused and the previous transition stays: at
+construction it is `sdk.invalid-input` at `graph.layout.nodeTransition` and no
+builder is created; at runtime it is the same code and path, with the UI state and
+its subscribers untouched.
 
 #### Connections and ports — `graph.layout.connections` / `graph.layout.ports`
 
@@ -954,7 +995,8 @@ nothing.
 
 Members of `builder.graphLayout`: `register(strategy)`, `setDefault(id)`,
 `active()` (the selected id), `all()` (every registered strategy), the drag policy
-pair `dragPolicy()` / `setDragPolicy(policy)`, the surface pairs
+pair `dragPolicy()` / `setDragPolicy(policy)`, the transition pair
+`nodeTransition()` / `setNodeTransition(policy)`, the surface pairs
 `connectionsPolicy()` / `setConnectionsPolicy(policy)`, `portsPolicy()` /
 `setPortsPolicy(policy)` and `insertHandlesPolicy()` / `setInsertHandlesPolicy(policy)`,
 the automatic arrangement pair `arrangeOnChange()` /

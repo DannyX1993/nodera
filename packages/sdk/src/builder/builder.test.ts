@@ -27,6 +27,7 @@ import {
   type ConnectionsPolicy,
   type DragPolicy,
   type InsertHandlesPolicy,
+  type NodeTransition,
   type PortsPolicy,
 } from "./builder.js";
 import type {
@@ -1158,6 +1159,78 @@ describe("graph layout drag policy", () => {
     expect(refused.ok).toBe(false);
     expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
     expect(builder.graphLayout.dragPolicy()).toBe("locked");
+  });
+});
+
+describe("graph layout node transition", () => {
+  it("declares an instant node transition by default, today's behaviour", () => {
+    const builder = create();
+
+    expect(builder.graphLayout.nodeTransition()).toBe("instant");
+    expect(builder.store.getState().nodeTransition).toBe("instant");
+  });
+
+  it("declares an animated node transition from configuration", () => {
+    const builder = create({ graph: { layout: { nodeTransition: "animated" } } });
+
+    expect(builder.graphLayout.nodeTransition()).toBe("animated");
+    expect(builder.store.getState().nodeTransition).toBe("animated");
+  });
+
+  const refusedTransitions: readonly unknown[] = ["smooth", "", true, 42, null];
+  it.each(refusedTransitions)(
+    "refuses the node transition %s at graph.layout.nodeTransition and creates no builder",
+    (nodeTransition) => {
+      const issues = fail({
+        graph: { layout: { nodeTransition } as unknown as GraphLayoutConfiguration },
+      });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({
+        code: "sdk.invalid-input",
+        path: ["graph", "layout", "nodeTransition"],
+      });
+    },
+  );
+
+  it("changes the node transition at runtime and reflects it in the UI state", () => {
+    const builder = create();
+
+    const changed = builder.graphLayout.setNodeTransition("animated");
+
+    expect(changed.ok).toBe(true);
+    expect(changed.ok && changed.value).toBe("animated");
+    expect(builder.graphLayout.nodeTransition()).toBe("animated");
+    expect(builder.store.getState().nodeTransition).toBe("animated");
+  });
+
+  it("refuses an unknown node transition at runtime and keeps the previous one", () => {
+    const builder = create({ graph: { layout: { nodeTransition: "animated" } } });
+    const before = builder.store.getState();
+    let notifications = 0;
+    builder.store.subscribe(() => notifications++);
+
+    const refused = builder.graphLayout.setNodeTransition("smooth" as NodeTransition);
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["graph", "layout", "nodeTransition"],
+    });
+    expect(builder.graphLayout.nodeTransition()).toBe("animated");
+    expect(builder.store.getState()).toBe(before);
+    expect(notifications).toBe(0);
+  });
+
+  it("refuses a node transition change on a disposed builder", () => {
+    const builder = create();
+    builder.dispose();
+
+    const refused = builder.graphLayout.setNodeTransition("animated");
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
+    expect(builder.graphLayout.nodeTransition()).toBe("instant");
   });
 });
 
