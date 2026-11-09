@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
   type CSSProperties,
   type FC,
   type ComponentType,
@@ -43,6 +44,7 @@ import type {
   ConnectionsPolicy,
   DragPolicy,
   InsertHandlesPolicy,
+  NodeTransition,
   PortsPolicy,
 } from "@nodera/ui-core";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
@@ -74,6 +76,8 @@ import {
   removedIdsFromReactFlowChanges,
   applyMeasuredDimensions,
   hasNewDimensions,
+  applyDragPositions,
+  dragPositionsFromChanges,
 } from "../map/react-flow-mapper.js";
 import type {
   NodeRendererRegistry,
@@ -192,6 +196,46 @@ export function canvasEdgeTypes(
   ) as unknown as EdgeTypes[string];
   return types;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Node transition                                                    */
+/* ------------------------------------------------------------------ */
+
+/** CSS class the canvas frame carries while node moves are animated. */
+export const NODE_TRANSITION_CLASS = "nodera-node-transitions";
+
+/**
+ * The empty live-drag position map.
+ *
+ * One module-level value, so "no drag in progress" is a stable identity and the
+ * node derivation does not invalidate on every render that changes nothing.
+ */
+const NO_DRAG_POSITIONS: ReadonlyMap<string, XYPosition> = new Map<string, XYPosition>();
+
+/**
+ * Rule that animates a node reaching a new position, and only then.
+ *
+ * React Flow marks the node it is dragging with a `dragging` class, and the
+ * canvas re-derives every node position from the document — a drag commit, an
+ * arrangement, a snap-back return. Excluding `.dragging` is what lets the node
+ * follow the pointer with no lag while a programmatic move still glides; a
+ * transition on the dragging node would make it trail the cursor.
+ *
+ * Token-driven with literal fallbacks (AGENTS.md §15), like the rest of the
+ * canvas: a host themes the motion through CSS custom properties and an
+ * unthemed graph still animates. `prefers-reduced-motion` wins over the host's
+ * choice, because the transition is decoration and the position is the content.
+ */
+export const NODE_TRANSITION_STYLE = `
+.${NODE_TRANSITION_CLASS} .react-flow__node:not(.dragging) {
+  transition: transform var(--ndr-node-transition-duration, 200ms) var(--ndr-node-transition-easing, ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .${NODE_TRANSITION_CLASS} .react-flow__node:not(.dragging) {
+    transition: none;
+  }
+}
+`;
 
 /* ------------------------------------------------------------------ */
 /*  Edge insert affordance (S6)                                        */
@@ -1336,6 +1380,20 @@ export interface GraphCanvasProps {
    */
   readonly insertHandles?: InsertHandlesPolicy;
   /**
+   * Whether a node moves to its new position or appears there.
+   *
+   * The host owns the value (it is UI state in `@nodera/ui-core`, seeded from
+   * `graph.layout.nodeTransition`). `"instant"` — the default, today's
+   * behaviour — paints a position change at once, which is why a drag under
+   * `dragPolicy: "snap-back"` returns to the assigned position with a jump.
+   * `"animated"` makes the node glide there instead. An active drag is never
+   * animated, so the node keeps following the pointer with no lag.
+   *
+   * It is presentation only: it writes no document position, pushes no history
+   * entry and emits no event.
+   */
+  readonly nodeTransition?: NodeTransition;
+  /**
    * Render the "+" affordance centred on every edge (S6).
    *
    * Off by default: the canvas adds no control the host did not ask for.
@@ -1453,8 +1511,12 @@ export interface GraphCanvasProps {
  *   - Drag positions are committed to the engine on drag stop
  *     (`onNodeDragStop`) as per-node undo units, and only under the `"free"`
  *     drag policy: `"locked"` and `"snap-back"` write no position at all.
- *   - Position changes arriving through `onNodesChange` are never
- *     committed (they carry no final state in this design).
+ *   - The position changes a drag reports through `onNodesChange` are painted
+ *     from canvas state and never committed: React Flow's controlled model
+ *     applies them to nothing on its own, so a canvas that dropped them would
+ *     not move the node at all. They are dropped when the drag ends, which is
+ *     what lets `"snap-back"` return to the assigned position (animated when
+ *     `nodeTransition` asks for it).
  */
 export const GraphCanvas: FC<GraphCanvasProps> = ({
   editor,
@@ -1467,6 +1529,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   portsPolicy = "visible",
   edgeInsertion = false,
   insertHandles = "each-edge",
+  nodeTransition = "instant",
   layoutDirection = "horizontal",
   renderEdgeInsert,
   renderPlaceholder,
@@ -1506,15 +1569,27 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [nodes],
   );
 
+  // Live positions a drag reports. Also canvas state, and for the same reason:
+  // React Flow's controlled model applies no position change itself, it reports
+  // them and expects the host to paint them. They are dropped when the drag ends,
+  // so the node follows the pointer while it travels and the document (under
+  // `"free"`) or the assigned position (under `"snap-back"`) owns it afterwards.
+  const [dragPositions, setDragPositions] =
+    useState<ReadonlyMap<string, XYPosition>>(NO_DRAG_POSITIONS);
+  const nodesWithDrag = useMemo(
+    () => applyDragPositions(nodesWithDims, dragPositions),
+    [nodesWithDims, dragPositions],
+  );
+
   // Route node types: a definition renderer id with no registry entry
   // would make React Flow fall back to its bare built-in node (error 003,
   // no port handles). Re-route those to the default Nodera wrapper.
   const nodesWithTypes = useMemo(
     () =>
-      nodesWithDims.map((node) =>
+      nodesWithDrag.map((node) =>
         node.type !== undefined && nodeTypes[node.type] ? node : { ...node, type: DEFAULT_NODE_RENDERER_ID },
       ),
-    [nodesWithDims, nodeTypes],
+    [nodesWithDrag, nodeTypes],
   );
 
   // Which nodes have a split to insert before, and which edges therefore lose
@@ -1686,11 +1761,23 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   );
 
   // Node change handler: record NEW measured dimensions only (identical
-  // re-measurements must not re-render — that is the feedback loop),
-  // and removals → removeNode. Positions commit on drag stop.
+  // re-measurements must not re-render — that is the feedback loop), live drag
+  // positions (canvas state, see `nodesWithDrag`), and removals → removeNode.
+  // Positions commit on drag stop.
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       externalOnNodesChange?.(changes);
+
+      const livePositions = dragPositionsFromChanges(changes);
+      if (livePositions.size > 0) {
+        setDragPositions((current) => {
+          const next = new Map(current);
+          for (const [id, position] of livePositions) {
+            next.set(id, position);
+          }
+          return next;
+        });
+      }
 
       const dimsChanged = hasNewDimensions(changes, measuredDims.current);
       if (dimsChanged) {
@@ -1725,6 +1812,9 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         draggedNodes.map((node) => ({ id: node.id, position: node.position })),
         dragPolicy,
       );
+      // The drag is over: from here the document is the only source of
+      // positions. Under `"snap-back"` this is what the return animates.
+      setDragPositions(NO_DRAG_POSITIONS);
       if (dragPolicy === "snap-back") {
         refresh();
       }
@@ -1826,14 +1916,24 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     return visual?.color ?? "#a3a3a3";
   }, []);
 
+  // The frame carries the transition scope only while node moves are animated,
+  // so an instant canvas renders exactly the DOM it rendered before the option.
+  const frameClassName =
+    nodeTransition === "animated"
+      ? [className, NODE_TRANSITION_CLASS].filter(Boolean).join(" ")
+      : className;
+
   return (
     <div
-      className={className}
+      className={frameClassName}
       style={{ width: "100%", height: "100%" }}
       data-color-mode={colorMode}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
+      {nodeTransition === "animated" && (
+        <style data-nodera-node-transition="">{NODE_TRANSITION_STYLE}</style>
+      )}
       <ReactFlow
         nodes={nodesWithTypes}
         edges={edges}

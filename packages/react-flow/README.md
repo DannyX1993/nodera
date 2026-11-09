@@ -33,7 +33,7 @@ commands. React Flow never crosses into the domain or application layers.
 
 ### Public API
 
-- `GraphCanvas` — renders the graph from an `EditorEngine`; subscribes to the engine event bus; translates drag, connect, select and delete interactions back into use cases (`moveNode`, `createEdge`, `removeNode`, `removeEdge`, `selectNode`, `selectEdge`, `selectMultiple`, `clearSelection`). Props: `editor`, optional `nodeRenderers` / `edgeRenderers` / `portRenderers` registries, `interactionMode`, `showMinimap`, `showControls`, `colorMode` ("light" | "dark" | "system"), the insert affordance props (`edgeInsertion`, `insertHandles`, `layoutDirection`, `renderEdgeInsert`, `renderPlaceholder`, `renderBranchInsert`), and passthrough callbacks (`onNodeClick`, `onEdgeClick`, `onConnect`, `onNodesChange`, `onEdgesChange`, `onLinkValidate`, `onDropNodeDefinition`).
+- `GraphCanvas` — renders the graph from an `EditorEngine`; subscribes to the engine event bus; translates drag, connect, select and delete interactions back into use cases (`moveNode`, `createEdge`, `removeNode`, `removeEdge`, `selectNode`, `selectEdge`, `selectMultiple`, `clearSelection`). Props: `editor`, optional `nodeRenderers` / `edgeRenderers` / `portRenderers` registries, `interactionMode`, the presentation policies (`dragPolicy`, `nodeTransition`, `connectionsPolicy`, `portsPolicy`), `showMinimap`, `showControls`, `colorMode` ("light" | "dark" | "system"), the insert affordance props (`edgeInsertion`, `insertHandles`, `layoutDirection`, `renderEdgeInsert`, `renderPlaceholder`, `renderBranchInsert`), and passthrough callbacks (`onNodeClick`, `onEdgeClick`, `onConnect`, `onNodesChange`, `onEdgesChange`, `onLinkValidate`, `onDropNodeDefinition`).
 - `NoderaCanvasProvider` / `useNoderaCanvas` — React Flow provider wrapper.
 - `useEditorGraph` — derives `{ nodes, edges, selectedNodeIds, selectedEdgeIds }` from the engine, event-driven.
 - `NodeRendererRegistry` / `EdgeRendererRegistry` — register custom renderers by definition renderer id; duplicates fail loudly; resolution falls back to `nodera-default-node` / `nodera-default-edge`. The mapper carries the definition's `renderer` id in node `data.rendererId`, so a registered renderer is used automatically (see the demo's `transform-card`).
@@ -65,6 +65,45 @@ dot gap is the theme token's documented numeric default (`canvas.backgroundDotSi
 = `16`), because React Flow's `<Background gap>` is a number and a CSS custom
 property can never feed a numeric prop. Switching the theme therefore restyles
 the canvas without re-rendering it.
+
+### Drag policy and node transition
+
+Every node position the canvas paints comes from the document, so a release, an
+`arrange` or a snap-back is a re-derivation, not a gesture the canvas animates.
+Two presentation props decide what that looks like, and neither writes anything:
+
+| Prop | Values | What the canvas does |
+| --- | --- | --- |
+| `dragPolicy` | `"free"` (default) / `"locked"` / `"snap-back"` | `"locked"` sets `nodesDraggable={false}`; `"free"` commits the dropped position through `moveNode`; `"snap-back"` lets the node follow the pointer and discards the drag, so the assigned position is painted again. |
+| `nodeTransition` | `"instant"` (default) / `"animated"` | `"animated"` renders one scoped `<style>` rule on the canvas frame: a node reaching a new position glides there with a `transform` transition. `"instant"` renders no style element at all. |
+
+The transition rule excludes the node React Flow is dragging (`.dragging`), so
+the dragged node keeps following the pointer with no lag, and it is disabled under
+`prefers-reduced-motion: reduce`. The motion is token-driven:
+`--ndr-node-transition-duration` (default `200ms`) and
+`--ndr-node-transition-easing` (default `ease`). The rule is scoped by the class
+the canvas puts on its own frame, so an `"instant"` canvas on the same page is
+never animated by a sibling's rule.
+
+None of that motion comes from React Flow: `nodes` is a controlled prop, so a
+controlled flow applies no position change itself and only reports the ones it
+would have applied. The canvas therefore keeps the live positions a drag reports
+in its own state — keyed by node id, and only while React Flow flags the change
+`dragging: true` — merges them over the derived nodes, and drops them at the drag
+stop, so nothing is written to the document while the drag runs. That is what
+makes the node follow the pointer, and it is also what makes
+`nodeTransition: "animated"` visible on a `"snap-back"` return: the release
+discards the live positions and re-derives the node from the document, and the
+transition is what carries it back to the assigned position.
+
+A node that moves therefore gets a new React Flow node object on every pointer
+move, and that has a second consequence worth knowing: React Flow resets a
+node's internal handle bounds whenever the adopted user node carries no
+`measured`. Losing them makes `getEdgePosition` answer `null` and unmounts the
+node's edges for a frame — the flicker a fast drag multiplies. The canvas carries
+the dimensions it already measured on every derived node as `measured` (canvas
+state, like the live positions), so only the position changes and the edges are
+repaired in the same frame as the node.
 
 ### Host-replaceable insert affordances (`edgeInsertion`)
 
