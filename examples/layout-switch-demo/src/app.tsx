@@ -16,6 +16,7 @@
  * | Layout  | Arrange on change     | `builder.graphLayout.setArrangeOnChange(policy)`               |
  * | Layout  | On remove             | `builder.graphLayout.setRemovalPolicy(policy)`                 |
  * | Surface | Manual drag           | `builder.graphLayout.setDragPolicy(policy)`                    |
+ * | Surface | Node transition       | `builder.graphLayout.setNodeTransition(policy)`                |
  * | Surface | Connections           | `builder.graphLayout.setConnectionsPolicy(policy)`             |
  * | Surface | Ports                 | `builder.graphLayout.setPortsPolicy(policy)`                   |
  * | Surface | Insert handles        | `builder.graphLayout.setInsertHandlesPolicy(policy)`           |
@@ -77,6 +78,9 @@ type Direction = (typeof DIRECTIONS)[number];
 /** What a manual drag does with the positions the layout assigned. */
 type DragPolicy = ReturnType<Builder["graphLayout"]["dragPolicy"]>;
 
+/** Whether a node moves to its new position or appears there. */
+type NodeTransition = ReturnType<Builder["graphLayout"]["nodeTransition"]>;
+
 /** Whether a person may draw a new connection on the canvas. */
 type ConnectionsPolicy = ReturnType<Builder["graphLayout"]["connectionsPolicy"]>;
 
@@ -112,6 +116,15 @@ const DRAG_POLICY_LABEL: Readonly<Record<DragPolicy, string>> = {
   free: "a manual drag moves the node and commits one position",
   locked: "the canvas refuses a manual drag, so the placed positions stay",
   "snap-back": "the node follows the pointer and returns to its assigned position",
+};
+
+/** Node transitions the host offers, in the order it shows them. */
+const NODE_TRANSITIONS = ["instant", "animated"] as const satisfies readonly NodeTransition[];
+
+/** What each transition does, in the host's own words. */
+const NODE_TRANSITION_LABEL: Readonly<Record<NodeTransition, string>> = {
+  instant: "the node appears at its new position, so a snap-back is a jump",
+  animated: "the node glides to its new position, so the return is visible",
 };
 
 /** Connection policies the host offers, in the order it shows them. */
@@ -243,6 +256,9 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   // Seeded from the builder's configuration, so every control always shows the
   // policy the canvas is really applying.
   const [drag, setDrag] = useState<DragPolicy>(() => builder.graphLayout.dragPolicy());
+  const [nodeTransition, setNodeTransition] = useState<NodeTransition>(() =>
+    builder.graphLayout.nodeTransition(),
+  );
   const [connections, setConnections] = useState<ConnectionsPolicy>(() =>
     builder.graphLayout.connectionsPolicy(),
   );
@@ -369,6 +385,21 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     }
     setDrag(changed.value);
     setStatus(`Drag policy "${changed.value}": ${DRAG_POLICY_LABEL[changed.value]}.`);
+  };
+
+  /** Changes whether a node moves to its new position or appears there. */
+  const selectNodeTransition = (reported: string): void => {
+    const transition = offered(NODE_TRANSITIONS, reported);
+    if (transition === undefined) {
+      return;
+    }
+    const changed = builder.graphLayout.setNodeTransition(transition);
+    if (!changed.ok) {
+      setStatus(`Node transition "${reported}" was not applied — ${issueSummary(changed.error)}`);
+      return;
+    }
+    setNodeTransition(changed.value);
+    setStatus(`Node transition "${changed.value}": ${NODE_TRANSITION_LABEL[changed.value]}.`);
   };
 
   /** Changes whether a person may draw a new connection on the canvas. */
@@ -826,6 +857,24 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
                   }}
                 >
                   {DRAG_POLICIES.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                Node transition
+                <select
+                  className="demo-select"
+                  data-demo-control="node-transition"
+                  value={nodeTransition}
+                  onChange={(event) => {
+                    selectNodeTransition(event.target.value);
+                  }}
+                >
+                  {NODE_TRANSITIONS.map((candidate) => (
                     <option key={candidate} value={candidate}>
                       {candidate}
                     </option>

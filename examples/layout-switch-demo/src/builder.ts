@@ -51,6 +51,10 @@ export const DEMO_LAYOUT = {
   // Both affordances at boot, so the demo shows the per-edge "+" and the one
   // before a split side by side; the panel switches between the three policies.
   insertHandles: "both",
+  // Animated at boot: the transition is what makes this demo's `snap-back` drag
+  // read as a gesture, and an instant canvas puts the node back with a jump
+  // between two frames. The panel turns it off to show the difference.
+  nodeTransition: "animated",
 } as const satisfies GraphLayoutConfiguration;
 
 /** Nodes of the seed graph, added without a position. */
