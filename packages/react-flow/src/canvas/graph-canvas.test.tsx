@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, createEvent, act, waitFor, cleanup } from "@testing-library/react";
-import { ReactFlow, ReactFlowProvider, useEdges, useNodes } from "@xyflow/react";
+import { ReactFlow, ReactFlowProvider, useEdges, useNodes, useStoreApi } from "@xyflow/react";
+import type { NodeChange } from "@xyflow/react";
 import type { FC, ReactNode } from "react";
 import { createElement } from "react";
 import {
@@ -618,6 +619,203 @@ describe("GraphCanvas drag policy", () => {
   });
 });
 
+/* ------------------------------------------------------------------ */
+/*  B2: live drag positions (canvas state)                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The positions a drag reports are painted by the canvas itself, because a
+ * controlled `<ReactFlow nodes={...}>` (`hasDefaultNodes === false`) applies no
+ * position change on its own: it reports every intermediate position through
+ * `onNodesChange` and expects the host to paint it. These tests deliver the
+ * changes through the live React Flow store (`triggerNodeChanges`) — the exact
+ * path a real drag takes — instead of calling the canvas's state setters.
+ */
+describe("GraphCanvas live drag positions", () => {
+  type FlowStore = ReturnType<typeof useStoreApi>;
+
+  /** The React Flow node wrapper, which carries the painted position. */
+  function nodeElement(container: HTMLElement, nodeId: string): HTMLElement {
+    const element = container.querySelector(`[data-testid="rf__node-${nodeId}"]`);
+    if (!(element instanceof HTMLElement)) {
+      throw new Error(`node ${nodeId} was not rendered`);
+    }
+    return element;
+  }
+
+  /** The transform React Flow paints on a node wrapper, i.e. where it is drawn. */
+  function paintedPosition(container: HTMLElement, nodeId: string): string {
+    return nodeElement(container, nodeId).style.transform;
+  }
+
+  /** Captures the store of the surrounding provider, like a host probe would. */
+  function StoreProbe(props: { readonly capture: (store: FlowStore) => void }): null {
+    props.capture(useStoreApi());
+    return null;
+  }
+
+  function seededEngine(): EditorEngine {
+    const engine = makeEngine();
+    addNode(engine, {
+      definitionId: "test.app-node",
+      nodeId: "n1",
+      position: { x: 0, y: 0 },
+    });
+    return engine;
+  }
+
+  /**
+   * Render the canvas beside a store probe inside ONE `ReactFlowProvider`, so
+   * the probe and the canvas share the store a real drag writes to.
+   */
+  function renderWithStore(engine: EditorEngine, props?: Partial<GraphCanvasProps>) {
+    const store: { current: FlowStore | undefined } = { current: undefined };
+    const rendered = render(
+      createElement(
+        "div",
+        { style: { width: 800, height: 600 } },
+        createElement(
+          ReactFlowProvider,
+          null,
+          createElement(GraphCanvas, { editor: engine, ...props }),
+          createElement(StoreProbe, {
+            capture: (captured: FlowStore) => {
+              store.current = captured;
+            },
+          }),
+        ),
+      ),
+    );
+
+    return {
+      ...rendered,
+      /** Deliver node changes through the live store, like React Flow does. */
+      deliver(changes: NodeChange[]): void {
+        const flowStore = store.current;
+        if (flowStore === undefined) {
+          throw new Error("the React Flow store was not captured");
+        }
+        act(() => {
+          flowStore.getState().triggerNodeChanges(changes);
+        });
+      },
+    };
+  }
+
+  it("paints the position a live drag reports", () => {
+    const engine = seededEngine();
+    const { container, deliver } = renderWithStore(engine, { dragPolicy: "snap-back" });
+
+    // The document owns the position before the drag.
+    expect(paintedPosition(container, "n1")).toBe("translate(0px,0px)");
+
+    deliver([
+      { id: "n1", type: "position", position: { x: 120, y: 80 }, dragging: true },
+    ]);
+
+    // The node follows the pointer, even though React Flow applied nothing.
+    expect(paintedPosition(container, "n1")).toBe("translate(120px,80px)");
+  });
+
+  it("writes nothing to the document while the drag is live", () => {
+    const engine = seededEngine();
+    const historyBefore = engine.history.size();
+    const { deliver } = renderWithStore(engine, { dragPolicy: "snap-back" });
+
+    deliver([
+      { id: "n1", type: "position", position: { x: 120, y: 80 }, dragging: true },
+    ]);
+
+    expect(engine.graph.getNode(createNodeId("n1"))?.position).toEqual({ x: 0, y: 0 });
+    expect(engine.history.size()).toBe(historyBefore);
+  });
+
+  it("paints only the node the changes report", () => {
+    const engine = seededEngine();
+    const { container, deliver } = renderWithStore(engine, { dragPolicy: "snap-back" });
+
+    deliver([
+      { id: "not-in-the-document", type: "position", position: { x: 120, y: 80 }, dragging: true },
+    ]);
+
+    expect(paintedPosition(container, "n1")).toBe("translate(0px,0px)");
+  });
+
+  it("keeps no position from the release", () => {
+    const engine = seededEngine();
+    const { container, deliver } = renderWithStore(engine, { dragPolicy: "snap-back" });
+
+    deliver([
+      { id: "n1", type: "position", position: { x: 120, y: 80 }, dragging: false },
+    ]);
+
+    // The release is not a live position: painting it would leave the node at
+    // the pointer instead of the position the document holds.
+    expect(paintedPosition(container, "n1")).toBe("translate(0px,0px)");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  B3: node transition                                                */
+/* ------------------------------------------------------------------ */
+
+describe("GraphCanvas node transition", () => {
+  /** The canvas frame: the element that carries the container attributes. */
+  function frame(container: HTMLElement): HTMLElement {
+    const element = container.querySelector("[data-color-mode]");
+    if (!(element instanceof HTMLElement)) {
+      throw new Error("the canvas frame was not rendered");
+    }
+    return element;
+  }
+
+  function transitionRule(container: HTMLElement): string {
+    const style = container.querySelector("style[data-nodera-node-transition]");
+    return style?.textContent ?? "";
+  }
+
+  function seededEngine(): EditorEngine {
+    const engine = makeEngine();
+    addNode(engine, {
+      definitionId: "test.app-node",
+      nodeId: "n1",
+      position: { x: 0, y: 0 },
+    });
+    return engine;
+  }
+
+  it("paints node moves at once when the host asks for no transition", () => {
+    const { container } = renderCanvas(seededEngine(), { dragPolicy: "snap-back" });
+
+    expect(transitionRule(container)).toBe("");
+    expect(frame(container).classList.contains("nodera-node-transitions")).toBe(false);
+  });
+
+  it("animates node moves when the host declares the animated transition", () => {
+    const { container } = renderCanvas(seededEngine(), {
+      dragPolicy: "snap-back",
+      nodeTransition: "animated",
+    });
+    const rule = transitionRule(container);
+
+    expect(frame(container).classList.contains("nodera-node-transitions")).toBe(true);
+    expect(rule).toContain(".nodera-node-transitions .react-flow__node");
+    // A node that is being dragged keeps following the pointer: no transition.
+    expect(rule).toContain(":not(.dragging)");
+    expect(rule).toContain("transition: transform");
+  });
+
+  it("follows a transition the host switches without rebuilding the canvas", () => {
+    const engine = seededEngine();
+    const { container, rerender } = renderCanvas(engine, { nodeTransition: "animated" });
+    expect(transitionRule(container)).not.toBe("");
+
+    rerender(createElement(Canvas, { editor: engine, nodeTransition: "instant" }));
+
+    expect(transitionRule(container)).toBe("");
+    expect(frame(container).classList.contains("nodera-node-transitions")).toBe(false);
+  });
+});
 
 /* ------------------------------------------------------------------ */
 /*  C2: edge insert affordance (S6)                                    */

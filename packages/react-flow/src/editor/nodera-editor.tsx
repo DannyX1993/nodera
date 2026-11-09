@@ -201,6 +201,7 @@ function DefaultCanvasRegion(props: {
           portRenderers={renderers.portRenderers}
           interactionMode={ui.interactionMode}
           dragPolicy={ui.dragPolicy}
+          nodeTransition={ui.nodeTransition}
           connectionsPolicy={ui.connections}
           portsPolicy={ui.ports}
           insertHandles={ui.insertHandles}

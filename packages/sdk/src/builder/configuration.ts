@@ -124,6 +124,24 @@ export interface GraphLayoutConfiguration {
    */
   readonly drag?: "locked" | "snap-back";
   /**
+   * Whether a node moves to its new position or appears there.
+   *
+   * `"instant"` (the default, and today's behaviour) paints a position change
+   * at once: under `drag: "snap-back"` the node jumps back to the position the
+   * layout assigned when the drag ends. `"animated"` makes the node glide there
+   * instead, so the return is visible. An active drag is never animated, so the
+   * node still follows the pointer with no lag.
+   *
+   * It is presentation policy: A transition never writes the document, pushes no
+   * history entry and emits no event. It applies whatever owns the positions, and
+   * the transition can be changed at runtime with
+   * `builder.graphLayout.setNodeTransition`. The duration comes from the
+   * `--ndr-node-transition-duration` and `--ndr-node-transition-easing` theme
+   * tokens when the host's theme defines them, and is skipped entirely under
+   * `prefers-reduced-motion: reduce`.
+   */
+  readonly nodeTransition?: "animated" | "instant";
+  /**
    * What a structural change does with the positions the layout owns.
    *
    * `"never"` (the default) is today's rule: only an explicit

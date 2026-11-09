@@ -38,6 +38,7 @@ import {
   type DialogDefinition,
   type DragPolicy,
   type InsertHandlesPolicy,
+  type NodeTransition,
   type LayoutDefinition,
   type LayoutPanelPlacement,
   type PanelDefinition,
@@ -132,6 +133,7 @@ export type { PortsPolicy } from "@nodera/ui-core";
  * is part of what `builder.graphLayout` reads and writes.
  */
 export type { InsertHandlesPolicy } from "@nodera/ui-core";
+export type { NodeTransition } from "@nodera/ui-core";
 
 /** Id of a builder the host did not name. */
 export const DEFAULT_BUILDER_ID = "nodera.builder";
@@ -237,6 +239,26 @@ export interface BuilderGraphLayoutApi {
    * `graph.layout.drag` and the previous policy stays.
    */
   setDragPolicy(policy: DragPolicy): Result<DragPolicy, SdkIssues>;
+  /**
+   * Whether a node moves to its new position or appears there.
+   *
+   * It is the policy declared in `graph.layout.nodeTransition` (`"instant"` by
+   * default, today's behaviour), unless the host changed it at runtime with
+   * {@link BuilderGraphLayoutApi.setNodeTransition}. `"animated"` makes a node
+   * glide to the position the document holds, which is what makes a drag under
+   * `"snap-back"` visible; an active drag is never animated.
+   */
+  nodeTransition(): NodeTransition;
+  /**
+   * Changes whether a node moves to its new position or appears there, and
+   * reflects it in the UI state the canvas reads, so a presentation binding
+   * re-renders without a rebuild.
+   *
+   * It never writes a document position by itself and pushes no history entry. A
+   * value outside the union is refused with `sdk.invalid-input` at
+   * `graph.layout.nodeTransition` and the previous transition stays.
+   */
+  setNodeTransition(policy: NodeTransition): Result<NodeTransition, SdkIssues>;
   /**
    * Connections policy the canvas applies today.
    *
@@ -662,6 +684,20 @@ function graphLayoutIssues(
       ),
     );
   }
+  const nodeTransition: unknown = Reflect.get(layout, "nodeTransition");
+  if (
+    nodeTransition !== undefined &&
+    nodeTransition !== "animated" &&
+    nodeTransition !== "instant"
+  ) {
+    issues.push(
+      shapeIssue(
+        'Builder graph layout node transition must be "animated" or "instant"',
+        nodeTransition,
+        [...path, "nodeTransition"],
+      ),
+    );
+  }
   const connections: unknown = Reflect.get(layout, "connections");
   if (connections !== undefined && connections !== "editable" && connections !== "fixed") {
     issues.push(
@@ -740,6 +776,21 @@ function resolveDragPolicy(configuration: GraphLayoutConfiguration | undefined):
     return "free";
   }
   return configuration.drag === "snap-back" ? "snap-back" : "locked";
+}
+
+/**
+ * Resolves the node transition a validated configuration declares.
+ *
+ * Independent of the placement mode and of who owns the positions: how a node
+ * reaches its position is presentation, so it applies to a layout-owned graph
+ * and to a hand-positioned one alike. Fail-closed like the rest of the
+ * configuration: `"instant"` — today's behaviour — is the default, so an
+ * unknown value never animates a canvas nobody asked to animate.
+ */
+function resolveNodeTransition(
+  configuration: GraphLayoutConfiguration | undefined,
+): NodeTransition {
+  return configuration?.nodeTransition === "animated" ? "animated" : "instant";
 }
 
 /**
@@ -1416,6 +1467,8 @@ class SdkBuilder implements Builder {
       all: () => this.strategyRegistry.all(),
       dragPolicy: () => this.store.getState().dragPolicy,
       setDragPolicy: (policy) => this.selectDragPolicy(policy),
+      nodeTransition: () => this.store.getState().nodeTransition,
+      setNodeTransition: (policy) => this.selectNodeTransition(policy),
       connectionsPolicy: () => this.store.getState().connections,
       setConnectionsPolicy: (policy) => this.selectConnectionsPolicy(policy),
       portsPolicy: () => this.store.getState().ports,
@@ -1701,6 +1754,30 @@ class SdkBuilder implements Builder {
       ]);
     }
     this.store.setDragPolicy(policy);
+    return ok(policy);
+  }
+
+  /**
+   * Applies a node transition to the UI state the canvas reads.
+   *
+   * Same contract as {@link selectDragPolicy}: the union is checked here because
+   * the value comes from a host, and a refused policy leaves both the state and
+   * its subscribers untouched.
+   */
+  private selectNodeTransition(policy: NodeTransition): Result<NodeTransition, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("graphLayout.setNodeTransition")]);
+    }
+    if (policy !== "animated" && policy !== "instant") {
+      return err([
+        shapeIssue(
+          'Builder graph layout node transition must be "animated" or "instant"',
+          policy,
+          ["graph", "layout", "nodeTransition"],
+        ),
+      ]);
+    }
+    this.store.setNodeTransition(policy);
     return ok(policy);
   }
 
@@ -2040,6 +2117,7 @@ export function createBuilder(
     layout: createLayoutState(layoutDefinition, { panels: panels.all() }),
     dialogRegistry: dialogs,
     dragPolicy: resolveDragPolicy(declaredGraphLayout),
+    nodeTransition: resolveNodeTransition(declaredGraphLayout),
     connections: resolveConnectionsPolicy(declaredGraphLayout),
     ports: resolvePortsPolicy(declaredGraphLayout),
     insertHandles: resolveInsertHandlesPolicy(declaredGraphLayout),

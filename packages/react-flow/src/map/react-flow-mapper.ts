@@ -348,6 +348,19 @@ export function hasNewDimensions(
  * changes) into the derived nodes. The minimap only paints nodes with
  * known dimensions, and a controlled flow must apply them itself.
  *
+ * `measured` is what makes the merged node survive a re-render. React Flow
+ * copies `userNode.measured` into its internal node on every adoption, and
+ * `parseHandles` answers `undefined` when a user node has no `measured` —
+ * deliberately, so a host that "re-initializes" a node gets it re-measured.
+ * Since this canvas re-derives the nodes from the document on every change, a
+ * repeatedly dragged node would lose `internals.handleBounds` on every pointer
+ * move (its handle geometry, not its size), `getEdgePosition` would answer
+ * `null` for its edges, and `EdgeWrapper` would unmount them for a frame: the
+ * edges of the node being dragged flicker. Carrying `measured` keeps the
+ * internal `handleBounds`, so only the position changes and the edges paint in
+ * the same frame as the node. Dimensions stay canvas state: the document is
+ * still untouched.
+ *
  * Also prunes stored dimensions for nodes that no longer exist.
  */
 export function applyMeasuredDimensions<T extends { id: string }>(
@@ -363,8 +376,62 @@ export function applyMeasuredDimensions<T extends { id: string }>(
   return nodes.map((node) => {
     const dims = measured.get(node.id);
     return dims
-      ? { ...node, width: dims.width, height: dims.height }
+      ? {
+          ...node,
+          width: dims.width,
+          height: dims.height,
+          measured: { width: dims.width, height: dims.height },
+        }
       : node;
+  });
+}
+
+/**
+ * Live positions a drag reports, keyed by node id.
+ *
+ * React Flow's controlled model never paints a position change itself: with a
+ * `nodes` prop (`hasDefaultNodes === false`) it reports every intermediate
+ * position through `onNodesChange` and expects the host to apply it, so a canvas
+ * that ignored them would not move the node at all — the pointer would travel
+ * and nothing would follow it.
+ *
+ * Only changes flagged `dragging: true` belong here. The release emits one last
+ * position with `dragging: false`, and that one must **not** be kept: under the
+ * `"snap-back"` policy it would leave the node at the pointer position instead
+ * of returning to the position the document holds.
+ */
+export function dragPositionsFromChanges(
+  changes: readonly NodeChange[],
+): Map<string, XYPosition> {
+  const positions = new Map<string, XYPosition>();
+  for (const change of changes) {
+    if (change.type !== "position" || change.dragging !== true) {
+      continue;
+    }
+    if (change.position !== undefined) {
+      positions.set(change.id, change.position);
+    }
+  }
+  return positions;
+}
+
+/**
+ * Merge the live drag positions into the derived nodes, and nothing else.
+ *
+ * This is canvas state (AGENTS.md §5.3): the engine and the document are not
+touched until the drag stop, and a node the drag never reported keeps the
+position the document gave it.
+ */
+export function applyDragPositions<T extends { id: string; position: XYPosition }>(
+  nodes: readonly T[],
+  positions: ReadonlyMap<string, XYPosition>,
+): T[] {
+  if (positions.size === 0) {
+    return [...nodes];
+  }
+  return nodes.map((node) => {
+    const position = positions.get(node.id);
+    return position === undefined ? node : { ...node, position };
   });
 }
 

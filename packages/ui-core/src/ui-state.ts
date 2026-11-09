@@ -26,6 +26,20 @@ export type InteractionMode = "select" | "pan";
 export type DragPolicy = "free" | "locked" | "snap-back";
 
 /**
+ * Whether a node moves to its new position or appears there.
+ *
+ * Host configuration, reflected in the UI state so the canvas re-renders when
+ * the host changes it:
+ *
+ * - `"instant"` (the default, and today's behaviour): a position change is
+ *   painted at once, so a node that returns to its assigned position under
+ *   `dragPolicy: "snap-back"` jumps there.
+ * - `"animated"`: the node glides to the position the document holds. An active
+ *   drag is never animated, so the node still follows the pointer.
+ */
+export type NodeTransition = "animated" | "instant";
+
+/**
  * Whether a person may draw a new connection on the canvas.
  *
  * Host configuration, reflected in the UI state so the canvas re-renders when
@@ -164,6 +178,15 @@ export interface UiState {
    */
   readonly dragPolicy: DragPolicy;
   /**
+   * Whether a node moves to its new position or appears there.
+   *
+   * The canvas adapter reads it reactively (a policy change re-renders without
+   * a rebuild); the builder seeds it from `graph.layout.nodeTransition` and
+   * changes it through `builder.graphLayout.setNodeTransition`. It never
+   * rewrites a document position on its own.
+   */
+  readonly nodeTransition: NodeTransition;
+  /**
    * Whether a person may draw a new connection on the canvas.
    *
    * The canvas adapter reads it reactively (a policy change re-renders without
@@ -212,6 +235,11 @@ export interface UiStateStoreOptions {
    */
   readonly dragPolicy?: DragPolicy;
   /**
+   * Node transition of the canvas. Defaults to `"instant"`, the behaviour of a
+   * canvas that paints every position change at once.
+   */
+  readonly nodeTransition?: NodeTransition;
+  /**
    * Connections policy of the canvas. Defaults to `"editable"`, today's
    * behaviour.
    */
@@ -258,6 +286,7 @@ export class UiStateStore {
       pendingAppendAnchorId: undefined,
       pendingBranchInsertId: undefined,
       dragPolicy: options.dragPolicy ?? "free",
+      nodeTransition: options.nodeTransition ?? "instant",
       connections: options.connections ?? "editable",
       ports: options.ports ?? "visible",
       insertHandles: options.insertHandles ?? "each-edge",
@@ -473,6 +502,20 @@ export class UiStateStore {
       return;
     }
     this.commit({ ...this.state, dragPolicy });
+  }
+
+  /**
+   * Applies the node transition of the canvas.
+   *
+   * The builder is what validates the value (`builder.graphLayout
+   * .setNodeTransition`), so an invalid policy never reaches the store; setting
+   * the transition already applied notifies nobody.
+   */
+  setNodeTransition(nodeTransition: NodeTransition): void {
+    if (nodeTransition === this.state.nodeTransition) {
+      return;
+    }
+    this.commit({ ...this.state, nodeTransition });
   }
 
   /**

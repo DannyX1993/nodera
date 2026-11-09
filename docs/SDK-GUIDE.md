@@ -607,7 +607,7 @@ below are the complete lists:
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
 | `dialogs.register` | `dialogs.all`, `builder.store` reads |
-| `graphLayout.register`, `graphLayout.setDefault`, `setDragPolicy`, `setConnectionsPolicy`, `setPortsPolicy`, `setInsertHandlesPolicy`, `setArrangeOnChange`, `setRemovalPolicy` | `graphLayout.active`, `graphLayout.all`, `dragPolicy`, `connectionsPolicy`, `portsPolicy`, `insertHandlesPolicy`, `arrangeOnChange`, `removalPolicy`, `lastAutoArrangement` |
+| `graphLayout.register`, `graphLayout.setDefault`, `setDragPolicy`, `setNodeTransition`, `setConnectionsPolicy`, `setPortsPolicy`, `setInsertHandlesPolicy`, `setArrangeOnChange`, `setRemovalPolicy` | `graphLayout.active`, `graphLayout.all`, `dragPolicy`, `nodeTransition`, `connectionsPolicy`, `portsPolicy`, `insertHandlesPolicy`, `arrangeOnChange`, `removalPolicy`, `lastAutoArrangement` |
 | `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `insertNodeBeforeBranching`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo`, `lastAutoArrangement` |
 | `graph.undo`, `graph.redo` — nothing is undone, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |

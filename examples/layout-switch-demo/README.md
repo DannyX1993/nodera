@@ -48,6 +48,7 @@ line. Direction and the two spacings are per-call overrides: they start from the
 | Control     | Values                          | SDK surface |
 | ----------- | ------------------------------- | ----------- |
 | Manual drag | `free` / `locked` / `snap-back` | `builder.graphLayout.setDragPolicy(policy)` |
+| Node transition | `instant` / `animated` | `builder.graphLayout.setNodeTransition(policy)` |
 | Connections | `editable` / `fixed`            | `builder.graphLayout.setConnectionsPolicy(policy)` |
 | Ports       | `visible` / `hidden`            | `builder.graphLayout.setPortsPolicy(policy)` |
 | Insert handles | `each-edge` / `before-branching` / `both` | `builder.graphLayout.setInsertHandlesPolicy(policy)` |
@@ -153,14 +154,15 @@ the boot seed from `src/builder.ts`, then arranges it with the values the
 controls currently hold. Each step is its own history unit; a reset is not a
 single undoable action, and the demo does not pretend otherwise.
 
-The **Manual drag**, **Connections** and **Ports** selects are the surface the
-arrangement implies. They start from the builders' getters, and choosing a
-strategy still applies what it implies: `nodera.graph-layout.layered` calls
-`setConnectionsPolicy("fixed")` and `setPortsPolicy("hidden")`, so the canvas
+The **Manual drag**, **Node transition**, **Connections** and **Ports** selects are
+the surface the arrangement implies. They start from the builders' getters, and
+choosing a strategy still applies what it implies: `nodera.graph-layout.layered`
+calls `setConnectionsPolicy("fixed")` and `setPortsPolicy("hidden")`, so the canvas
 offers no handle to drag a connection from and refuses one that arrives anyway;
 `nodera.graph-layout.free` restores `"editable"` and `"visible"`. None of the
 three writes a document position, an edge or a history entry, so an `Arrange`
-after switching behaves exactly as before.
+after switching behaves exactly as before. The demo boots on
+`Node transition: animated`, which is what makes the snap-back visible at all.
 
 ## What to try
 
@@ -168,6 +170,11 @@ after switching behaves exactly as before.
   `Connections: fixed` + `Ports: hidden`. Try to move a node — the canvas
   refuses — and look for a port handle: there is none. Then switch to `free` +
   `snap-back` + `editable` + `visible` and drag, connect and drop freely.
+- **Snap-back, visible**: `layered` + `Manual drag: snap-back` +
+  `Node transition: animated`. Drag `parse` somewhere and release: the node
+  glides back to its assigned slot instead of jumping there. Switch the
+  transition to `instant` and repeat: same policy, same documents, but the return
+  is now a jump between two frames — which is exactly what the control toggles.
 - **Downstream arrangement**: `layered` + `Arrange on change: downstream`.
   Select `parse`, press `Add node…`: the node takes its anchored slot as one
   history unit, then `connect` re-ranks it as a second one. Undo twice and watch

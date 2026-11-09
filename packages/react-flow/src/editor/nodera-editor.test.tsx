@@ -309,6 +309,42 @@ describe("<NoderaEditor> insert-handle placement", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  Node transition passthrough                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How a node reaches its position is host configuration too, so the editor's
+ * only job here is the passthrough: `graph.layout.nodeTransition` reaches the UI
+ * state and the UI state reaches the canvas, which turns it into one scoped rule.
+ * A broken wire would leave the canvas on its own `"instant"` default, which is
+ * exactly what these two cases tell apart.
+ */
+describe("<NoderaEditor> node transition", () => {
+  it("renders the transition rule the configuration declares", () => {
+    const builder = assertOk(
+      createBuilder({
+        registry: { nodes: [NODE] },
+        graph: { layout: { mode: "auto", drag: "snap-back", nodeTransition: "animated" } },
+      }),
+    );
+
+    const { container } = render(editor({ builder }));
+
+    expect(builder.store.getState().nodeTransition).toBe("animated");
+    expect(container.querySelector("style[data-nodera-node-transition]")).not.toBeNull();
+  });
+
+  it("renders no transition rule when the configuration keeps the instant default", () => {
+    const builder = assertOk(createBuilder({ registry: { nodes: [NODE] } }));
+
+    const { container } = render(editor({ builder }));
+
+    expect(builder.store.getState().nodeTransition).toBe("instant");
+    expect(container.querySelector("style[data-nodera-node-transition]")).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /*  Host-rendered insert affordances (S6)                              */
 /* ------------------------------------------------------------------ */
 

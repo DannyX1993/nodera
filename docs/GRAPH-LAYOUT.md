@@ -97,6 +97,7 @@ puts it (AGENTS.md §4, §12; odd task S5):
 | Configuration and command | `@nodera/sdk` | `graph.layout`, `builder.graphLayout` and `builder.graph.arrange(request?)`. The SDK reads the graph as plain data, asks the selected strategy and applies the answer through the use case above. |
 | Rendering and affordances | `@nodera/react-flow`, `@nodera/ui-*` | The canvas renders positions **from the document**; the node-creation dialog and its "+" affordance (which is how a node enters the graph in the first place) live in `ui-react`/`ui-core`. Neither calls `arrange`, and neither ships a placement control. |
 | Drag policy | `@nodera/sdk` → `@nodera/ui-core` → `@nodera/react-flow` | `graph.layout.drag` and `builder.graphLayout.setDragPolicy` write `UiState.dragPolicy`; the canvas maps it onto `nodesDraggable` plus the drag-commit path. Reading and writing the policy moves nothing: only a `"free"` drag commits a position. |
+| Node transition | `@nodera/sdk` → `@nodera/ui-core` → `@nodera/react-flow` | `graph.layout.nodeTransition` and `builder.graphLayout.setNodeTransition` write `UiState.nodeTransition`; the canvas turns it into one scoped CSS rule on its frame, so a node reaching a derived position glides there. It never animates an active drag, and it moves nothing. |
 | Connections and ports policies | `@nodera/sdk` → `@nodera/ui-core` → `@nodera/react-flow` | `graph.layout.connections` / `graph.layout.ports` and `builder.graphLayout.setConnectionsPolicy` / `setPortsPolicy` write `UiState.connections` and `UiState.ports`; the canvas maps them onto `nodesConnectable` plus the connect/validation path and onto the port renderers. Neither writes an edge, a port or a history entry. |
 
 Two consequences worth stating, because they are easy to break:
@@ -119,6 +120,7 @@ Two consequences worth stating, because they are easy to break:
 | `rankSpacing` | positive finite number, document units: distance between consecutive `Arrange` ranks | the declared `spacing` |
 | `strategy` | globally qualified strategy id | `nodera.graph-layout.layered` |
 | `drag` | `"locked"` or `"snap-back"`: what a manual drag does when the layout owns the positions (inert under `mode: "free"`) | `"locked"` |
+| `nodeTransition` | `"animated"` or `"instant"`: whether a node moves to its new position or appears there (independent of `mode`) | `"instant"` |
 | `connections` | `"editable"` or `"fixed"`: whether a person may draw a new connection (independent of `mode`) | `"editable"` |
 | `ports` | `"visible"` or `"hidden"`: whether the node surface paints a port handle at all (independent of `mode`) | `"visible"` |
 | `insertHandles` | `"each-edge"`, `"before-branching"` or `"both"`: where the insert "+" sits when a node has several successors (independent of `mode`) | `"each-edge"` |
@@ -141,6 +143,7 @@ const builder = assertValid(
         rankSpacing: 320,                        // default: spacing
         strategy: "nodera.graph-layout.layered", // the built-in default
         drag: "locked",                          // default; or "snap-back"
+        nodeTransition: "instant",               // default; or "animated"
         connections: "editable",                 // default; or "fixed"
         ports: "visible",                        // default; or "hidden"
         insertHandles: "each-edge",              // default; or "before-branching" / "both"
@@ -184,6 +187,39 @@ and no builder is created; at runtime `setDragPolicy` refuses the same way and t
 previous policy stays, with the store and its subscribers untouched. `"free"` is
 accepted at runtime (a host can hand placement back to its own drag handling) but
 not in configuration, where it is what `mode: "free"` already means.
+
+### Animated node moves
+
+`nodeTransition` decides how a node reaches a position the canvas derives from
+the document: a committed drag, an `arrange`, or the assigned position a
+`"snap-back"` drag returns to.
+
+| Transition | What the canvas does |
+| --- | --- |
+| `"instant"` (default, today's behaviour) | The position change is painted at once, so a `"snap-back"` release puts the node back with a jump. |
+| `"animated"` | The node glides to its position with a CSS `transform` transition, so the return is visible. |
+
+It is presentation policy: no document write, no history entry and no event, and
+it applies whatever owns the positions. The value is reflected in the UI state
+(`builder.store.getState().nodeTransition`), so a canvas follows a change the host
+makes with `builder.graphLayout.setNodeTransition` without a rebuild; an unknown
+value is `sdk.invalid-input` at `graph.layout.nodeTransition`, and the previous
+transition stays.
+
+An **active** drag is never animated — React Flow marks the dragged node, and the
+canvas leaves that node out of the transition — so the node keeps following the
+pointer with no lag. The motion is token-driven, like the rest of the canvas: a
+host themes it with `--ndr-node-transition-duration` (default `200ms`) and
+`--ndr-node-transition-easing` (default `ease`), and `prefers-reduced-motion:
+reduce` turns it off whatever the configuration says, because the position is the
+content and the motion is decoration.
+
+A drag works through the same mechanism from the other side: the node follows the
+pointer because the canvas paints the live positions React Flow reports (canvas
+state, keyed by node id and kept only while the change is flagged `dragging:
+true`), since a controlled canvas applies no position change itself. The return
+the transition animates is that state dropped at the drag stop, the node
+therefore re-derived from the document.
 
 ### Fixed connections and hidden ports
 
@@ -749,6 +785,11 @@ every layout action in its own toolbar **above** the canvas:
   toolbar reports both values, and the canvas re-renders from the UI state;
 - a drag-policy select calling `builder.graphLayout.setDragPolicy(policy)`, seeded
   from `builder.graphLayout.dragPolicy()`;
+- a node-transition select calling
+  `builder.graphLayout.setNodeTransition(policy)`, seeded from
+  `builder.graphLayout.nodeTransition()`. The demo boots on `"animated"`, which is
+  what makes its `"snap-back"` drags visible: the node glides back to the slot the
+  arrangement assigned instead of jumping there between two frames;
 - direction, spacing and rank-spacing fields passed per call to
   `builder.graph.arrange({ direction, spacing, rankSpacing })`;
 - one explicit Arrange button running that call;

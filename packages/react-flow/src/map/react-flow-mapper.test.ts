@@ -15,7 +15,9 @@ import type { PortDeclaration, PortDirection, PortInstance } from "@nodera/graph
 import type { EdgeDefinition } from "@nodera/edge-registry";
 
 import {
+  applyDragPositions,
   applyMeasuredDimensions,
+  dragPositionsFromChanges,
   hasNewDimensions,
   connectionFromReactFlow,
   nodePositionFromReactFlow,
@@ -772,6 +774,27 @@ describe("applyMeasuredDimensions (T8 minimap fix)", () => {
     expect(nodes[0]).not.toHaveProperty("width");
   });
 
+  it("carries `measured`, so a re-derived node keeps its internal handle bounds", () => {
+    // React Flow's `parseHandles` answers `undefined` when a user node has no
+    // `measured`, and that drops the node's internal handle bounds — which
+    // unmounts its edges for a frame on every re-derivation (the drag flicker).
+    const nodes = [{ id: "n1", position: { x: 0, y: 0 }, data: {} }];
+    const dims = new Map([["n1", { width: 160, height: 48 }]]);
+
+    const merged = applyMeasuredDimensions(nodes, dims);
+
+    expect(merged[0]).toMatchObject({ measured: { width: 160, height: 48 } });
+  });
+
+  it("leaves a node without stored dimensions identical, and unmeasured", () => {
+    const node = { id: "n1", position: { x: 0, y: 0 }, data: {} };
+
+    const merged = applyMeasuredDimensions([node], new Map());
+
+    expect(merged[0]).toBe(node);
+    expect(merged[0]).not.toHaveProperty("measured");
+  });
+
   it("drops stored dimensions for nodes that no longer exist", () => {
     const nodes = [{ id: "n1", position: { x: 0, y: 0 }, data: {} }];
     const dims = new Map<string, { width: number; height: number }>([
@@ -814,5 +837,101 @@ describe("hasNewDimensions (loop guard)", () => {
     const measured = new Map();
     const changes = [{ id: "n1", type: "position" as const, position: { x: 1, y: 2 } }];
     expect(hasNewDimensions(changes as never, measured)).toBe(false);
+  });
+});
+
+describe("dragPositionsFromChanges (live drag paint)", () => {
+  it("keeps the position a live drag reports", () => {
+    const changes: NodeChange[] = [
+      { id: "n1", type: "position", position: { x: 120, y: 80 }, dragging: true },
+    ];
+
+    expect([...dragPositionsFromChanges(changes)]).toEqual([
+      ["n1", { x: 120, y: 80 }],
+    ]);
+  });
+
+  it("ignores the release, the last position change of a drag", () => {
+    const changes: NodeChange[] = [
+      { id: "n1", type: "position", position: { x: 120, y: 80 }, dragging: false },
+    ];
+
+    // Keeping this one would leave a snap-back node at the pointer position.
+    expect(dragPositionsFromChanges(changes).size).toBe(0);
+  });
+
+  it("ignores non-position changes", () => {
+    const changes: NodeChange[] = [
+      { id: "n1", type: "dimensions", dimensions: { width: 140, height: 40 } },
+      { id: "n1", type: "select", selected: true },
+      { id: "n1", type: "remove" },
+    ];
+
+    expect(dragPositionsFromChanges(changes).size).toBe(0);
+  });
+
+  it("ignores a live position change that carries no position", () => {
+    const changes: NodeChange[] = [{ id: "n1", type: "position", dragging: true }];
+
+    expect(dragPositionsFromChanges(changes).size).toBe(0);
+  });
+
+  it("keeps one position per node of a multi-node drag", () => {
+    const changes: NodeChange[] = [
+      { id: "n1", type: "position", position: { x: 100, y: 0 }, dragging: true },
+      { id: "n2", type: "position", position: { x: 200, y: 0 }, dragging: true },
+    ];
+
+    const positions = dragPositionsFromChanges(changes);
+
+    expect(positions.size).toBe(2);
+    expect(positions.get("n1")).toEqual({ x: 100, y: 0 });
+    expect(positions.get("n2")).toEqual({ x: 200, y: 0 });
+  });
+});
+
+describe("applyDragPositions (canvas state)", () => {
+  const nodes = [
+    { id: "n1", position: { x: 0, y: 0 }, data: {} },
+    { id: "n2", position: { x: 10, y: 0 }, data: {} },
+  ];
+
+  it("moves only the reported node and leaves the others identical", () => {
+    const merged = applyDragPositions(nodes, new Map([["n1", { x: 120, y: 80 }]]));
+
+    expect(merged[0]?.position).toEqual({ x: 120, y: 80 });
+    // The node the drag never reported keeps the document's position — same
+    // object, so React Flow is not told a node it is not dragging moved.
+    expect(merged[1]).toBe(nodes[1]);
+  });
+
+  it("keeps the measured size a moved node already carries", () => {
+    // The size a node already reports must survive the move: losing `measured`
+    // would make React Flow re-measure it and unmount its edges for a frame.
+    const measured = [
+      { id: "n1", position: { x: 0, y: 0 }, measured: { width: 160, height: 48 }, data: {} },
+    ];
+
+    const merged = applyDragPositions(measured, new Map([["n1", { x: 40, y: 20 }]]));
+
+    expect(merged[0]).toMatchObject({
+      position: { x: 40, y: 20 },
+      measured: { width: 160, height: 48 },
+    });
+  });
+
+  it("returns the nodes unchanged in value when the map is empty", () => {
+    const merged = applyDragPositions(nodes, new Map());
+
+    expect(merged).toEqual(nodes);
+    expect(merged).not.toBe(nodes);
+  });
+
+  it("does not mutate the input array", () => {
+    const before = nodes.map((node) => ({ ...node, position: { ...node.position } }));
+
+    applyDragPositions(nodes, new Map([["n1", { x: 5, y: 5 }]]));
+
+    expect(nodes).toEqual(before);
   });
 });
