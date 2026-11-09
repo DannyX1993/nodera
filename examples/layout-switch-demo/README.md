@@ -51,8 +51,7 @@ line. Direction and the two spacings are per-call overrides: they start from the
 | Node transition | `instant` / `animated` | `builder.graphLayout.setNodeTransition(policy)` |
 | Connections | `editable` / `fixed`            | `builder.graphLayout.setConnectionsPolicy(policy)` |
 | Ports       | `visible` / `hidden`            | `builder.graphLayout.setPortsPolicy(policy)` |
-| Insert handles | `each-edge` / `before-branching` / `both` | `builder.graphLayout.setInsertHandlesPolicy(policy)` |
-| Edge "+"    | read-only state, `on` / `off`   | `builder.features.edgeInsertion` — a construction-time flag, reported instead of switched |
+| Edge "+"    | `on` / `off`                    | `builder.features.setEdgeInsertion(value)` — a runtime toggle, seeded from `builder.features.edgeInsertion` |
 
 ### Actions
 
@@ -114,17 +113,6 @@ undo restores the original edge. A refused insertion prints the SDK diagnostic i
 the status line and leaves the graph untouched. The button is the framework's
 default; `NoderaEditor.renderEdgeInsert` replaces it when a host wants its own
 icon or control.
-
-**`Insert handles` decides where that "+" sits when a node has several
-successors.** `each-edge` — the default — keeps one "+" per edge; `before-branching`
-draws a single "+" on a branching parent's outgoing side, before the split, and
-none of its own on those edges (every other edge keeps its per-edge one); `both`
-draws the two side by side. The branching "+" opens the same dialog and the host
-sees `pendingBranchInsertId` in the UI state: it inserts with
-`builder.graph.insertNodeBeforeBranching`, which points the parent at one new node
-and re-points every former successor edge through it as a **single** history unit
-— one undo restores the parent's original edges. The handle is a `ViewportPortal`
-overlay, so it never enters React Flow's node or edge layer.
 
 An empty graph has no edge to paint a "+" on, so the same flag also paints the
 **placeholders**. With no node the canvas draws a dashed placeholder node carrying
@@ -219,15 +207,12 @@ own placement UI writes exactly this page; the framework still adds none.
   The canvas deletes through the application use case directly, so pressing
   `Backspace` removes a node with its edges whatever the policy says — a
   framework gap this demo reports instead of hiding.
-- **Edge insertion is reported, not switchable.** `features.edgeInsertion` is a
-  construction-time flag, so the panel shows its state and explains where it is
-  decided instead of offering a control that could not change it. `Insert
-  handles` is switchable, but only decides where the affordance sits: with the
-  flag off the canvas paints neither handle.
-- **The branching "+" is wired by the host.** The framework's dialog records the
-  parent and the demo's `onAddNode` handler runs
-  `builder.graph.insertNodeBeforeBranching`; the built-in dialog command covers
-  the per-edge insertion only.
+- **Edge insertion is toggleable.** `builder.features.setEdgeInsertion(value)` flips it
+  at runtime; the canvas re-renders from the UI store without a rebuild, so the host
+  writes the toggle without touching the builder.
+- **The per-edge "+" is wired by the host.** The framework's dialog records the
+  edge and the demo's `onAddNode` handler runs
+  `builder.graph.insertNode`; the built-in dialog command covers it.
 - No node renderers are registered: the binding's default node renderer draws
   the three definitions. This demo is about placement, not drawing.
 - The layered strategy ranks by longest path and orders each rank by node id. It
