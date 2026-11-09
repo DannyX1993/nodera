@@ -36,7 +36,7 @@ import {
 } from "@nodera/ui-react";
 
 import { GraphCanvas } from "../canvas/graph-canvas.js";
-import type { PlaceholderAxis } from "../canvas/graph-canvas.js";
+import type { BranchHandle, PhantomPlaceholder, PlaceholderAxis } from "../canvas/graph-canvas.js";
 import { NoderaCanvasProvider } from "../canvas/nodera-canvas-provider.js";
 import {
   NoderaBuilderProvider,
@@ -69,12 +69,36 @@ export interface NoderaEditorProps {
    * becomes the pending insertion and the node-creation dialog opens); this prop
    * only changes what the control looks like, so a host can ship an icon, a
    * different label or its own component. The affordance itself is still enabled
-   * by `features.edgeInsertion`, never by rendering it, and the phantom empty
-   * state (a placeholder node, plus a placeholder edge while the graph holds one
-   * node) keeps the framework's own `"+"`: it records an append anchor instead of
-   * an edge, so a host button wired to `useEdgeInsertActions` could not run it.
+   * by `features.edgeInsertion`, never by rendering it. The other two controls
+   * have their own props ({@link NoderaEditorProps.renderPlaceholder} and
+   * {@link NoderaEditorProps.renderBranchInsert}), because they record a
+   * different anchor than an edge id and would not run a button wired to
+   * `useEdgeInsertActions`.
    */
   readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
+  /**
+   * Replaces the framework's phantom placeholder (S6): the dashed box **and** its
+   * `"+"`, for both the empty state and the successor placeholders.
+   *
+   * The canvas keeps the geometry — the box's slot and its dashed connector —
+   * and only asks the host what to paint. The host receives the whole
+   * `PhantomPlaceholder` (`kind`, `anchorId`, `box`, `connector`). Recording the
+   * append anchor in the UI state and opening the node-creation dialog belong to
+   * the component once it is replaced, so a host that wants that flow uses the
+   * UI store (`useNoderaUi()`) or wraps `DefaultPlaceholderBox`.
+   */
+  readonly renderPlaceholder?: (placeholder: PhantomPlaceholder) => ReactNode;
+  /**
+   * Replaces the framework's branching `"+"` (S23), the one handle a forking
+   * parent gets instead of one per edge.
+   *
+   * The canvas keeps the position (the fork) and passes the `BranchHandle`
+   * (`nodeId` plus its flow coordinates). Activation — recording
+   * `UiState.pendingBranchInsertId` and opening the node-creation dialog — belongs
+   * to the component once it is replaced, so a host can wrap
+   * `DefaultBranchInsertButton` or write its own handler.
+   */
+  readonly renderBranchInsert?: (handle: BranchHandle) => ReactNode;
   /**
    * Axis the phantom placeholders step along (S7, S21).
    *
@@ -158,6 +182,8 @@ function regionContent(panelIds: readonly string[]): ReactNode {
 function DefaultCanvasRegion(props: {
   readonly builder: Builder;
   readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
+  readonly renderPlaceholder?: (placeholder: PhantomPlaceholder) => ReactNode;
+  readonly renderBranchInsert?: (handle: BranchHandle) => ReactNode;
   readonly layoutDirection?: PlaceholderAxis;
 }): ReactNode {
   const builder = props.builder;
@@ -188,6 +214,12 @@ function DefaultCanvasRegion(props: {
           {...(props.renderEdgeInsert === undefined
             ? {}
             : { renderEdgeInsert: props.renderEdgeInsert })}
+          {...(props.renderPlaceholder === undefined
+            ? {}
+            : { renderPlaceholder: props.renderPlaceholder })}
+          {...(props.renderBranchInsert === undefined
+            ? {}
+            : { renderBranchInsert: props.renderBranchInsert })}
           onDropNodeDefinition={(definitionId, position) => {
             builder.graph.addNode({ type: definitionId, position });
           }}
@@ -251,6 +283,12 @@ function EditorSurface(props: NoderaEditorProps): ReactNode {
           {...(props.renderEdgeInsert === undefined
             ? {}
             : { renderEdgeInsert: props.renderEdgeInsert })}
+          {...(props.renderPlaceholder === undefined
+            ? {}
+            : { renderPlaceholder: props.renderPlaceholder })}
+          {...(props.renderBranchInsert === undefined
+            ? {}
+            : { renderBranchInsert: props.renderBranchInsert })}
         />
       ),
     ...(hostSlots?.header === undefined && headerContent === undefined

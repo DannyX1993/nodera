@@ -93,6 +93,22 @@ export {
 export { NoderaNodeRenderer, createNodeType, useNodeTypes } from "./canvas/custom-node.js";
 export type { NoderaNodeDataWithRenderer } from "./canvas/custom-node.js";
 export type { GraphCanvasProps } from "./canvas/graph-canvas.js";
+// The default insert affordances, so a host wraps them instead of reimplementing
+// them: `renderEdgeInsert`, `renderPlaceholder` and `renderBranchInsert` receive
+// the framework geometry and the host supplies the control on top.
+export {
+  BRANCH_INSERT_LABEL,
+  CanvasBranchHandleOverlay,
+  CanvasPlaceholderOverlay,
+  DefaultBranchInsertButton,
+  DefaultEdgeInsertButton,
+  DefaultPlaceholderBox,
+} from "./canvas/graph-canvas.js";
+export type {
+  BranchHandle,
+  PhantomPlaceholder,
+  PlaceholderKind,
+} from "./canvas/graph-canvas.js";
 
 // ---------------------------------------------------------------------------
 // SDK binding layer

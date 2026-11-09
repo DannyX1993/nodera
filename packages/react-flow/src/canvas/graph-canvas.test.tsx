@@ -37,7 +37,7 @@ import {
   DefaultEdgeInsertButton,
   edgeOffersInsertHandle,
 } from "./graph-canvas.js";
-import type { GraphCanvasProps } from "./graph-canvas.js";
+import type { BranchHandle, GraphCanvasProps, PhantomPlaceholder } from "./graph-canvas.js";
 import { NODE_DEFINITION_MIME_TYPE } from "./definition-drop.js";
 
 /* ------------------------------------------------------------------ */
@@ -1410,6 +1410,106 @@ describe("GraphCanvas phantom placeholders", () => {
     expect(container.querySelector(".react-flow__minimap")).not.toBeNull();
     expect(successorsOf(container)).toHaveLength(1);
   });
+
+  /* ---------------------------------------------------------------- */
+  /*  H: the placeholder the host replaces (S6)                        */
+  /* ---------------------------------------------------------------- */
+
+  /** A host component standing in for the framework's dashed box. */
+  function hostPlaceholder(placeholder: PhantomPlaceholder): ReactNode {
+    return createElement(
+      "div",
+      {
+        "data-testid": "host-placeholder",
+        "data-host-kind": placeholder.kind,
+        "data-host-anchor": placeholder.anchorId ?? "",
+      },
+      createElement("button", { type: "button" }, "host +"),
+    );
+  }
+
+  it("replaces the default placeholder box and its + for the empty graph", () => {
+    const { container } = renderPlaceholders(makeEngine(), placeholderStore(), {
+      renderPlaceholder: hostPlaceholder,
+    });
+
+    expect(container.querySelectorAll("[data-testid='host-placeholder']")).toHaveLength(1);
+    // The framework's box and its "+" are replaced, not doubled.
+    expect(placeholdersOf(container)).toEqual([]);
+    expect(container.querySelector("[data-nodera-phantom-insert]")).toBeNull();
+  });
+
+  it("replaces the placeholder of the single-node empty state and keeps its connector", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    const { container } = renderPlaceholders(engine, placeholderStore(), {
+      renderPlaceholder: hostPlaceholder,
+    });
+
+    const host = container.querySelector("[data-testid='host-placeholder']");
+    expect(host?.getAttribute("data-host-kind")).toBe("empty-state");
+    expect(host?.getAttribute("data-host-anchor")).toBe("n1");
+    expect(placeholdersOf(container)).toEqual([]);
+    expect(container.querySelector("[data-nodera-phantom-insert]")).toBeNull();
+    // The dashed connector is the placeholder's geometry, so the canvas keeps it.
+    expect(connectorOf(container)).not.toBeNull();
+  });
+
+  it("hands the host the successor kind with its anchor, box and connector", () => {
+    const engine = twoConnectedNodes();
+    const received: PhantomPlaceholder[] = [];
+    renderPlaceholders(engine, placeholderStore(), {
+      renderPlaceholder: (placeholder) => {
+        received.push(placeholder);
+        return hostPlaceholder(placeholder);
+      },
+    });
+
+    expect(received).toHaveLength(1);
+    const [placeholder] = received;
+    expect(placeholder?.kind).toBe("successor");
+    expect(placeholder?.anchorId).toBe("n2");
+    // n2 sits at x=240, so its placeholder is one free slot further along.
+    expect(placeholder?.box.x).toBeGreaterThan(240);
+    expect(placeholder?.box.y).toBe(0);
+    expect(placeholder?.connector?.axis).toBe("horizontal");
+  });
+
+  it("keeps the default placeholder box and its + when the host supplies no renderer", () => {
+    const { container } = renderPlaceholders(twoConnectedNodes(), placeholderStore());
+
+    expect(container.querySelectorAll("[data-nodera-phantom-node]")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-nodera-phantom-insert]")).toHaveLength(1);
+    expect(container.querySelector("[data-testid='host-placeholder']")).toBeNull();
+  });
+
+  it("keeps the host placeholder presentation-only and every real edge drawn", () => {
+    const engine = twoConnectedNodes();
+    const nodeCreated = vi.fn();
+    const edgeCreated = vi.fn();
+    engine.events.subscribe("node.created", nodeCreated);
+    engine.events.subscribe("edge.created", edgeCreated);
+    const before = {
+      nodes: engine.graph.getNodes().map((node) => String(node.id)),
+      edges: engine.graph.getEdges().map((edge) => String(edge.id)),
+      history: engine.history.size(),
+    };
+
+    const { container } = renderPlaceholders(engine, placeholderStore(), {
+      renderPlaceholder: hostPlaceholder,
+    });
+
+    const contents = flowContents(engine, { renderPlaceholder: hostPlaceholder });
+    expect([...contents.nodes].sort()).toEqual(["n1", "n2"]);
+    expect(contents.edges).toEqual(before.edges);
+    expect(container.querySelectorAll(".react-flow__node")).toHaveLength(2);
+    expect(container.querySelector("[data-testid='host-placeholder']")).not.toBeNull();
+    expect(engine.graph.getNodes().map((node) => String(node.id))).toEqual(before.nodes);
+    expect(engine.graph.getEdges().map((edge) => String(edge.id))).toEqual(before.edges);
+    expect(engine.history.size()).toBe(before.history);
+    expect(nodeCreated).not.toHaveBeenCalled();
+    expect(edgeCreated).not.toHaveBeenCalled();
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -1935,6 +2035,99 @@ describe("GraphCanvas insert-handle placement (S23)", () => {
     expect(nodeCreated).not.toHaveBeenCalled();
     expect(edgeCreated).not.toHaveBeenCalled();
     expect(container.querySelector("[data-nodera-branch-insert]")).not.toBeNull();
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  J: the branching "+" the host replaces (S6)                     */
+  /* ---------------------------------------------------------------- */
+
+  /** A host component standing in for the framework's branching button. */
+  function hostBranch(handle: BranchHandle): ReactNode {
+    return createElement(
+      "button",
+      { type: "button", "data-testid": "host-branch", "data-host-node": handle.nodeId },
+      "host +",
+    );
+  }
+
+  it("replaces the branching + with the host component where a split exists", () => {
+    const received: BranchHandle[] = [];
+    const { container } = renderHandles(forkingGraph(), {
+      insertHandles: "before-branching",
+      renderBranchInsert: (handle) => {
+        received.push(handle);
+        return hostBranch(handle);
+      },
+    });
+
+    expect(container.querySelectorAll("[data-testid='host-branch']")).toHaveLength(1);
+    // The framework's button is replaced, not doubled.
+    expect(container.querySelector("[data-nodera-branch-insert]")).toBeNull();
+    expect(received.map((handle) => handle.nodeId)).toEqual(["n1"]);
+    expect(typeof received[0]?.x).toBe("number");
+    expect(typeof received[0]?.y).toBe("number");
+    // Still an overlay inside the viewport, never a graph element.
+    expect(
+      container.querySelector(".react-flow__viewport-portal [data-testid='host-branch']"),
+    ).not.toBeNull();
+  });
+
+  it("calls the host renderer only where a split exists", () => {
+    const engine = forkingGraph();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n4", position: { x: 480, y: 0 } });
+    createEdge(engine, {
+      source: { nodeId: "n2", portId: "out-1" },
+      target: { nodeId: "n4", portId: "in-1" },
+    });
+
+    const received: BranchHandle[] = [];
+    const { container } = renderHandles(engine, {
+      insertHandles: "both",
+      renderBranchInsert: (handle) => {
+        received.push(handle);
+        return hostBranch(handle);
+      },
+    });
+
+    // n1 forks into n2 and n3; n2 has a single successor, so it has no split.
+    expect(received.map((handle) => handle.nodeId)).toEqual(["n1"]);
+    expect(container.querySelectorAll("[data-testid='host-branch']")).toHaveLength(1);
+  });
+
+  it("keeps the default branching button when the host supplies no renderer", () => {
+    const { container } = renderHandles(forkingGraph(), { insertHandles: "before-branching" });
+
+    expect(container.querySelector("[data-nodera-branch-insert-for='n1']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='host-branch']")).toBeNull();
+  });
+
+  it("keeps the host branching control presentation-only and every real edge drawn", () => {
+    const engine = forkingGraph();
+    const nodeCreated = vi.fn();
+    const edgeCreated = vi.fn();
+    engine.events.subscribe("node.created", nodeCreated);
+    engine.events.subscribe("edge.created", edgeCreated);
+    const before = {
+      nodes: engine.graph.getNodes().map((node) => String(node.id)),
+      edges: engine.graph.getEdges().map((edge) => String(edge.id)),
+      history: engine.history.size(),
+    };
+
+    const { container } = renderHandles(engine, {
+      insertHandles: "before-branching",
+      renderBranchInsert: hostBranch,
+    });
+
+    const contents = flowContents(engine);
+    expect([...contents.nodes].sort()).toEqual(["n1", "n2", "n3"]);
+    expect(contents.edges).toEqual(before.edges);
+    expect(container.querySelectorAll(".react-flow__node")).toHaveLength(3);
+    expect(container.querySelector("[data-testid='host-branch']")).not.toBeNull();
+    expect(engine.graph.getNodes().map((node) => String(node.id))).toEqual(before.nodes);
+    expect(engine.graph.getEdges().map((edge) => String(edge.id))).toEqual(before.edges);
+    expect(engine.history.size()).toBe(before.history);
+    expect(nodeCreated).not.toHaveBeenCalled();
+    expect(edgeCreated).not.toHaveBeenCalled();
   });
 });
 

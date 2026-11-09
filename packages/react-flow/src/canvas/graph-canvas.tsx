@@ -716,6 +716,42 @@ function PlaceholderConnectorView(props: {
   );
 }
 
+/** Props accepted by {@link DefaultPlaceholderBox}. */
+export interface DefaultPlaceholderBoxProps {
+  /** The placeholder to draw: its kind, anchor, box and connector. */
+  readonly placeholder: PhantomPlaceholder;
+}
+
+/**
+ * The framework's placeholder: a dashed box carrying the "+".
+ *
+ * Exported so a host that wants a different box can wrap this one instead of
+ * re-implementing the geometry the derivation handed it. The box owns nothing
+ * but its own presentation: the coordinates come from the placeholder, and the
+ * `"+"` inside it (`{@link PhantomInsertButton}`) records the append anchor and
+ * opens the node-creation dialog.
+ */
+export const DefaultPlaceholderBox: FC<DefaultPlaceholderBoxProps> = ({ placeholder }) => (
+  <div
+    data-nodera-phantom-node="inactive"
+    data-nodera-phantom-kind={placeholder.kind}
+    data-nodera-phantom-for={placeholder.anchorId ?? ""}
+    className="nodera-phantom-node"
+    style={{
+      ...PHANTOM_NODE_STYLE,
+      position: "absolute",
+      zIndex: PLACEHOLDER_Z_INDEX,
+      width: placeholder.box.width,
+      height: placeholder.box.height,
+      transform: `translate(${String(placeholder.box.x)}px, ${String(
+        placeholder.box.y,
+      )}px)`,
+    }}
+  >
+    <PhantomInsertButton anchorId={placeholder.anchorId} />
+  </div>
+);
+
 /** Key of the placeholder that follows no node (the empty graph). */
 const EMPTY_GRAPH_KEY = "nodera.phantom.empty";
 
@@ -737,10 +773,16 @@ const EMPTY_GRAPH_KEY = "nodera.phantom.empty";
  * Nothing here is selectable, draggable, deletable or connectable, because
  * nothing here is an element React Flow manages: the boxes are plain `div`s with
  * `pointer-events: none`, and only the `"+"` takes the pointer.
+ *
+ * `render` replaces the box **and** its `"+"` for every placeholder (S6); the
+ * dashed connector stays the canvas's, because it is the geometry of the
+ * placeholder rather than the control. Without it the framework's own
+ * {@link DefaultPlaceholderBox} is painted, byte for byte.
  */
 export const CanvasPlaceholderOverlay: FC<{
   readonly placeholders: readonly PhantomPlaceholder[];
-}> = ({ placeholders }) => {
+  readonly render?: (placeholder: PhantomPlaceholder) => ReactNode;
+}> = ({ placeholders, render }) => {
   if (placeholders.length === 0) {
     return null;
   }
@@ -752,24 +794,11 @@ export const CanvasPlaceholderOverlay: FC<{
           {placeholder.connector === undefined ? null : (
             <PlaceholderConnectorView connector={placeholder.connector} />
           )}
-          <div
-            data-nodera-phantom-node="inactive"
-            data-nodera-phantom-kind={placeholder.kind}
-            data-nodera-phantom-for={placeholder.anchorId ?? ""}
-            className="nodera-phantom-node"
-            style={{
-              ...PHANTOM_NODE_STYLE,
-              position: "absolute",
-              zIndex: PLACEHOLDER_Z_INDEX,
-              width: placeholder.box.width,
-              height: placeholder.box.height,
-              transform: `translate(${String(placeholder.box.x)}px, ${String(
-                placeholder.box.y,
-              )}px)`,
-            }}
-          >
-            <PhantomInsertButton anchorId={placeholder.anchorId} />
-          </div>
+          {render === undefined ? (
+            <DefaultPlaceholderBox placeholder={placeholder} />
+          ) : (
+            render(placeholder)
+          )}
         </Fragment>
       ))}
     </ViewportPortal>
@@ -1011,10 +1040,15 @@ export const DefaultBranchInsertButton: FC<{ readonly nodeId: string }> = ({ nod
  * the nodes' coordinate system and pans and zooms with them, while staying out of
  * React Flow's `nodes` and `edges` arrays — the separation that keeps a
  * presentation control from ever becoming a graph element.
+ *
+ * `render` replaces the `"+"` itself (S6) while the canvas keeps the fork's
+ * coordinates; without it the framework's {@link DefaultBranchInsertButton} is
+ * painted, byte for byte.
  */
 export const CanvasBranchHandleOverlay: FC<{
   readonly handles: readonly BranchHandle[];
-}> = ({ handles }) => {
+  readonly render?: (handle: BranchHandle) => ReactNode;
+}> = ({ handles, render }) => {
   if (handles.length === 0) {
     return null;
   }
@@ -1033,7 +1067,11 @@ export const CanvasBranchHandleOverlay: FC<{
             pointerEvents: "none",
           }}
         >
-          <DefaultBranchInsertButton nodeId={handle.nodeId} />
+          {render === undefined ? (
+            <DefaultBranchInsertButton nodeId={handle.nodeId} />
+          ) : (
+            render(handle)
+          )}
         </div>
       ))}
     </ViewportPortal>
@@ -1340,6 +1378,38 @@ export interface GraphCanvasProps {
    * `useEdgeInsertActions()` from `@nodera/ui-react`.
    */
   readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
+  /**
+   * Host renderer for a phantom placeholder (S6), replacing the framework's
+   * dashed box **and** its `"+"`.
+   *
+   * The host receives the whole {@link PhantomPlaceholder} — `kind`
+   * (`"empty-state"` or `"successor"`), `anchorId`, `box` in flow coordinates
+   * and the `connector` that joins it to its node — so one component covers both
+   * kinds. The canvas keeps the geometry: the box goes exactly where the
+   * derivation put it and the dashed connector is still painted, because the
+   * line is the placeholder's shape, not its control.
+   *
+   * Replacing the box also replaces what it *does*: recording
+   * `UiState.pendingAppendAnchorId` and opening the node-creation dialog are the
+   * framework button's job, so a host that wants the append flow wires it itself
+   * (`useNoderaUi()` gives it the store). A host that wants the default
+   * behaviour inside its own layout renders `DefaultPlaceholderBox`.
+   */
+  readonly renderPlaceholder?: (placeholder: PhantomPlaceholder) => ReactNode;
+  /**
+   * Host renderer for the branching `"+"` (S23), replacing the framework's
+   * button.
+   *
+   * The canvas keeps the position (the fork, derived from the document) and the
+   * overlay discipline; the host replaces the control and receives the
+   * {@link BranchHandle} it stands for (`nodeId`, and the `x`/`y` flow
+   * coordinates it was placed at). Replacing it also replaces the activation:
+   * the framework button records `UiState.pendingBranchInsertId` and opens the
+   * node-creation dialog, so a host that wants that flow calls the store itself
+   * or wraps `DefaultBranchInsertButton`. Without this prop the default button is
+   * painted, byte for byte.
+   */
+  readonly renderBranchInsert?: (handle: BranchHandle) => ReactNode;
   /** CSS class for the outer container. */
   readonly className?: string;
   /** Show the minimap. */
@@ -1399,6 +1469,8 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   insertHandles = "each-edge",
   layoutDirection = "horizontal",
   renderEdgeInsert,
+  renderPlaceholder,
+  renderBranchInsert,
   className,
   showMinimap = true,
   showControls = true,
@@ -1787,8 +1859,14 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         nodesConnectable={connectionsPolicy === "editable"}
       >
         <Background {...canvasBackgroundOptions()} />
-        <CanvasPlaceholderOverlay placeholders={placeholders} />
-        <CanvasBranchHandleOverlay handles={branchHandles} />
+        <CanvasPlaceholderOverlay
+          placeholders={placeholders}
+          {...(renderPlaceholder === undefined ? {} : { render: renderPlaceholder })}
+        />
+        <CanvasBranchHandleOverlay
+          handles={branchHandles}
+          {...(renderBranchInsert === undefined ? {} : { render: renderBranchInsert })}
+        />
         {showMinimap && (
           <MiniMap nodeColor={minimapNodeColor} pannable zoomable />
         )}

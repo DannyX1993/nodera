@@ -435,6 +435,87 @@ keeps the position and the activation path and changes only the control (the
 What the button looks like is the host's; when it lands and what it writes is the
 framework's.
 
+### Replacing the affordances (S6)
+
+All three controls the affordance paints are host-replaceable through a
+component prop, and none of them needs a new SDK member, renderer kind or
+dependency. The canvas keeps what makes the control work; the host decides what
+it looks like:
+
+| Prop (`GraphCanvas`, forwarded by `NoderaEditor`) | Replaces | Host receives |
+| --- | --- | --- |
+| `renderEdgeInsert` | the "+" at the midpoint of one edge | `edgeId` |
+| `renderPlaceholder` | the dashed placeholder box **and** its "+", for the empty state *and* every successor placeholder | `PhantomPlaceholder`: `kind`, `anchorId`, `box`, `connector` |
+| `renderBranchInsert` | the branching "+" of a parent with two or more successors | `BranchHandle`: `nodeId`, `x`, `y` |
+
+**What the host may replace.** The control: its element, its icon, its label, its
+styling, and — because it is the host's component — what activating it does. One
+component covers both placeholder kinds, so a host that wants `box` or `connector`
+to move with the layout reads them from the placeholder it receives instead of
+recomputing geometry.
+
+**What it may not replace.** The geometry and the overlay discipline, which is
+what keeps the affordance honest:
+
+- the per-edge "+" stays at the rendered edge's midpoint; the placeholder stays in
+the first free slot the derivation chose and keeps its dashed connector (the
+connector is the placeholder's *shape*, not its control); the branching "+" stays
+at the fork;
+- whatever the host renders is painted **inside** `ViewportPortal`, so it is still
+not a React Flow node or edge and still never reaches the document,
+`builder.graph.nodes()` / `edges()`, the events or the history. The regression
+that emptied the edge layer cannot come back through a host component;
+- absent means today's rendering, byte for byte: all three props are optional and
+fall back to the framework's own component.
+
+**The behaviour moves with the component.** Recording the pending session
+(`UiState.pendingEdgeInsertId`, `pendingAppendAnchorId`, `pendingBranchInsertId`)
+and opening the node-creation dialog are what the framework *buttons* do. A
+replaced placeholder or branching handle whose component does neither records
+nothing and opens nothing — that is the point of replacing it, and the
+responsibility that comes with it. A host that wants the default flow wraps the
+exported default instead of re-implementing it:
+
+```tsx
+// The defaults live in the canvas module, beside `GraphCanvas` — the same module
+// `DefaultEdgeInsertButton` already is in, and not re-exported from the root.
+import {
+  DefaultBranchInsertButton,
+  DefaultEdgeInsertButton,
+  DefaultPlaceholderBox,
+} from "@nodera/react-flow/src/canvas/graph-canvas.js";
+
+<NoderaEditor
+  builder={builder}
+  renderPlaceholder={(placeholder) => (
+    <aside style={{ position: "absolute", pointerEvents: "all" }}>
+      <DefaultPlaceholderBox placeholder={placeholder} />
+      <hint kind={placeholder.kind}>{placeholder.kind === "successor" ? "continue" : "start"}</hint>
+    </aside>
+  )}
+  renderBranchInsert={(handle) => <DefaultBranchInsertButton nodeId={handle.nodeId} />}
+/>;
+```
+
+A host button wired to `useEdgeInsertActions()` cannot stand in for the other two:
+that hook records an *edge*, while the placeholder appends *after a node* and the
+branching handle inserts *before a split*. A host that replaces them either wraps
+the exported defaults or drives the UI store itself (`useNoderaUi()`):
+
+```ts
+const { store } = useNoderaUi();
+
+store.openDialog(NODERA_CREATE_NODE_DIALOG_ID);   // then, for the placeholder:
+store.setPendingEdgeInsertId(undefined);
+store.setPendingAppendAnchorId(placeholder.anchorId);
+// and for the branching handle:
+store.setPendingBranchInsertId(handle.nodeId);
+```
+
+What each pending session means once the dialog closes is the framework's either
+way: `insertNode({ edgeId, type })`, `addNode({ type, after })` plus `connect`,
+`insertNodeBeforeBranching({ nodeId, type })`.
+
 ### The phantom empty state
 
 An empty canvas has no edge to put a "+" on, so the same affordance also covers
@@ -524,6 +605,13 @@ as one reversible unit, one `undo()` here removes the connecting edge and a
 second one removes the node. A single-unit append-and-connect needs its own
 application use case; it does not exist yet, so no part of this flow claims
 atomicity.
+
+The dashed box and its "+" are replaceable by the host
+(`renderPlaceholder`, [see above](#replacing-the-affordances-s6)). What is
+*inside* the default button — recording the anchor and opening the dialog — is
+the default's behaviour, so a host component that replaces the box and wants the
+append flow has to perform those two steps itself, or wrap
+`DefaultPlaceholderBox`.
 
 ### Successor placeholders (S21)
 
@@ -621,6 +709,12 @@ as `GraphCanvas.insertHandles`. It is presentation only: it writes no node, edge
 event or history entry by itself, and the whole placement needs
 `features.edgeInsertion` to be on. An invalid value is refused at
 `graph.layout.insertHandles` and the stored one stays.
+
+The branching "+" itself is replaceable (`renderBranchInsert`, [see
+above](#replacing-the-affordances-s6)): the canvas keeps the fork's coordinates
+and the overlay, the host component decides the look — and, once replaced, does
+its own recording of `UiState.pendingBranchInsertId` and its own dialog opening
+unless it wraps `DefaultBranchInsertButton`.
 
 ### `builder.graphLayout`
 
