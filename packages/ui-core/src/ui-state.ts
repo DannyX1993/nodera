@@ -68,24 +68,6 @@ export type ConnectionsPolicy = "editable" | "fixed";
  */
 export type PortsPolicy = "visible" | "hidden";
 
-/**
- * Where the edge insertion "+" affordance sits when a node has several
- * successors (S23).
- *
- * Host configuration, reflected in the UI state so the canvas re-renders when
- * the host changes it:
- *
- * - `"each-edge"` (the default, and today's behaviour): one "+" per edge.
- * - `"before-branching"`: a parent with two or more successors gets a single
- *   "+" on its outgoing side, before the edges split, and those edges carry none
- *   of their own. Every other edge keeps its per-edge "+".
- * - `"both"`: the branching "+" and the per-edge ones, side by side.
- *
- * Pure presentation policy: it writes no document state, pushes no history entry
- * and emits no event by itself.
- */
-export type InsertHandlesPolicy = "each-edge" | "before-branching" | "both";
-
 /** Element a context menu was opened for. */
 export type MenuTargetKind = "node" | "edge" | "pane" | "canvas";
 
@@ -204,15 +186,6 @@ export interface UiState {
    * nothing: the port data still reaches every node renderer.
    */
   readonly ports: PortsPolicy;
-  /**
-   * Where the edge insertion "+" sits when a node has several successors.
-   *
-   * The canvas adapter reads it reactively (a policy change re-renders without a
-   * rebuild); the builder seeds it from `graph.layout.insertHandles` and changes
-   * it through `builder.graphLayout.setInsertHandlesPolicy`. It never writes an
-   * edge or a node by itself.
-   */
-  readonly insertHandles: InsertHandlesPolicy;
 }
 
 /** Initial values accepted by {@link UiStateStore}. */
@@ -249,11 +222,6 @@ export interface UiStateStoreOptions {
    * behaviour.
    */
   readonly ports?: PortsPolicy;
-  /**
-   * Where the insert "+" affordance sits when a node has several successors.
-   * Defaults to `"each-edge"`, today's behaviour.
-   */
-  readonly insertHandles?: InsertHandlesPolicy;
 }
 
 /** Listener notified after every state change. */
@@ -289,7 +257,6 @@ export class UiStateStore {
       nodeTransition: options.nodeTransition ?? "instant",
       connections: options.connections ?? "editable",
       ports: options.ports ?? "visible",
-      insertHandles: options.insertHandles ?? "each-edge",
     };
   }
 
@@ -544,20 +511,6 @@ export class UiStateStore {
       return;
     }
     this.commit({ ...this.state, ports });
-  }
-
-  /**
-   * Applies the insert-handle placement policy of the canvas.
-   *
-   * The builder is what validates the value (`builder.graphLayout
-   * .setInsertHandlesPolicy`), so an invalid policy never reaches the store;
-   * setting the policy already applied notifies nobody.
-   */
-  setInsertHandles(insertHandles: InsertHandlesPolicy): void {
-    if (insertHandles === this.state.insertHandles) {
-      return;
-    }
-    this.commit({ ...this.state, insertHandles });
   }
 
   private commit(next: UiState): void {

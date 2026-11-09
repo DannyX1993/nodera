@@ -4,7 +4,6 @@ import {
   UiStateStore,
   type ConnectionsPolicy,
   type DragPolicy,
-  type InsertHandlesPolicy,
   type NodeTransition,
   type PortsPolicy,
 } from "./ui-state.js";
@@ -69,7 +68,6 @@ describe("UiStateStore", () => {
       nodeTransition: "instant",
       connections: "editable",
       ports: "visible",
-      insertHandles: "each-edge",
     });
   });
 
@@ -485,47 +483,6 @@ describe("UiStateStore connections and ports policies", () => {
     store.subscribe(() => notifications++);
 
     store.setPorts("visible");
-
-    expect(notifications).toBe(0);
-    expect(store.getState()).toBe(before);
-  });
-});
-
-describe("UiStateStore insert handles policy", () => {
-  it("defaults to one handle per edge", () => {
-    expect(createStore().getState().insertHandles).toBe("each-edge");
-  });
-
-  it("seeds the policy the host declares", () => {
-    const store = new UiStateStore({
-      themeId: "nodera.light",
-      layoutId: "nodera.editor",
-      layout: emptyLayout,
-      insertHandles: "before-branching",
-    });
-
-    expect(store.getState().insertHandles).toBe("before-branching");
-  });
-
-  it("changes the policy and notifies its subscribers once", () => {
-    const store = createStore();
-    const seen: InsertHandlesPolicy[] = [];
-    store.subscribe((state) => seen.push(state.insertHandles));
-
-    store.setInsertHandles("both");
-    store.setInsertHandles("both");
-
-    expect(store.getState().insertHandles).toBe("both");
-    expect(seen).toEqual(["both"]);
-  });
-
-  it("notifies nobody when the policy already matches", () => {
-    const store = createStore();
-    const before = store.getState();
-    let notifications = 0;
-    store.subscribe(() => notifications++);
-
-    store.setInsertHandles("each-edge");
 
     expect(notifications).toBe(0);
     expect(store.getState()).toBe(before);
