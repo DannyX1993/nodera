@@ -29,6 +29,7 @@ import {
   redo,
   removeEdge,
   removeNode,
+  removeNodeSplicing,
   selectMultiple,
   undo,
   updateNodeProperties,
@@ -42,7 +43,7 @@ import type {
   LayoutStrategyRegistry,
 } from "@nodera/graph-layout";
 import type { ValidationLevel, ValidationReport } from "@nodera/validation";
-import type { ArrangeOnChange } from "../builder/configuration.js";
+import type { ArrangeOnChange, RemovalPolicy } from "../builder/configuration.js";
 import {
   disposedIssue,
   isPlainObject,
@@ -196,6 +197,19 @@ export interface ArrangeSettings {
 }
 
 /**
+ * What removing a node reads from the composition: the policy
+ * `graph.layout.onRemove` in effect today.
+ *
+ * Read through a function for the same reason {@link ArrangeSettings} is:
+ * `builder.graphLayout.setRemovalPolicy` changes what the very next removal
+ * does, with no re-composition.
+ */
+export interface RemovalSettings {
+  /** Policy `graph.layout.onRemove` in effect today. */
+  readonly onRemove: () => RemovalPolicy;
+}
+
+/**
  * The graph surface of the builder.
  *
  * Mutation is reported as `Result` so the host branches once per call; the
@@ -204,6 +218,34 @@ export interface ArrangeSettings {
  */
 export interface BuilderGraphApi {
   addNode(request: AddNodeRequest): Result<NodeInstanceView, SdkIssues>;
+  /**
+   * Removes a node, following the removal policy the host configured.
+   *
+   * With `graph.layout.onRemove: "detach"` — the default — the node and every
+   * edge it carried leave the graph together, in one history unit: one `undo()`
+   * restores the node and its edges. With `"splice"` the removals happen exactly
+   * the same way **and** each predecessor is joined to each successor inside the
+   * same unit, so the hierarchy above and below stays connected through one hop
+   * and one `undo()` still restores the node with its original edges, ids
+   * included. The spliced edges keep the ports of the edges that went away and
+   * take the removed node's incoming edge definition type; a pair that would
+   * duplicate an existing edge is skipped.
+   *
+   * The removal answers the removed node in the §9 instance vocabulary, whatever
+   * the policy is. Splice or not, a node with no predecessor or no successor
+   * simply loses its edges.
+   *
+   * With `graph.layout.arrangeOnChange: "downstream"` and `mode: "auto"` a
+   * splice is followed by a **second** history unit that arranges the spliced
+   * predecessors and their descendants (see {@link BuilderGraphApi.arrange});
+   * one `undo()` steps that arrangement back and a second one restores the
+   * removal. The removal never fails because of it — a refused arrangement is
+   * reported by {@link BuilderGraphApi.lastAutoArrangement}. `"detach"`
+   * arranges nothing, exactly as before.
+   *
+   * An unknown node is `sdk.invalid-input` carrying the use case's own
+   * `node-not-found` code, and nothing is written, pushed or emitted.
+   */
   removeNode(nodeId: string): Result<NodeInstanceView, SdkIssues>;
   moveNode(nodeId: string, position: NodePosition): Result<NodeInstanceView, SdkIssues>;
   /** Writes each property value through the update use case, one history unit each. */
@@ -278,15 +320,17 @@ export interface BuilderGraphApi {
   arrange(request?: ArrangeRequest): Result<readonly NodeInstanceView[], SdkIssues>;
   /**
    * What the automatic downstream arrangement did after the last structural
-   * change, i.e. the second unit of `insertNode` and `connect`.
+   * change, i.e. the second unit of `insertNode`, `connect` and a spliced
+   * `removeNode`.
    *
    * It answers `"skipped"` when the policy did not apply (`"never"`,
-   * `mode: "free"`, or no `insertNode`/`connect` happened yet), `"arranged"` with
-   * the nodes it placed, and `"refused"` with the structured diagnostics when the
-   * strategy or a position was rejected — in which case the mutation that
-   * triggered it stands, because the two are separate history units. `connect`
-   * returns its edge and `insertNode` its node and edges, so this read is how the
-   * framework reports the second unit without changing those results.
+   * `mode: "free"`, `"detach"`, a removal with no predecessor, or no such
+   * mutation happened yet), `"arranged"` with the nodes it placed, and `"refused"`
+   * with the structured diagnostics when the strategy or a position was rejected —
+   * in which case the mutation that triggered it stands, because the two are
+   * separate history units. `connect` returns its edge, `insertNode` its node and
+   * edges and `removeNode` the removed node, so this read is how the framework
+   * reports the second unit without changing those results.
    */
   lastAutoArrangement(): AutoArrangeOutcome;
   /** Every node of the graph, in the §9 instance vocabulary. */
@@ -621,15 +665,21 @@ function unknownArrangeOriginIssue(fromId: string): SdkIssue {
 }
 
 /**
- * Ids of `from` and of everything reachable from it by following edges outward.
+ * Ids of the origins and of everything reachable from them by following edges
+ * outward.
  *
  * The reachability is transitive and direction-sensitive: an edge
  * `source --> target` puts `target` downstream of `source`, so an edge pointing
- * **into** the origin never pulls its source into the written subset. Cycles are
- * harmless — the visited set is the loop guard — and every id is visited once,
- * so the walk is linear in the edges of the graph.
+ * **into** an origin never pulls its source into the written subset. Several
+ * origins — the predecessors of a removed node under `onRemove: "splice"` — are
+ * walked as one set, so the subset is their union and still one history unit.
+ * Cycles are harmless — the visited set is the loop guard — and every id is
+ * visited once, so the walk is linear in the edges of the graph.
  */
-function downstreamNodeIds(editor: EditorEngine, from: string): ReadonlySet<string> {
+function downstreamNodeIds(
+  editor: EditorEngine,
+  origins: readonly string[],
+): ReadonlySet<string> {
   const adjacency = new Map<string, string[]>();
   for (const edge of editor.graph.getEdges()) {
     const source = edge.connection.source.nodeId;
@@ -640,8 +690,8 @@ function downstreamNodeIds(editor: EditorEngine, from: string): ReadonlySet<stri
       targets.push(edge.connection.target.nodeId);
     }
   }
-  const reachable = new Set<string>([from]);
-  const pending: string[] = [from];
+  const reachable = new Set<string>(origins);
+  const pending: string[] = [...origins];
   for (let index = 0; index < pending.length; index += 1) {
     const current = pending[index];
     if (current === undefined) {
@@ -735,22 +785,22 @@ function applyPositions(
 }
 
 /**
- * The computed positions of `from` and its descendants, in strategy order.
+ * The computed positions of the origins and their descendants, in strategy order.
  *
  * The reachability is computed once for the call, not per position: it is a walk
  * over the graph, while the answer is already in hand.
  */
 function scopedTo(
   editor: EditorEngine,
-  from: string,
+  origins: readonly string[],
   positions: readonly GraphLayoutPlacedNode[],
 ): readonly GraphLayoutPlacedNode[] {
-  const reachable = downstreamNodeIds(editor, from);
+  const reachable = downstreamNodeIds(editor, origins);
   return positions.filter((entry) => reachable.has(entry.nodeId));
 }
 
 /**
- * Arranges `from` and its descendants, or reports why it could not.
+ * Arranges the origins and their descendants, or reports why it could not.
  *
  * The whole answer is computed and the subset is what gets written, which is the
  * only scope that matters: every position written is document state and history
@@ -761,7 +811,7 @@ function arrangeDownstream(
   editor: EditorEngine,
   graphLayout: ResolvedGraphLayout,
   settings: ArrangeSettings,
-  from: string,
+  origins: readonly string[],
 ): AutoArrangeOutcome {
   const computed = computePlacement(editor, graphLayout, settings);
   if (!computed.ok) {
@@ -769,7 +819,7 @@ function arrangeDownstream(
   }
   const written = applyPositions(
     editor,
-    scopedTo(editor, from, computed.value.positions),
+    scopedTo(editor, origins, computed.value.positions),
   );
   return written.ok
     ? { outcome: "arranged", nodes: written.value }
@@ -807,6 +857,10 @@ function autoArrangePolicy(
  * what is **written** to the origin and its descendants while the answer stays
  * whole, and `graph.layout.arrangeOnChange: "downstream"` reuses that same scoped
  * write after an `insertNode` or a `connect`, as a history unit of its own.
+ * `removalSettings` decides what `removeNode` does: `"detach"` delegates to the
+ * plain removal use case, `"splice"` to the one that joins the removed node's
+ * predecessors to its successors, and only the latter is followed by the
+ * automatic arrangement, which starts from the spliced predecessors.
  * `isDisposed` is the builder's own lifecycle flag: a disposed builder refuses
  * every mutation with `sdk.disposed` and keeps every read working, because the
  * state the host already received must stay renderable.
@@ -816,6 +870,7 @@ export function createGraphApi(
   isDisposed: () => boolean,
   graphLayout: ResolvedGraphLayout,
   arrangeSettings: ArrangeSettings,
+  removalSettings: RemovalSettings,
 ): BuilderGraphApi {
   // What the automatic policy did after the latest structural change. It lives
   // here, next to the mutations that produce it, because `connect` answers its
@@ -823,11 +878,11 @@ export function createGraphApi(
   // unit without changing a published shape.
   let lastArrangement: AutoArrangeOutcome = { outcome: "skipped" };
 
-  /** Arranges `nodeId` and its descendants when the policy asks for it. */
-  const arrangeAfter = (nodeId: string): AutoArrangeOutcome =>
-    autoArrangePolicy(graphLayout, arrangeSettings) === "never"
+  /** Arranges the given origins and their descendants when the policy asks for it. */
+  const arrangeAfter = (origins: readonly string[]): AutoArrangeOutcome =>
+    origins.length === 0 || autoArrangePolicy(graphLayout, arrangeSettings) === "never"
       ? { outcome: "skipped" }
-      : arrangeDownstream(editor, graphLayout, arrangeSettings, nodeId);
+      : arrangeDownstream(editor, graphLayout, arrangeSettings, origins);
 
   return {
     addNode(request: AddNodeRequest): Result<NodeInstanceView, SdkIssues> {
@@ -883,10 +938,22 @@ export function createGraphApi(
       if (issues !== undefined) {
         return err(issues);
       }
-      const removed = removeNode(editor, { nodeId });
-      return removed.ok
-        ? ok(toNodeInstanceView(removed.value.node))
-        : err([useCaseIssue(removed.error)]);
+      if (removalSettings.onRemove() !== "splice") {
+        const removed = removeNode(editor, { nodeId });
+        return removed.ok
+          ? ok(toNodeInstanceView(removed.value.node))
+          : err([useCaseIssue(removed.error)]);
+      }
+      // Splice: the node leaves and its predecessors are joined to its
+      // successors inside that same unit. Only the automatic arrangement is a
+      // second one, and it starts from the predecessors, because they are the
+      // nodes whose position the new hop changes.
+      const spliced = removeNodeSplicing(editor, { nodeId });
+      if (!spliced.ok) {
+        return err([useCaseIssue(spliced.error)]);
+      }
+      lastArrangement = arrangeAfter(spliced.value.predecessors);
+      return ok(toNodeInstanceView(spliced.value.node));
     },
 
     moveNode(nodeId: string, position: NodePosition): Result<NodeInstanceView, SdkIssues> {
@@ -978,7 +1045,7 @@ export function createGraphApi(
       }
       // The insertion already succeeded, so the automatic arrangement is a
       // second history unit and can never fail this call.
-      lastArrangement = arrangeAfter(inserted.value.node.id);
+      lastArrangement = arrangeAfter([inserted.value.node.id]);
       const edges: readonly [EdgeInstanceView, EdgeInstanceView] = [
         toEdgeInstanceView(inserted.value.edges[0]),
         toEdgeInstanceView(inserted.value.edges[1]),
@@ -1035,7 +1102,7 @@ export function createGraphApi(
       // The new relation changes where its target sits, so that node and what
       // hangs off it are what a downstream arrangement writes — again as its own
       // unit, which cannot fail the connection.
-      lastArrangement = arrangeAfter(request.target);
+      lastArrangement = arrangeAfter([request.target]);
       return ok(toEdgeInstanceView(connected.value));
     },
 
@@ -1090,7 +1157,7 @@ export function createGraphApi(
       const written =
         from === undefined
           ? computed.value.positions
-          : scopedTo(editor, from, computed.value.positions);
+          : scopedTo(editor, [from], computed.value.positions);
       return applyPositions(editor, written);
     },
 

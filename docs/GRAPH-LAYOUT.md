@@ -23,6 +23,7 @@ nothing moves unless the host asks.
 | `Arrange` (explicit) | The selected strategy, for the whole graph when the host calls `builder.graph.arrange()`, or only for `from` and its descendants with `arrange({ from })`. One history unit either way. |
 | Downstream auto (`insertNode`, `connect`) | The selected strategy, for the node the change touched and its descendants, when the host declares `graph.layout.arrangeOnChange: "downstream"`. **A second** history unit, applied after the mutation (see [Automatic downstream arrangement](#automatic-downstream-arrangement)). |
 | Edge insertion (`builder.graph.insertNode`) | The builder, in `mode: "auto"`, anchored on the edge's **source**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node and the two edges that replace the original — plus, with `arrangeOnChange: "downstream"`, a second one for the downstream arrangement. |
+| Removal splice (`graph.layout.onRemove: "splice"`) | The selected strategy, for the spliced predecessors and their descendants, when `arrangeOnChange: "downstream"` and the layout owns the positions. The removal writes no position at all: it and its spliced edges are one unit of their own, the arrangement is a **second** one. |
 | Phantom "+" (`addNode({ after })` + `connect`) | The builder, in `mode: "auto"`, anchored on the node the placeholder followed — exactly the `after` rule. **Two** history units: the node, then the edge, because both are separate SDK calls (see [The phantom empty state](#the-phantom-empty-state)). |
 
 A host that declares a ranked layout applies it once at boot — compose, seed, then
@@ -120,6 +121,7 @@ Two consequences worth stating, because they are easy to break:
 | `connections` | `"editable"` or `"fixed"`: whether a person may draw a new connection (independent of `mode`) | `"editable"` |
 | `ports` | `"visible"` or `"hidden"`: whether the node surface paints a port handle at all (independent of `mode`) | `"visible"` |
 | `arrangeOnChange` | `"never"` or `"downstream"`: what a structural change arranges when the layout owns the positions | `"never"` |
+| `onRemove` | `"detach"` or `"splice"`: what removing a node does with the relations it carried (independent of `mode`) | `"detach"` |
 
 ```ts
 import { assertOk, assertValid, createBuilder } from "@nodera/sdk";
@@ -140,6 +142,7 @@ const builder = assertValid(
         connections: "editable",                 // default; or "fixed"
         ports: "visible",                        // default; or "hidden"
         arrangeOnChange: "never",                // default; or "downstream"
+        onRemove: "detach",                      // default; or "splice"
       },
     },
   }),
@@ -294,6 +297,41 @@ Two honest no-ops: the `free` strategy returns no position, and so does an empty
 graph — neither pushes a history entry. A strategy that answers a diagnostic makes
 `arrange()` fail with `sdk.invalid-input`, keeping the geometry's own code in
 `metadata.strategyCode`, and nothing is applied.
+
+### Removal under a layout-owned graph
+
+Removing a node from a graph the layout owns can leave the hierarchy above and
+below apart. `graph.layout.onRemove` declares what happens instead:
+
+| Policy | What a removal does | History |
+| --- | --- | --- |
+| `"detach"` (default) | The node and every edge it carried leave the graph; the hierarchy is left apart. Today's behaviour, byte for byte. | One unit: one `undo()` restores the node and its edges. |
+| `"splice"` | The node leaves **and** each predecessor is joined to each successor, so the graph stays connected through one hop. | The same single unit: one `undo()` restores the node and its original edges, ids included, and drops every spliced edge. |
+
+The policy is host configuration and independent of `mode` — whether a removed
+node leaves a hole or is spliced over is graph semantics, not geometry.
+`builder.graphLayout` reports and changes it (`removalPolicy()` /
+`setRemovalPolicy(policy)`); an unknown value is refused and the stored one stays.
+
+The splice rule, in full:
+
+- **Ports from the edges that went away.** The predecessor's port comes from its
+  incoming edge, the successor's port from its outgoing one.
+- **Type from the incoming edge.** The new edge takes the removed node's
+  **incoming** edge definition type; with no incoming edge there is no pair to
+  write, so there is no type either. The old labels and metadata are not copied.
+- **Cartesian, duplicates skipped.** Every predecessor joins every successor,
+  because dropping a pair would silently sever a branch; a pair whose endpoints
+  **and** ports already carry an edge is skipped instead of written twice.
+- **Degrades honestly.** A node with no predecessor or no successor has no pair
+  and is simply removed with its edges, in the same one unit.
+
+With `arrangeOnChange: "downstream"` and `mode: "auto"` the spliced
+**predecessors** and their descendants are arranged afterwards as a **second**
+history unit, so the branch settles into the new ranks: one `undo()` steps the
+arrangement back, a second one restores the removal. A refused arrangement never
+fails the removal — `builder.graph.lastAutoArrangement()` reports it. With
+`"detach"` nothing is arranged, exactly as before.
 
 The placement rule behind the answer (longest-path ranks, the relaxation cap, the
 rank of the isolated and cycle-locked nodes, in-rank order by node id, the two
@@ -506,6 +544,10 @@ Stated, not hidden:
   `unpositioned` for a host that calls a strategy directly.
 - No framework toggle. Every re-placement is a host action: an explicit `Arrange`,
   or the `arrangeOnChange: "downstream"` policy the host declares in configuration.
+- `onRemove: "splice"` joins the removed node's predecessors to its successors and
+  nothing more: it does not re-route ports beyond the ones the removed edges
+  carried, nor pick a different successor when a pair would duplicate an existing
+  edge — that pair is skipped.
 - The downstream policy arranges the touched node and its descendants, not their
   neighbours in the same rank: a sibling of the inserted node moves only if its own
   subtree is arranged.

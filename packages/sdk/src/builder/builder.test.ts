@@ -32,6 +32,7 @@ import type {
   ArrangeOnChange,
   BuilderConfiguration,
   GraphLayoutConfiguration,
+  RemovalPolicy,
 } from "./configuration.js";
 
 const NodeRenderer = (): null => null;
@@ -1354,5 +1355,75 @@ describe("graph layout arrangeOnChange policy", () => {
 
     expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
     expect(builder.graphLayout.arrangeOnChange()).toBe("never");
+  });
+});
+
+describe("graph layout removal policy", () => {
+  it("detaches by default, whatever the placement mode", () => {
+    expect(create().graphLayout.removalPolicy()).toBe("detach");
+    expect(create({ graph: { layout: { mode: "auto" } } }).graphLayout.removalPolicy()).toBe(
+      "detach",
+    );
+  });
+
+  it("declares the splice policy from configuration", () => {
+    const builder = create({ graph: { layout: { onRemove: "splice" } } });
+
+    expect(builder.graphLayout.removalPolicy()).toBe("splice");
+  });
+
+  const refusedPolicies: readonly unknown[] = ["join", "", true, 42, null];
+  it.each(refusedPolicies)(
+    "refuses the removal policy %s at graph.layout.onRemove and creates no builder",
+    (onRemove) => {
+      const issues = fail({
+        graph: {
+          layout: { onRemove } as unknown as GraphLayoutConfiguration,
+        },
+      });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({
+        code: "sdk.invalid-input",
+        path: ["graph", "layout", "onRemove"],
+      });
+    },
+  );
+
+  it("round-trips the policy through the getter and the setter", () => {
+    const builder = create({ graph: { layout: { onRemove: "splice" } } });
+
+    expect(builder.graphLayout.removalPolicy()).toBe("splice");
+
+    const detached = builder.graphLayout.setRemovalPolicy("detach");
+    expect(detached.ok && detached.value).toBe("detach");
+    expect(builder.graphLayout.removalPolicy()).toBe("detach");
+
+    const spliced = builder.graphLayout.setRemovalPolicy("splice");
+    expect(spliced.ok && spliced.value).toBe("splice");
+    expect(builder.graphLayout.removalPolicy()).toBe("splice");
+  });
+
+  it("refuses an unknown policy at runtime and keeps the stored one", () => {
+    const builder = create({ graph: { layout: { onRemove: "splice" } } });
+
+    const refused = builder.graphLayout.setRemovalPolicy("join" as RemovalPolicy);
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["graph", "layout", "onRemove"],
+    });
+    expect(builder.graphLayout.removalPolicy()).toBe("splice");
+  });
+
+  it("refuses a policy change on a disposed builder", () => {
+    const builder = create();
+    builder.dispose();
+
+    const refused = builder.graphLayout.setRemovalPolicy("splice");
+
+    expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
+    expect(builder.graphLayout.removalPolicy()).toBe("detach");
   });
 });

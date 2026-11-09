@@ -104,6 +104,7 @@ import type {
   BuilderDocumentConfiguration,
   BuilderDocumentFormat,
   GraphLayoutConfiguration,
+  RemovalPolicy,
 } from "./configuration.js";
 import { resolveFeatures, type ResolvedFeatures } from "./features.js";
 
@@ -294,6 +295,30 @@ export interface BuilderGraphLayoutApi {
    * `graph.layout.arrangeOnChange` and the previous policy stays.
    */
   setArrangeOnChange(policy: ArrangeOnChange): Result<ArrangeOnChange, SdkIssues>;
+  /**
+   * What removing a node does today: `"detach"` or `"splice"`.
+   *
+   * It is the policy declared in `graph.layout.onRemove` (`"detach"` by
+   * default), unless the host changed it at runtime with
+   * {@link BuilderGraphLayoutApi.setRemovalPolicy}. `"splice"` makes
+   * `builder.graph.removeNode` join every predecessor to every successor inside
+   * the removal's own history unit, so one undo restores the node and its
+   * original edges; `"detach"` keeps today's behaviour exactly.
+   *
+   * Like the other policies it is host configuration, never a control the
+   * framework puts in front of a user.
+   */
+  removalPolicy(): RemovalPolicy;
+  /**
+   * Changes what removing a node does with the relations it carried.
+   *
+   * Like {@link BuilderGraphLayoutApi.setArrangeOnChange} this one decides what
+   * the SDK writes to the document, so it lives in the builder and never touches
+   * the UI state. It writes nothing on its own. A value outside the union is
+   * refused with `sdk.invalid-input` at `graph.layout.onRemove` and the previous
+   * policy stays.
+   */
+  setRemovalPolicy(policy: RemovalPolicy): Result<RemovalPolicy, SdkIssues>;
 }
 
 /**
@@ -639,6 +664,16 @@ function graphLayoutIssues(
       ),
     );
   }
+  const onRemove: unknown = Reflect.get(layout, "onRemove");
+  if (onRemove !== undefined && onRemove !== "detach" && onRemove !== "splice") {
+    issues.push(
+      shapeIssue(
+        'Builder graph layout removal policy must be "detach" or "splice"',
+        onRemove,
+        [...path, "onRemove"],
+      ),
+    );
+  }
   return issues;
 }
 
@@ -700,6 +735,22 @@ function resolveArrangeOnChange(
   configuration: GraphLayoutConfiguration | undefined,
 ): ArrangeOnChange {
   return configuration?.arrangeOnChange === "downstream" ? "downstream" : "never";
+}
+
+/**
+ * Resolves the removal policy a validated configuration declares.
+ *
+ * Unlike the drag policy it does not depend on who owns placement: whether a
+ * removed node leaves a hole or is spliced over is graph semantics, not geometry,
+ * so the declared value always wins and `"detach"` — today's behaviour — is the
+ * default. Fail-closed like the rest of the configuration: only `"splice"`
+ * splices, so an unknown value can never join relations nobody asked to join.
+ * The placement mode still gates the automatic arrangement that follows a splice.
+ */
+function resolveRemovalPolicy(
+  configuration: GraphLayoutConfiguration | undefined,
+): RemovalPolicy {
+  return configuration?.onRemove === "splice" ? "splice" : "detach";
 }
 
 /**
@@ -1194,6 +1245,8 @@ interface BuilderAssemblerOptions {
   readonly rankSpacing: number;
   /** What a structural change arranges automatically, resolved from configuration. */
   readonly arrangeOnChange: ArrangeOnChange;
+  /** What removing a node does with the relations it carried. */
+  readonly onRemove: RemovalPolicy;
 }
 
 /** Concrete builder. Hosts only ever see the {@link Builder} contract. */
@@ -1230,6 +1283,14 @@ class SdkBuilder implements Builder {
    * change applies to the next mutation with no re-composition.
    */
   private arrangeOnChangePolicy: ArrangeOnChange;
+  /**
+   * What removing a node does with the relations it carried.
+   *
+   * Builder state for the same reason: it decides document writes, so the graph
+   * API reads it through a function and a runtime change applies to the next
+   * removal with no re-composition.
+   */
+  private onRemovePolicy: RemovalPolicy;
 
   constructor(options: BuilderAssemblerOptions) {
     this.id = options.id;
@@ -1247,6 +1308,7 @@ class SdkBuilder implements Builder {
     this.bindings = options.renderers;
     this.strategyRegistry = options.strategies;
     this.arrangeOnChangePolicy = options.arrangeOnChange;
+    this.onRemovePolicy = options.onRemove;
     // One adapter object per builder, so a host can hold on to it across reads.
     this.registries = {
       nodes: createNodeDefinitionRegistryView(this.nodeRegistry, () => this.disposedFlag),
@@ -1257,11 +1319,17 @@ class SdkBuilder implements Builder {
       panels: options.registries.panels,
       tools: options.registries.tools,
     };
-    this.graph = createGraphApi(this.editor, () => this.disposedFlag, options.graphLayout, {
-      strategies: this.strategyRegistry,
-      rankSpacing: options.rankSpacing,
-      arrangeOnChange: () => this.arrangeOnChangePolicy,
-    });
+    this.graph = createGraphApi(
+      this.editor,
+      () => this.disposedFlag,
+      options.graphLayout,
+      {
+        strategies: this.strategyRegistry,
+        rankSpacing: options.rankSpacing,
+        arrangeOnChange: () => this.arrangeOnChangePolicy,
+      },
+      { onRemove: () => this.onRemovePolicy },
+    );
     this.document = createDocumentApi(this.editor, this.documentFormat, () => this.disposedFlag);
     this.events = createBuilderEvents(this.editor.events);
     this.theme = {
@@ -1289,6 +1357,8 @@ class SdkBuilder implements Builder {
       setPortsPolicy: (policy) => this.selectPortsPolicy(policy),
       arrangeOnChange: () => this.arrangeOnChangePolicy,
       setArrangeOnChange: (policy) => this.selectArrangeOnChange(policy),
+      removalPolicy: () => this.onRemovePolicy,
+      setRemovalPolicy: (policy) => this.selectRemovalPolicy(policy),
     };
     this.dialogs = {
       register: (dialog) => this.addDialog(dialog),
@@ -1640,6 +1710,30 @@ class SdkBuilder implements Builder {
     this.arrangeOnChangePolicy = policy;
     return ok(policy);
   }
+
+  /**
+   * Applies a removal policy.
+   *
+   * Same contract as {@link selectArrangeOnChange} minus the UI state: the union
+   * is checked here because the value comes from a host, and a refused policy
+   * leaves the stored one — and therefore the next removal — untouched.
+   */
+  private selectRemovalPolicy(policy: RemovalPolicy): Result<RemovalPolicy, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("graphLayout.setRemovalPolicy")]);
+    }
+    if (policy !== "detach" && policy !== "splice") {
+      return err([
+        shapeIssue(
+          'Builder graph layout removal policy must be "detach" or "splice"',
+          policy,
+          ["graph", "layout", "onRemove"],
+        ),
+      ]);
+    }
+    this.onRemovePolicy = policy;
+    return ok(policy);
+  }
 }
 
 /**
@@ -1900,6 +1994,7 @@ export function createBuilder(
     strategies,
     rankSpacing,
     arrangeOnChange: resolveArrangeOnChange(declaredGraphLayout),
+    onRemove: resolveRemovalPolicy(declaredGraphLayout),
   });
 
   // Configured plugins run last, once every declarative registry is populated,

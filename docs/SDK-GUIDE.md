@@ -354,6 +354,59 @@ arrangement is reported by `graph.lastAutoArrangement()` (`"skipped"`,
 `"arranged"`, `"refused"`). A bare `addNode` arranges nothing, and `"never"` — the
 default — keeps the previous rule that only an explicit `Arrange` moves nodes.
 
+### Removing a node under a layout-owned graph
+
+`graph.layout.onRemove` declares what `builder.graph.removeNode()` does with the
+relations the node carried. It is host configuration — never a control the
+framework puts in front of a user — and it is about graph semantics, not
+geometry, so it applies in both placement modes:
+
+| Policy | Declared as | What a removal does |
+| --- | --- | --- |
+| `"detach"` (default) | nothing, or `graph.layout.onRemove: "detach"` | Today's behaviour, byte for byte: node and edges leave, the hierarchy above and below is left apart. |
+| `"splice"` | `graph.layout.onRemove: "splice"` | The node leaves and each predecessor is joined to each successor, so the graph stays connected through one hop. |
+
+```ts
+createBuilder({ graph: { layout: { onRemove: "splice" } } });
+
+// p --in--> n --out--> s   becomes   p --> s
+assertOk(builder.graph.removeNode("node-middle"));
+builder.graph.undo(); // one undo: node, both original edges and their ids
+```
+
+**One unit, one undo.** The removal of the node, the removal of the edges it
+carried and the spliced edges are a single `remove-node-splicing` history unit,
+so `undo()` restores the graph exactly as it was — same ids, same ports — and
+`redo()` splices again. There is no state in which the node is gone and the splice
+is missing.
+
+**Ports come from the edges that went away, the type from the incoming one.** A
+spliced edge keeps the predecessor's port (from its incoming edge) and the
+successor's port (from its outgoing edge), and takes the removed node's
+**incoming** edge definition type. The old labels and metadata are not copied:
+they described relations that no longer exist.
+
+**Every predecessor joins every successor, duplicates skipped.** Several of each
+produce the cartesian product, because dropping a pair would silently sever a
+branch. A pair whose endpoints **and** ports already carry an edge is skipped
+instead of written twice. A node with no predecessor or no successor has no pair
+to write and is simply removed with its edges, in the same one unit.
+
+With `arrangeOnChange: "downstream"` and `mode: "auto"` a splice is followed by a
+**second** history unit that arranges the spliced predecessors and their
+descendants, so the branch settles into the new ranks; one `undo()` steps the
+arrangement back and a second one restores the removal. A refused arrangement
+never fails the removal — `graph.lastAutoArrangement()` reports it.
+
+```ts
+builder.graphLayout.removalPolicy();            // "detach" | "splice"
+assertOk(builder.graphLayout.setRemovalPolicy("splice"));
+```
+
+A value outside the union is refused and the stored one stays: at construction it
+is `sdk.invalid-input` at `graph.layout.onRemove` and no builder is created; at
+runtime it is the same code and path, and the next removal behaves as before.
+
 **The strategy is host configuration, and it is replaceable.** `builder.graphLayout`
 registers implementations, selects one by id and reports what is installed:
 
@@ -513,7 +566,7 @@ below are the complete lists:
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
 | `dialogs.register` | `dialogs.all`, `builder.store` reads |
-| `graphLayout.register`, `graphLayout.setDefault`, `setDragPolicy`, `setConnectionsPolicy`, `setPortsPolicy`, `setArrangeOnChange` | `graphLayout.active`, `graphLayout.all`, `dragPolicy`, `connectionsPolicy`, `portsPolicy`, `arrangeOnChange`, `lastAutoArrangement` |
+| `graphLayout.register`, `graphLayout.setDefault`, `setDragPolicy`, `setConnectionsPolicy`, `setPortsPolicy`, `setArrangeOnChange`, `setRemovalPolicy` | `graphLayout.active`, `graphLayout.all`, `dragPolicy`, `connectionsPolicy`, `portsPolicy`, `arrangeOnChange`, `removalPolicy`, `lastAutoArrangement` |
 | `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo`, `lastAutoArrangement` |
 | `graph.undo`, `graph.redo` — nothing is undone, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |

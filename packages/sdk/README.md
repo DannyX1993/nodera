@@ -578,6 +578,9 @@ Two further fields declare the surface of the same graph: `connections`
 A third pair declares what a structural change arranges: `arrangeOnChange`
 (`"never" | "downstream"`, default `"never"`) — see
 [Automatic downstream arrangement](#automatic-downstream-arrangement--graphlayoutarrangeonchange--setarrangeonchange).
+A fourth declares what removing a node does with the relations it carried:
+`onRemove` (`"detach" | "splice"`, default `"detach"`) — see
+[Removal under a layout-owned graph](#removal-under-a-layout-owned-graph--graphlayoutonremove--setremovalpolicy).
 
 The assigned position belongs to the same history unit as the creation: `undo()`
 removes the node, `redo()` restores it where it was. A value outside these
@@ -745,6 +748,61 @@ stored one stays: at construction it is `sdk.invalid-input` at
 `graph.layout.arrangeOnChange` and no builder is created; at runtime it is the
 same code and path, and the next mutation keeps behaving as before.
 
+#### Removal under a layout-owned graph — `graph.layout.onRemove` / `setRemovalPolicy`
+
+`graph.layout.onRemove` declares what `builder.graph.removeNode()` does with the
+relations the removed node carried. Like `arrangeOnChange` it is host
+configuration, never a control the framework puts in front of a user, and it is
+about graph semantics rather than geometry, so it applies whatever `mode` says:
+
+| Policy | Declared as | What a removal does |
+| --- | --- | --- |
+| `"detach"` (default) | nothing, or `graph.layout.onRemove: "detach"` | Today's behaviour, byte for byte: the node and every edge it carried leave the graph, and the hierarchy above and below is left apart. |
+| `"splice"` | `graph.layout.onRemove: "splice"` | The node leaves **and** each predecessor is joined to each successor, so the graph stays connected through one hop. One history unit, exactly like the removal itself. |
+
+```ts
+createBuilder({ graph: { layout: { onRemove: "splice" } } });
+
+// p --in--> n --out--> s   becomes   p --> s
+assertOk(builder.graph.removeNode("node-middle"));
+builder.graph.undo(); // the node and its two original edges are back, ids included
+```
+
+Four rules make the splice predictable:
+
+- **One unit, one undo.** The node removal, the removal of its edges and the
+  spliced edges go into the same `remove-node-splicing` history unit, so one
+  `undo()` restores the node with its original edges (same ids, same ports) and
+  drops every spliced relation. There is no half-applied removal.
+- **Ports from the edges that went away, type from the incoming one.** A spliced
+  edge keeps the predecessor's port (from its incoming edge) and the successor's
+  port (from its outgoing edge), and takes the removed node's **incoming** edge
+  definition type. Labels and metadata of the old edges are not copied: they
+  described relations that no longer exist.
+- **Cartesian, with the duplicates skipped.** Every predecessor is joined to
+  every successor. A pair whose endpoints and ports already carry an edge is
+  skipped instead of written twice.
+- **Degrades honestly.** A node with no predecessor or no successor has no pair
+  to write, so it is simply removed with its edges — still one unit.
+
+With `graph.layout.arrangeOnChange: "downstream"` and `mode: "auto"` a splice is
+followed by a **second** history unit that arranges the spliced **predecessors**
+and their descendants, so the branch settles into the new ranks; one `undo()`
+steps the arrangement back and a second one restores the removal. A refused
+arrangement never fails the removal — it is reported by
+`builder.graph.lastAutoArrangement()`. `"detach"` arranges nothing, exactly as
+before.
+
+```ts
+builder.graphLayout.removalPolicy();            // "detach" | "splice"
+assertOk(builder.graphLayout.setRemovalPolicy("splice"));
+```
+
+A value outside the union is refused and the stored one stays: at construction it
+is `sdk.invalid-input` at `graph.layout.onRemove` and no builder is created; at
+runtime it is the same code and path, and the next removal keeps behaving as
+before.
+
 ### Graph layout strategies — `builder.graphLayout`
 
 `builder.graph.arrange()` is explicit and all-or-nothing: it asks the selected
@@ -807,8 +865,9 @@ Members of `builder.graphLayout`: `register(strategy)`, `setDefault(id)`,
 `active()` (the selected id), `all()` (every registered strategy), the drag policy
 pair `dragPolicy()` / `setDragPolicy(policy)`, the surface pairs
 `connectionsPolicy()` / `setConnectionsPolicy(policy)` and `portsPolicy()` /
-`setPortsPolicy(policy)` and the automatic arrangement pair `arrangeOnChange()` /
-`setArrangeOnChange(policy)`, all described above. The built-ins are
+`setPortsPolicy(policy)`, the automatic arrangement pair `arrangeOnChange()` /
+`setArrangeOnChange(policy)` and the removal pair `removalPolicy()` /
+`setRemovalPolicy(policy)`, all described above. The built-ins are
 `nodera.graph-layout.free` (no-op) and `nodera.graph-layout.layered` (rank by
 longest path, in-rank order by node id, no crossing minimization); a used id is a
 `sdk.duplicate-id` and an unknown one is refused, so a plugin never shadows the

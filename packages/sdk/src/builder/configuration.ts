@@ -70,6 +70,16 @@ export interface BuilderUiConfiguration {
 export type ArrangeOnChange = "never" | "downstream";
 
 /**
+ * What removing a node does with the relations it carried.
+ *
+ * `"detach"` — today's behaviour — removes the node and its edges and leaves the
+ * hierarchy above and below apart. `"splice"` joins every predecessor to every
+ * successor, so the graph stays connected through one hop. Host configuration,
+ * never a user toggle.
+ */
+export type RemovalPolicy = "detach" | "splice";
+
+/**
  * How the builder places nodes: on add, and on an explicit `Arrange`.
  *
  * Configuration only, never a behaviour on its own and never a runtime toggle
@@ -130,6 +140,30 @@ export interface GraphLayoutConfiguration {
    * be changed at runtime with `builder.graphLayout.setArrangeOnChange`.
    */
   readonly arrangeOnChange?: ArrangeOnChange;
+  /**
+   * What removing a node does with the relations it carried.
+   *
+   * `"detach"` (the default) is today's behaviour: the node and every edge it
+   * carried leave the graph together and the hierarchy above and below is left
+   * apart. `"splice"` removes the node **and** joins each predecessor to each
+   * successor, so the graph stays connected through one hop: the spliced edges
+   * keep the ports of the edges that went away (the predecessor's from its
+   * incoming edge, the successor's from its outgoing one), take the removed
+   * node's incoming edge definition type, and a pair that would duplicate an
+   * existing edge is skipped instead of written twice.
+   *
+   * The removal, the edge removals and the spliced edges are **one** history
+   * unit: one undo restores the node with its original edges. A node with no
+   * predecessor or no successor degrades to a plain removal, in the same unit.
+   * When `arrangeOnChange` is `"downstream"` and the layout owns the positions,
+   * the spliced predecessors are arranged afterwards as a unit of their own, and
+   * a refused arrangement never fails the removal — it is reported on
+   * `builder.graph.lastAutoArrangement()`.
+   *
+   * The policy can be changed at runtime with
+   * `builder.graphLayout.setRemovalPolicy`.
+   */
+  readonly onRemove?: RemovalPolicy;
   /**
    * Whether a person may draw a new connection on the canvas.
    *
