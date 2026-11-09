@@ -14,6 +14,54 @@ nothing else from the workspace. Its dependency set is the same one
 `examples/phase6-demo` declares (plus `@nodera/ui-react` for the dialog and the
 "+" affordance); it adds no external package and no styling framework.
 
+## The options panel
+
+The page is a compact header plus the canvas. The header carries the title, a
+one-line summary of every option's current value, and an **Options** disclosure —
+a native button with `aria-expanded` and `aria-controls` — that opens one panel
+above the canvas. The panel is the host's own HTML: nothing about it reaches the
+framework, which still ships no runtime toggle for placement (S20).
+
+The panel holds three labelled groups (`fieldset` / `legend`), and every control
+is a native element named by its own visible label. Each policy control reads its
+value from the builder — `graphLayout.active()`, `dragPolicy()`,
+`connectionsPolicy()`, `portsPolicy()`, `arrangeOnChange()`, `removalPolicy()` —
+and writes it back through the documented SDK call, so no control can drift from
+the policy the canvas is really applying. A refused value leaves both the control
+and the canvas on the previous one, and the diagnostic is printed in the status
+line. Direction and the two spacings are per-call overrides: they start from the
+`graph.layout` the demo declares, win for one `Arrange`, and are never stored.
+
+### Layout
+
+| Control           | Values                                   | SDK surface |
+| ----------------- | ---------------------------------------- | ----------- |
+| Strategy          | `nodera.graph-layout.layered` / `…free`  | `builder.graphLayout.setDefault(id)` — and then one `arrange`, plus the surface that strategy implies |
+| Direction         | `horizontal` / `vertical`                | `builder.graph.arrange({ direction, … })` |
+| Spacing           | number, document units                   | `builder.graph.arrange({ spacing, … })` |
+| Rank spacing      | number, document units                   | `builder.graph.arrange({ rankSpacing, … })` |
+| Arrange on change | `never` / `downstream`                   | `builder.graphLayout.setArrangeOnChange(policy)` |
+| On remove         | `detach` / `splice`                      | `builder.graphLayout.setRemovalPolicy(policy)` |
+
+### Surface
+
+| Control     | Values                          | SDK surface |
+| ----------- | ------------------------------- | ----------- |
+| Manual drag | `free` / `locked` / `snap-back` | `builder.graphLayout.setDragPolicy(policy)` |
+| Connections | `editable` / `fixed`            | `builder.graphLayout.setConnectionsPolicy(policy)` |
+| Ports       | `visible` / `hidden`            | `builder.graphLayout.setPortsPolicy(policy)` |
+| Edge "+"    | read-only state, `on` / `off`   | `builder.features.edgeInsertion` — a construction-time flag, reported instead of switched |
+
+### Actions
+
+| Action                       | Enabled when              | SDK surface |
+| ---------------------------- | ------------------------- | ----------- |
+| `Arrange`                    | always                    | `builder.graph.arrange({ … })` — one explicit history unit |
+| `Arrange from "<node>"`      | exactly one node selected | `builder.graph.arrange({ from, … })` — only that node and its descendants are written |
+| `Add node…`                  | always                    | `CreateNodeButton` → the node-creation dialog → `builder.graph.addNode({ after })` |
+| `Remove "<node>"`            | exactly one node selected | `builder.graph.removeNode(id)` — follows `onRemove` |
+| `Reset graph`                | always                    | `resetDemoGraph` — `disconnect`, `removeNode`, then the boot seed |
+
 ## What it demonstrates
 
 The graph is a five-node pipeline (`ingest → parse, enrich → score → publish`)
@@ -21,35 +69,39 @@ seeded through `builder.graph.addNode` **without positions**. The builder
 declares `graph.layout: { mode: "auto", direction: "horizontal", spacing: 240,
 rankSpacing: 280 }`, so the seed nodes are first placed on a deterministic grid.
 
-| Control      | What it calls                                                        |
-| ------------ | -------------------------------------------------------------------- |
-| Strategy     | `builder.graphLayout.setDefault(id)` — `…layered` or `…free`          |
-| Connections  | `builder.graphLayout.setConnectionsPolicy(policy)` — the strategy select sets it |
-| Ports        | `builder.graphLayout.setPortsPolicy(policy)` — the strategy select sets it |
-| Direction    | passed to `builder.graph.arrange({ direction })`                      |
-| Spacing      | passed to `builder.graph.arrange({ spacing })`                        |
-| Rank spacing | passed to `builder.graph.arrange({ rankSpacing })`                    |
-| Arrange      | `builder.graph.arrange({ direction, spacing, rankSpacing })`          |
-| Drag         | `builder.graphLayout.setDragPolicy(policy)` — `locked`, `snap-back`, `free` |
-| "+"          | `CreateNodeButton` → the built-in node-creation dialog               |
-| "+" on an edge | `features.edgeInsertion` → the canvas affordance → `builder.graph.insertNode` |
-| "+" on the phantom | `features.edgeInsertion` with 0 or 1 node → `addNode({ after })` + `connect` |
-
-Pressing **Arrange** is the only thing that re-places nodes. It is one explicit
-action and one history unit: `builder.graph.undo()` puts every previous position
-back (including the absence of a position). Selecting
+Pressing **Arrange** is the only thing that re-places the whole graph. It is one
+explicit action and one history unit: `builder.graph.undo()` puts every previous
+position back (including the absence of a position). Selecting
 `nodera.graph-layout.free` makes the next Arrange an honest no-op that moves
 nothing and pushes no history entry.
 
-The **overrides are per call**: they win for that one Arrange and are never
-stored. Clear a spacing field (or type `0`) and press Arrange to see the SDK
-refuse the switch with an `sdk.invalid-input` diagnostic at `spacing` or
-`rankSpacing` — the status line prints it and nothing moves.
+**`Arrange from "<node>"` is the scoped call.** The strategy still ranks the
+whole graph, but only the selected node and the nodes reachable from it by
+following edges outward receive their position; everything else keeps the place
+it had. It is still one history unit.
 
-The **"+"** button opens the framework's node-creation dialog, which lists the
-definitions the host registered. The host handles the selection itself and adds
-the node with `builder.graph.addNode`, so `mode: "auto"` gives it a free slot;
-the status line reports where it landed. Press Arrange to rank it with the rest.
+The **overrides are per call**: direction, spacing and rank spacing win for that
+one Arrange and are never stored. Clear a spacing field (or type `0`) and press
+Arrange to see the SDK refuse the switch with an `sdk.invalid-input` diagnostic
+at `spacing` or `rankSpacing` — the status line prints it and nothing moves.
+
+**`Arrange on change: downstream`** makes a structural change arrange by itself:
+after an insertion or a connection, the builder ranks the changed node and its
+descendants in a **second** history unit. One `undo()` steps the arrangement
+back, a second undoes the mutation. `never` keeps the rule that only an explicit
+Arrange moves a node.
+
+**`On remove: splice`** makes `builder.graph.removeNode` join each predecessor to
+each successor inside the removal's own history unit, so the hierarchy above and
+below stays connected through one hop. `Remove "<node>"` is the control that
+calls that path; one `undo()` restores the node with its original edges.
+
+The **`Add node…`** button opens the framework's node-creation dialog, which
+lists the definitions the host registered. The host handles the selection itself
+and adds the node with `builder.graph.addNode` — anchored on the single selected
+node, so `mode: "auto"` gives it the next free slot after it, or at the end of
+the graph with no selection. The status line reports where it landed and which
+history units the add-and-connect produced.
 
 The builder declares `features: { edgeInsertion: true }`, so the canvas paints a
 **"+" on every edge** as well. Clicking it opens the same dialog on that edge;
@@ -74,48 +126,74 @@ framework does not have yet. The phantoms themselves are presentation only: they
 never reach `builder.graph.nodes()`, the history or the minimap, and they vanish
 once the graph holds two nodes.
 
-The **Drag** select calls `builder.graphLayout.setDragPolicy` and starts from
-`builder.graphLayout.dragPolicy()`, so it always shows the policy the canvas is
-applying. The demo configures `mode: "auto"` without a `drag` value, which means
-`locked`: try to move a node and the canvas refuses. `snap-back` lets it follow
-the pointer and returns it to its placed position on release, and `free` restores
-the drag-and-commit behaviour. None of them changes a position by itself, so an
-`Arrange` after switching behaves exactly as before.
+**`Reset graph`** empties the graph through the public API — every edge, then
+every node, so the result does not depend on `onRemove` — and re-seeds it with
+the boot seed from `src/builder.ts`, then arranges it with the values the
+controls currently hold. Each step is its own history unit; a reset is not a
+single undoable action, and the demo does not pretend otherwise.
 
-The **Connections** and **Ports** values are not separate controls: the strategy
-select decides them, because a strategy that owns the positions owns the surface
-around them. Choosing `nodera.graph-layout.layered` calls
-`builder.graphLayout.setConnectionsPolicy("fixed")` and `setPortsPolicy("hidden")`,
-so the canvas offers no handle to drag a connection from and refuses one that
-arrives anyway — the arrangement cannot be contradicted by an edge. Choosing
-`nodera.graph-layout.free` restores `"editable"` and `"visible"`. Both start from
-`builder.graphLayout.connectionsPolicy()` / `portsPolicy()`, and the toolbar shows
-the values the canvas is applying. Neither writes a document position, an edge or
-a history entry, so an `Arrange` after switching behaves exactly as before.
+The **Manual drag**, **Connections** and **Ports** selects are the surface the
+arrangement implies. They start from the builders' getters, and choosing a
+strategy still applies what it implies: `nodera.graph-layout.layered` calls
+`setConnectionsPolicy("fixed")` and `setPortsPolicy("hidden")`, so the canvas
+offers no handle to drag a connection from and refuses one that arrives anyway;
+`nodera.graph-layout.free` restores `"editable"` and `"visible"`. None of the
+three writes a document position, an edge or a history entry, so an `Arrange`
+after switching behaves exactly as before.
+
+## What to try
+
+- **The layout owns everything**: `layered` + `Manual drag: locked` +
+  `Connections: fixed` + `Ports: hidden`. Try to move a node — the canvas
+  refuses — and look for a port handle: there is none. Then switch to `free` +
+  `snap-back` + `editable` + `visible` and drag, connect and drop freely.
+- **Downstream arrangement**: `layered` + `Arrange on change: downstream`.
+  Select `parse`, press `Add node…`: the node takes its anchored slot as one
+  history unit, then `connect` re-ranks it as a second one. Undo twice and watch
+  the two units come apart.
+- **Splice on removal**: `layered` + `On remove: splice`. Select `score`, press
+  `Remove "score"`, and `parse`/`enrich` end up connected to `publish`; one undo
+  restores the node and its three original edges. Repeat with `detach` to see the
+  hierarchy fall apart instead.
+- **Scoped versus whole arrangement**: set `Manual drag: free` and drag `ingest`
+  far away, then select `parse` and press `Arrange from "parse"` — only the
+  selected node and its descendants move. Press `Arrange` to pull `ingest` back
+  into the ranks.
 
 ## The switching belongs to the host
 
 There is no framework toggle for placement. The Nodera SDK ships configuration
 (`graph.layout`) and one explicit command (`graph.arrange(options?)`), and the
-React Flow binding renders the canvas from the document. The strategy select,
-the direction select, the drag select, the two number fields, the Arrange button
-and the "+" affordance in `src/app.tsx` are plain host HTML/CSS **above** the
-canvas — never inside it — and every one of them calls the public SDK. A host
-that wants its own placement UI writes exactly this page; the framework still
-adds none.
+React Flow binding renders the canvas from the document. The panel in
+`src/app.tsx` — the disclosure, the three groups, the seven selects, the two
+number fields and the five actions — is plain host HTML/CSS **above** the canvas,
+never inside it, and every control calls the public SDK. A host that wants its
+own placement UI writes exactly this page; the framework still adds none.
 
 ## Files
 
 | File              | Role                                                          |
 | ----------------- | ------------------------------------------------------------- |
 | `src/main.tsx`    | Mounts the app inside `NoderaBuilderProvider`; loads the canvas engine stylesheet |
-| `src/builder.ts`  | The whole composition: one `createBuilder`, seeded graph       |
+| `src/builder.ts`  | The whole composition: one `createBuilder`, the seed and its reset |
 | `src/nodes.ts`    | Three node definitions (the vocabulary the dialog offers)      |
-| `src/app.tsx`     | The host controls, the status line and `<NoderaEditor>`        |
-| `index.html`      | Host chrome only (this demo's own page layout)                 |
+| `src/app.tsx`     | The options panel, the status line and `<NoderaEditor>`        |
+| `index.html`      | Host chrome only (this demo's own page layout and controls)    |
 
 ## Limitations, stated rather than hidden
 
+- **There is no automated test for this example.** The repository has no test
+  runner wired for `examples/`; the demo is verified by `typecheck` and `build`,
+  and by reading the status line while clicking. The SDK behavior behind every
+  control is covered by the SDK's own tests.
+- **The canvas' Delete key is not policy-aware.** `onRemove` is honoured by
+  `builder.graph.removeNode`, which the panel's `Remove "<node>"` action calls.
+  The canvas deletes through the application use case directly, so pressing
+  `Backspace` removes a node with its edges whatever the policy says — a
+  framework gap this demo reports instead of hiding.
+- **Edge insertion is reported, not switchable.** `features.edgeInsertion` is a
+  construction-time flag, so the panel shows its state and explains where it is
+  decided instead of offering a control that could not change it.
 - No node renderers are registered: the binding's default node renderer draws
   the three definitions. This demo is about placement, not drawing.
 - The layered strategy ranks by longest path and orders each rank by node id. It

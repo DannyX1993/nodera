@@ -48,7 +48,7 @@
         box-sizing: border-box;
       }
 
-      .demo-bar {
+      .demo-header {
         display: flex;
         align-items: center;
         gap: 10px;
@@ -59,10 +59,108 @@
         background: #131c2b;
       }
 
-      .demo-bar h1 {
-        margin: 0 8px 0 0;
+      .demo-header h1 {
+        margin: 0;
         font-size: 13px;
         font-weight: 600;
+      }
+
+      /*
+       * The current state, in one line, so the panel can stay collapsed and the
+       * header still says what the canvas is doing.
+       */
+      .demo-summary {
+        margin: 0 0 0 auto;
+        color: #94a3b8;
+        font-size: 11px;
+      }
+
+      .demo-disclosure {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border: 1px solid #2f3b4f;
+        border-radius: 5px;
+        background: #1a2333;
+        color: #e5e9f0;
+        font-family: inherit;
+        font-size: 11px;
+        line-height: 1.4;
+        cursor: pointer;
+      }
+
+      /*
+       * Expanded state is carried by the glyph and `aria-expanded`; the border is
+       * a second cue, never the only one.
+       */
+      .demo-disclosure[aria-expanded="true"] {
+        border-color: #f59e0b;
+        color: #fde68a;
+      }
+
+      .demo-options {
+        padding: 6px 8px;
+        border: 1px solid #24344d;
+        border-radius: 6px;
+        background: #101a29;
+      }
+
+      /* A collapsed panel must not keep any display override alive. */
+      .demo-options[hidden] {
+        display: none;
+      }
+
+      .demo-options-body {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .demo-group {
+        margin: 0;
+        padding: 4px 8px 6px;
+        border: 1px solid #2f3b4f;
+        border-radius: 6px;
+        min-width: 0;
+      }
+
+      .demo-group legend {
+        padding: 0 4px;
+        color: #cbd5e1;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .demo-group-body {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .demo-state {
+        margin: 0;
+        padding: 2px 6px;
+        border: 1px dashed #2f3b4f;
+        border-radius: 5px;
+        color: #cbd5e1;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+        font-size: 11px;
+      }
+
+      .demo-note {
+        margin: 0;
+        max-width: 34ch;
+        color: #94a3b8;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      .demo-note code {
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+        color: #cbd5e1;
       }
 
       .demo-control {
@@ -96,6 +194,29 @@
 
       .demo-button:hover {
         border-color: #f59e0b;
+      }
+
+      .demo-button:disabled,
+      .demo-select:disabled,
+      .demo-number:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .demo-button:disabled:hover {
+        border-color: #2f3b4f;
+      }
+
+      /*
+       * Every interactive element is operable by keyboard, so every one of them
+       * has to show where the focus is.
+       */
+      .demo-select:focus-visible,
+      .demo-number:focus-visible,
+      .demo-button:focus-visible,
+      .demo-disclosure:focus-visible {
+        outline: 2px solid #f59e0b;
+        outline-offset: 1px;
       }
 
       .demo-status {

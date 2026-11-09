@@ -3,30 +3,42 @@
  *
  * The canvas is one component (`<NoderaEditor builder={builder} />`); every
  * control around it is plain host HTML that drives the public SDK. The controls
- * live **above** the canvas, never inside it: the framework ships no runtime
- * toggle for placement, and this page is what a host writes when it wants one.
+ * live in one collapsible **Options** panel **above** the canvas, never inside
+ * it: the framework ships no runtime toggle for placement, and this page is what
+ * a host writes when it wants one (S20).
  *
- * | Control        | SDK surface                                              |
- * | -------------- | -------------------------------------------------------- |
- * | Strategy       | `builder.graphLayout.setDefault(id)`                      |
- * | Direction      | `builder.graph.arrange({ direction, … })`                  |
- * | Spacing        | `builder.graph.arrange({ spacing, … })`                    |
- * | Rank spacing   | `builder.graph.arrange({ rankSpacing, … })`                |
- * | Arrange        | `builder.graph.arrange({ … })` — one explicit history unit |
- * | Drag policy    | `builder.graphLayout.setDragPolicy(policy)`                |
- * | Connections    | `builder.graphLayout.setConnectionsPolicy(policy)`         |
- * | Ports          | `builder.graphLayout.setPortsPolicy(policy)`               |
- * | "+"            | `CreateNodeButton` → the built-in node-creation dialog,    |
- * |                | whose selection the host adds with `builder.graph.addNode` |
- * | "+" on an edge  | the canvas affordance (`features.edgeInsertion`), whose     |
- * |                | selection the host inserts with `builder.graph.insertNode` |
- * | "+" on the     | the same affordance on the phantom empty state: the host   |
- * | phantom        | appends with `addNode({ after })` + `connect` (two units)  |
+ * | Group   | Control               | SDK surface                                                  |
+ * | ------- | --------------------- | ------------------------------------------------------------ |
+ * | Layout  | Strategy              | `builder.graphLayout.setDefault(id)`                          |
+ * | Layout  | Direction             | `builder.graph.arrange({ direction, … })`                      |
+ * | Layout  | Spacing               | `builder.graph.arrange({ spacing, … })`                        |
+ * | Layout  | Rank spacing          | `builder.graph.arrange({ rankSpacing, … })`                    |
+ * | Layout  | Arrange on change     | `builder.graphLayout.setArrangeOnChange(policy)`               |
+ * | Layout  | On remove             | `builder.graphLayout.setRemovalPolicy(policy)`                 |
+ * | Surface | Manual drag           | `builder.graphLayout.setDragPolicy(policy)`                    |
+ * | Surface | Connections           | `builder.graphLayout.setConnectionsPolicy(policy)`             |
+ * | Surface | Ports                 | `builder.graphLayout.setPortsPolicy(policy)`                   |
+ * | Surface | Edge "+"              | `builder.features.edgeInsertion` — construction-time, reported |
+ * | Actions | Arrange               | `builder.graph.arrange({ … })` — one explicit history unit     |
+ * | Actions | Arrange from a node   | `builder.graph.arrange({ from, … })` — the scoped call         |
+ * | Actions | Add node              | `CreateNodeButton` → `builder.graph.addNode({ after })`        |
+ * | Actions | Remove selected node  | `builder.graph.removeNode(id)` — obeys `onRemove`              |
+ * | Actions | Reset graph           | `resetDemoGraph` — wipe, then seed again                       |
+ * | canvas  | "+" on an edge        | `features.edgeInsertion` → the canvas affordance → the dialog,  |
+ * |         |                       | whose selection the host inserts with `builder.graph.insertNode` |
+ * | canvas  | "+" on the phantom    | the same affordance on the phantom empty state: the host       |
+ * |         |                       | appends with `addNode({ after })` + `connect` (two units)      |
  *
- * Nothing is persisted by those overrides: they win for the one `Arrange` call
- * that carries them, and the next call without them reads `graph.layout` again.
- * Every `Result` is checked here and its diagnostics are shown in the status
- * line, so a refused arrangement is visible without a console.
+ * Nothing is persisted by the per-call overrides: they win for the one `Arrange`
+ * call that carries them, and the next call without them reads `graph.layout`
+ * again. Every `Result` is checked here and its diagnostics are shown in the
+ * status line, so a refused arrangement, insertion or policy change is visible
+ * without a console.
+ *
+ * Accessibility (AGENTS.md §15): the header's disclosure is a native button
+ * carrying `aria-expanded` / `aria-controls`, the three groups are `fieldset`s
+ * with `legend`s, and every control is a native element named by its own visible
+ * label — nothing is conveyed by colour alone.
  */
 
 import { useState, type ReactNode } from "react";
@@ -37,16 +49,20 @@ import {
   CreateNodeButton,
   NodeCreationDialog,
   useDialogActions,
+  useEditorSnapshot,
   useUiState,
 } from "@nodera/ui-react";
 
-import { DEMO_LAYOUT } from "./builder.js";
+import { DEMO_LAYOUT, resetDemoGraph } from "./builder.js";
 
 /** Props accepted by {@link LayoutSwitchDemo}. */
 export interface LayoutSwitchDemoProps {
   /** The builder composed in `builder.ts`. */
   readonly builder: Builder;
 }
+
+/** Id the disclosure button controls, so `aria-controls` has a target. */
+const OPTIONS_PANEL_ID = "demo-options-panel";
 
 /** Directions the host offers, in the order it shows them. */
 const DIRECTIONS = ["horizontal", "vertical"] as const;
@@ -62,6 +78,12 @@ type ConnectionsPolicy = ReturnType<Builder["graphLayout"]["connectionsPolicy"]>
 
 /** Whether the node surface paints its port handles. */
 type PortsPolicy = ReturnType<Builder["graphLayout"]["portsPolicy"]>;
+
+/** What a structural change arranges by itself. */
+type ArrangeOnChange = ReturnType<Builder["graphLayout"]["arrangeOnChange"]>;
+
+/** What removing a node does with the relations it carried. */
+type RemovalPolicy = ReturnType<Builder["graphLayout"]["removalPolicy"]>;
 
 /**
  * The built-in strategy id that does not own the positions.
@@ -85,6 +107,46 @@ const DRAG_POLICY_LABEL: Readonly<Record<DragPolicy, string>> = {
   "snap-back": "the node follows the pointer and returns to its assigned position",
 };
 
+/** Connection policies the host offers, in the order it shows them. */
+const CONNECTION_POLICIES = ["editable", "fixed"] as const satisfies readonly ConnectionsPolicy[];
+
+/** What each connection policy does, in the host's own words. */
+const CONNECTION_POLICY_LABEL: Readonly<Record<ConnectionsPolicy, string>> = {
+  editable: "a person may draw a valid connection; it is one history unit",
+  fixed: "no handle accepts a connection, so the arrangement cannot be contradicted",
+};
+
+/** Port policies the host offers, in the order it shows them. */
+const PORTS_POLICIES = ["visible", "hidden"] as const satisfies readonly PortsPolicy[];
+
+/** What each port policy does, in the host's own words. */
+const PORTS_POLICY_LABEL: Readonly<Record<PortsPolicy, string>> = {
+  visible: "every port is painted as a handle a connection can attach to",
+  hidden: "no handle is painted; node renderers still receive their ports",
+};
+
+/** Automatic arrangement policies the host offers. */
+const ARRANGE_ON_CHANGE_POLICIES = [
+  "never",
+  "downstream",
+] as const satisfies readonly ArrangeOnChange[];
+
+/** What each automatic arrangement policy does, in the host's own words. */
+const ARRANGE_ON_CHANGE_LABEL: Readonly<Record<ArrangeOnChange, string>> = {
+  never: "only an explicit Arrange moves a node",
+  downstream:
+    "an insertion or a connection arranges the changed node and its descendants, as a second history unit",
+};
+
+/** Removal policies the host offers. */
+const REMOVAL_POLICIES = ["detach", "splice"] as const satisfies readonly RemovalPolicy[];
+
+/** What each removal policy does, in the host's own words. */
+const REMOVAL_POLICY_LABEL: Readonly<Record<RemovalPolicy, string>> = {
+  detach: "a removed node takes its edges with it and leaves the hierarchy apart",
+  splice: "a removed node joins each predecessor to each successor, in the same history unit",
+};
+
 /** The values the host's controls hold for one arrangement. */
 interface Arrangement {
   readonly direction: Direction;
@@ -93,8 +155,23 @@ interface Arrangement {
   readonly strategyId: string;
 }
 
+/** The per-call overrides `arrange` receives, already parsed. */
+interface ArrangeOverrides {
+  readonly direction: Direction;
+  readonly spacing: number;
+  readonly rankSpacing: number;
+}
+
 /** What the status line says before the host arranges anything. */
-const INITIAL_STATUS = "Press Arrange to re-place every node in ranks.";
+const INITIAL_STATUS = "Open Options and press Arrange to re-place every node in ranks.";
+
+/** The offered value a select reported, or `undefined` when it is not one. */
+function offered<Value extends string>(
+  values: readonly Value[],
+  reported: string,
+): Value | undefined {
+  return values.find((candidate) => candidate === reported);
+}
 
 /** Joins the diagnostics of a refused SDK call into one readable line. */
 function issueSummary(issues: SdkIssues): string {
@@ -116,30 +193,79 @@ function positionLabel(position: { readonly x: number; readonly y: number } | un
   return position === undefined ? "no position" : `(${String(position.x)}, ${String(position.y)})`;
 }
 
+/** A strategy id as the header prints it: everything after the framework prefix. */
+function shortStrategy(strategyId: string): string {
+  const parts = strategyId.split(".");
+  return parts[parts.length - 1] ?? strategyId;
+}
+
 export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   const builder = props.builder;
   const ui = useUiState();
   const dialogs = useDialogActions();
+  // The selection is application state, so it reaches React through the
+  // documented editor snapshot rather than a read during render.
+  const snapshot = useEditorSnapshot(builder.editor);
+  const singleSelectedId =
+    snapshot.selectedNodes.length === 1 ? snapshot.selectedNodes[0] : undefined;
 
   // The selection and the numbers the host's own controls hold. They are the
   // host's state, not the builder's configuration: `arrange()` receives them
   // per call and writes nothing back.
   const [strategyId, setStrategyId] = useState(() => builder.graphLayout.active());
-  const [direction, setDirection] = useState<Direction>(DEMO_LAYOUT.direction);
+  const [direction, setDirection] = useState<Direction>(() => DEMO_LAYOUT.direction);
   const [spacing, setSpacing] = useState(String(DEMO_LAYOUT.spacing));
   const [rankSpacing, setRankSpacing] = useState(String(DEMO_LAYOUT.rankSpacing));
   const [status, setStatus] = useState(INITIAL_STATUS);
-  // Seeded from the builder's configuration, so the control always shows the
+  const [optionsOpen, setOptionsOpen] = useState(true);
+  // Seeded from the builder's configuration, so every control always shows the
   // policy the canvas is really applying.
-  const [dragPolicy, setDragPolicy] = useState<DragPolicy>(
-    () => builder.graphLayout.dragPolicy(),
-  );
-  // Seeded from the builder's configuration too, so the toolbar reports the
-  // policies the canvas is really applying from the first render.
-  const [connections, setConnections] = useState<ConnectionsPolicy>(
-    () => builder.graphLayout.connectionsPolicy(),
+  const [drag, setDrag] = useState<DragPolicy>(() => builder.graphLayout.dragPolicy());
+  const [connections, setConnections] = useState<ConnectionsPolicy>(() =>
+    builder.graphLayout.connectionsPolicy(),
   );
   const [ports, setPorts] = useState<PortsPolicy>(() => builder.graphLayout.portsPolicy());
+  const [arrangeOnChange, setArrangeOnChange] = useState<ArrangeOnChange>(() =>
+    builder.graphLayout.arrangeOnChange(),
+  );
+  const [removal, setRemoval] = useState<RemovalPolicy>(() => builder.graphLayout.removalPolicy());
+
+  // A construction-time flag, reported instead of switched: the panel has no
+  // way to change it, so it says what the canvas is really doing.
+  const edgeInsertion = builder.features.edgeInsertion;
+
+  /** The per-call overrides the control values describe, parsed on purpose. */
+  const overrides = (values: Arrangement): ArrangeOverrides => ({
+    direction: values.direction,
+    spacing: Number.parseFloat(values.spacing),
+    rankSpacing: Number.parseFloat(values.rankSpacing),
+  });
+
+  /**
+   * Runs one whole-graph arrangement and answers the status line it produced.
+   *
+   * The numbers are passed through a parse on purpose: an emptied field becomes
+   * `NaN`, which the SDK refuses at `spacing` / `rankSpacing` and moves nothing —
+   * the refusal is the behaviour to see, so the demo never hides it.
+   */
+  const arrangementStatus = (values: Arrangement): string => {
+    const result = builder.graph.arrange(overrides(values));
+    if (!result.ok) {
+      return `Arrange was refused — ${issueSummary(result.error)}`;
+    }
+    return (
+      `Arranged ${movedLabel(result.value.length)} with "${values.strategyId}", ` +
+      `${values.direction}, spacing ${values.spacing}, rank spacing ${values.rankSpacing}.`
+    );
+  };
+
+  const applyArrangement = (values: Arrangement): void => {
+    setStatus(arrangementStatus(values));
+  };
+
+  const arrange = (): void => {
+    applyArrangement({ direction, spacing, rankSpacing, strategyId });
+  };
 
   /**
    * Selects the strategy the next `arrange()` runs.
@@ -173,7 +299,7 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
    *
    * Both are presentation policies: they write no document state, push no history
    * entry and emit no event, so a refused value simply leaves the previous one in
-   * place and the toolbar keeps reporting it.
+   * place and the panel keeps reporting it.
    */
   const applySurface = (
     layoutOwned: boolean,
@@ -199,33 +325,6 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   };
 
   /**
-   * Runs one arrangement with the values the controls hold.
-   *
-   * The numbers are passed through a parse on purpose: an emptied field becomes
-   * `NaN`, which the SDK refuses at `spacing` / `rankSpacing` and moves nothing —
-   * the refusal is the behaviour to see, so the demo never hides it.
-   */
-  const applyArrangement = (values: Arrangement): void => {
-    const result = builder.graph.arrange({
-      direction: values.direction,
-      spacing: Number.parseFloat(values.spacing),
-      rankSpacing: Number.parseFloat(values.rankSpacing),
-    });
-    if (!result.ok) {
-      setStatus(`Arrange was refused — ${issueSummary(result.error)}`);
-      return;
-    }
-    setStatus(
-      `Arranged ${movedLabel(result.value.length)} with "${values.strategyId}", ` +
-        `${values.direction}, spacing ${values.spacing}, rank spacing ${values.rankSpacing}.`,
-    );
-  };
-
-  const arrange = (): void => {
-    applyArrangement({ direction, spacing, rankSpacing, strategyId });
-  };
-
-  /**
    * Changes what a manual drag does.
    *
    * The policy is host configuration, so this is a configuration change and not
@@ -233,18 +332,153 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
    * in the document moves, and a refused value leaves the previous policy in
    * place (the select keeps showing it).
    */
-  const selectDragPolicy = (next: string): void => {
-    const policy = DRAG_POLICIES.find((candidate) => candidate === next);
+  const selectDragPolicy = (reported: string): void => {
+    const policy = offered(DRAG_POLICIES, reported);
     if (policy === undefined) {
       return;
     }
     const changed = builder.graphLayout.setDragPolicy(policy);
     if (!changed.ok) {
-      setStatus(`Drag policy "${next}" was not applied — ${issueSummary(changed.error)}`);
+      setStatus(`Drag policy "${reported}" was not applied — ${issueSummary(changed.error)}`);
       return;
     }
-    setDragPolicy(changed.value);
+    setDrag(changed.value);
     setStatus(`Drag policy "${changed.value}": ${DRAG_POLICY_LABEL[changed.value]}.`);
+  };
+
+  /** Changes whether a person may draw a new connection on the canvas. */
+  const selectConnections = (reported: string): void => {
+    const policy = offered(CONNECTION_POLICIES, reported);
+    if (policy === undefined) {
+      return;
+    }
+    const changed = builder.graphLayout.setConnectionsPolicy(policy);
+    if (!changed.ok) {
+      setStatus(`Connections "${reported}" were not applied — ${issueSummary(changed.error)}`);
+      return;
+    }
+    setConnections(changed.value);
+    setStatus(`Connections "${changed.value}": ${CONNECTION_POLICY_LABEL[changed.value]}.`);
+  };
+
+  /** Changes whether the node surface paints its port handles. */
+  const selectPorts = (reported: string): void => {
+    const policy = offered(PORTS_POLICIES, reported);
+    if (policy === undefined) {
+      return;
+    }
+    const changed = builder.graphLayout.setPortsPolicy(policy);
+    if (!changed.ok) {
+      setStatus(`Ports "${reported}" were not applied — ${issueSummary(changed.error)}`);
+      return;
+    }
+    setPorts(changed.value);
+    setStatus(`Ports "${changed.value}": ${PORTS_POLICY_LABEL[changed.value]}.`);
+  };
+
+  /** Changes what a structural change arranges by itself. */
+  const selectArrangeOnChange = (reported: string): void => {
+    const policy = offered(ARRANGE_ON_CHANGE_POLICIES, reported);
+    if (policy === undefined) {
+      return;
+    }
+    const changed = builder.graphLayout.setArrangeOnChange(policy);
+    if (!changed.ok) {
+      setStatus(`Arrange on change "${reported}" was not applied — ${issueSummary(changed.error)}`);
+      return;
+    }
+    setArrangeOnChange(changed.value);
+    setStatus(`Arrange on change "${changed.value}": ${ARRANGE_ON_CHANGE_LABEL[changed.value]}.`);
+  };
+
+  /** Changes what removing a node does with the relations it carried. */
+  const selectRemovalPolicy = (reported: string): void => {
+    const policy = offered(REMOVAL_POLICIES, reported);
+    if (policy === undefined) {
+      return;
+    }
+    const changed = builder.graphLayout.setRemovalPolicy(policy);
+    if (!changed.ok) {
+      setStatus(`On remove "${reported}" was not applied — ${issueSummary(changed.error)}`);
+      return;
+    }
+    setRemoval(changed.value);
+    setStatus(`On remove "${changed.value}": ${REMOVAL_POLICY_LABEL[changed.value]}.`);
+  };
+
+  /**
+   * Arranges the selected node and its descendants only.
+   *
+   * The scoped call is the SDK's own: the strategy still ranks the whole graph,
+   * but only `from` and what is reachable from it outward receive a position, in
+   * one history unit. Every other node keeps the place it had.
+   */
+  const arrangeFromSelection = (): void => {
+    if (singleSelectedId === undefined) {
+      setStatus("Select exactly one node to arrange from it.");
+      return;
+    }
+    const result = builder.graph.arrange({
+      ...overrides({ direction, spacing, rankSpacing, strategyId }),
+      from: singleSelectedId,
+    });
+    if (!result.ok) {
+      setStatus(`Arrange from "${singleSelectedId}" was refused — ${issueSummary(result.error)}`);
+      return;
+    }
+    setStatus(
+      `Arranged ${movedLabel(result.value.length)} from "${singleSelectedId}" with ` +
+        `"${strategyId}": only that node and its descendants moved, in one history unit.`,
+    );
+  };
+
+  /**
+   * Removes the selected node through the SDK, so the removal policy applies.
+   *
+   * `builder.graph.removeNode` is the only path `graph.layout.onRemove` governs:
+   * with `"splice"` the node leaves and each predecessor is joined to each
+   * successor inside the same history unit, with `"detach"` its edges leave with
+   * it. The canvas' own Delete key goes through the application use case directly
+   * and is not policy-aware — a framework gap this demo reports instead of
+   * hiding.
+   */
+  const removeSelected = (): void => {
+    if (singleSelectedId === undefined) {
+      setStatus("Select exactly one node to remove it.");
+      return;
+    }
+    const removed = builder.graph.removeNode(singleSelectedId);
+    if (!removed.ok) {
+      setStatus(`Node "${singleSelectedId}" was not removed — ${issueSummary(removed.error)}`);
+      return;
+    }
+    const relations =
+      removal === "splice"
+        ? "and each predecessor was joined to each successor"
+        : "with every edge it carried";
+    setStatus(
+      `Removed "${removed.value.id}" onRemove "${removal}", ${relations}; ` +
+        "one undo restores it.",
+    );
+  };
+
+  /**
+   * Re-creates the seeded graph in place.
+   *
+   * The seeding lives in `builder.ts`, next to the boot sequence, so a reset is
+   * the same graph the demo starts with instead of a second copy that could
+   * drift. Every removal and every creation is its own history unit, and the
+   * edges are dropped first so the result does not depend on `onRemove`.
+   */
+  const resetGraph = (): void => {
+    const issues = resetDemoGraph(builder);
+    if (issues.length > 0) {
+      setStatus(`Reset was refused — ${issueSummary(issues)}`);
+      return;
+    }
+    setStatus(
+      `Reset to the seeded graph. ${arrangementStatus({ direction, spacing, rankSpacing, strategyId })}`,
+    );
   };
 
   /**
@@ -260,8 +494,8 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
    *   node is appended with `builder.graph.addNode({ type, after })` — the anchor
    *   is the node the placeholder followed, or absent on an empty graph — and
    *   then connected to it with `builder.graph.connect`;
-   * - the toolbar "+" (neither): `addNode({ type })` and `mode: "auto"` gives it
-   *   a free slot.
+   * - the palette button (neither): `addNode({ type })`, anchored on the single
+   *   selected node when there is one, so `mode: "auto"` gives it a free slot.
    *
    * The phantom path is **two history units**, not one: create, then connect,
    * because both are separate SDK calls. One `undo()` removes the connecting edge
@@ -340,126 +574,302 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   const dialogOpen = ui.activeDialogId !== undefined;
   const strategies = builder.graphLayout.all();
 
+  // The header reports every option the panel holds, so the state is readable
+  // with the panel collapsed.
+  const summary = [
+    `${shortStrategy(strategyId)} ${direction}`,
+    `spacing ${spacing}/${rankSpacing}`,
+    `drag ${drag}`,
+    `connections ${connections}`,
+    `ports ${ports}`,
+    `arrange on ${arrangeOnChange}`,
+    `remove ${removal}`,
+    `edge "+" ${edgeInsertion ? "on" : "off"}`,
+  ].join(" · ");
+
   return (
     <div className="demo-host">
-      <header className="demo-bar">
+      <header className="demo-header">
         <h1>Nodera layout-switch demo</h1>
-
-        <label className="demo-control">
-          Strategy
-          <select
-            className="demo-select"
-            aria-label="Placement strategy"
-            value={strategyId}
-            onChange={(event) => {
-              selectStrategy(event.target.value);
-            }}
-          >
-            {strategies.map((strategy) => (
-              <option key={strategy.id} value={strategy.id}>
-                {strategy.id}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="demo-control">
-          Direction
-          <select
-            className="demo-select"
-            aria-label="Arrange direction"
-            value={direction}
-            onChange={(event) => {
-              const next = event.target.value;
-              if (DIRECTIONS.some((candidate) => candidate === next)) {
-                setDirection(next as Direction);
-                applyArrangement({
-                  direction: next as Direction,
-                  spacing,
-                  rankSpacing,
-                  strategyId,
-                });
-              }
-            }}
-          >
-            {DIRECTIONS.map((candidate) => (
-              <option key={candidate} value={candidate}>
-                {candidate}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="demo-control">
-          Spacing
-          <input
-            className="demo-number"
-            type="number"
-            min={1}
-            step={20}
-            aria-label="Spacing"
-            value={spacing}
-            onChange={(event) => {
-              setSpacing(event.target.value);
-              applyArrangement({
-                direction,
-                spacing: event.target.value,
-                rankSpacing,
-                strategyId,
-              });
-            }}
-          />
-        </label>
-
-        <label className="demo-control">
-          Rank spacing
-          <input
-            className="demo-number"
-            type="number"
-            min={1}
-            step={20}
-            aria-label="Rank spacing"
-            value={rankSpacing}
-            onChange={(event) => {
-              setRankSpacing(event.target.value);
-              applyArrangement({
-                direction,
-                spacing,
-                rankSpacing: event.target.value,
-                strategyId,
-              });
-            }}
-          />
-        </label>
-
-        <label className="demo-control">
-          Drag
-          <select
-            className="demo-select"
-            aria-label="Manual drag policy"
-            value={dragPolicy}
-            onChange={(event) => {
-              selectDragPolicy(event.target.value);
-            }}
-          >
-            {DRAG_POLICIES.map((candidate) => (
-              <option key={candidate} value={candidate}>
-                {candidate}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button type="button" className="demo-button" onClick={arrange}>
-          Arrange
+        <p className="demo-summary" data-demo-summary="">
+          {summary}
+        </p>
+        <button
+          type="button"
+          className="demo-disclosure"
+          data-demo-control="options"
+          aria-expanded={optionsOpen}
+          aria-controls={OPTIONS_PANEL_ID}
+          onClick={() => {
+            setOptionsOpen(!optionsOpen);
+          }}
+        >
+          <span aria-hidden="true">{optionsOpen ? "▾" : "▸"}</span>
+          {" Options"}
         </button>
-
-        <CreateNodeButton className="demo-button" />
-
-        <span className="demo-control" data-testid="layout-surface">
-          {`surface: connections ${connections} · ports ${ports}`}
-        </span>
       </header>
+
+      <section
+        id={OPTIONS_PANEL_ID}
+        className="demo-options"
+        aria-label="Layout options"
+        hidden={!optionsOpen}
+      >
+        <div className="demo-options-body">
+          <fieldset className="demo-group">
+            <legend>Layout</legend>
+            <div className="demo-group-body">
+              <label className="demo-control">
+                Strategy
+                <select
+                  className="demo-select"
+                  data-demo-control="strategy"
+                  value={strategyId}
+                  onChange={(event) => {
+                    selectStrategy(event.target.value);
+                  }}
+                >
+                  {strategies.map((strategy) => (
+                    <option key={strategy.id} value={strategy.id}>
+                      {strategy.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                Direction
+                <select
+                  className="demo-select"
+                  data-demo-control="direction"
+                  value={direction}
+                  onChange={(event) => {
+                    const next = offered(DIRECTIONS, event.target.value);
+                    if (next === undefined) {
+                      return;
+                    }
+                    setDirection(next);
+                    applyArrangement({ direction: next, spacing, rankSpacing, strategyId });
+                  }}
+                >
+                  {DIRECTIONS.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                Spacing
+                <input
+                  className="demo-number"
+                  type="number"
+                  min={1}
+                  step={20}
+                  data-demo-control="spacing"
+                  value={spacing}
+                  onChange={(event) => {
+                    setSpacing(event.target.value);
+                    applyArrangement({
+                      direction,
+                      spacing: event.target.value,
+                      rankSpacing,
+                      strategyId,
+                    });
+                  }}
+                />
+              </label>
+
+              <label className="demo-control">
+                Rank spacing
+                <input
+                  className="demo-number"
+                  type="number"
+                  min={1}
+                  step={20}
+                  data-demo-control="rank-spacing"
+                  value={rankSpacing}
+                  onChange={(event) => {
+                    setRankSpacing(event.target.value);
+                    applyArrangement({
+                      direction,
+                      spacing,
+                      rankSpacing: event.target.value,
+                      strategyId,
+                    });
+                  }}
+                />
+              </label>
+
+              <label className="demo-control">
+                Arrange on change
+                <select
+                  className="demo-select"
+                  data-demo-control="arrange-on-change"
+                  value={arrangeOnChange}
+                  onChange={(event) => {
+                    selectArrangeOnChange(event.target.value);
+                  }}
+                >
+                  {ARRANGE_ON_CHANGE_POLICIES.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                On remove
+                <select
+                  className="demo-select"
+                  data-demo-control="on-remove"
+                  value={removal}
+                  onChange={(event) => {
+                    selectRemovalPolicy(event.target.value);
+                  }}
+                >
+                  {REMOVAL_POLICIES.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset className="demo-group">
+            <legend>Surface</legend>
+            <div className="demo-group-body">
+              <label className="demo-control">
+                Manual drag
+                <select
+                  className="demo-select"
+                  data-demo-control="drag"
+                  value={drag}
+                  onChange={(event) => {
+                    selectDragPolicy(event.target.value);
+                  }}
+                >
+                  {DRAG_POLICIES.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                Connections
+                <select
+                  className="demo-select"
+                  data-demo-control="connections"
+                  value={connections}
+                  onChange={(event) => {
+                    selectConnections(event.target.value);
+                  }}
+                >
+                  {CONNECTION_POLICIES.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                Ports
+                <select
+                  className="demo-select"
+                  data-demo-control="ports"
+                  value={ports}
+                  onChange={(event) => {
+                    selectPorts(event.target.value);
+                  }}
+                >
+                  {PORTS_POLICIES.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <p className="demo-state" data-demo-state="edge-insertion">
+                {`edge "+" ${edgeInsertion ? "on" : "off"}`}
+              </p>
+              <p className="demo-note">
+                {"Edge insertion is a construction-time flag: "}
+                <code>{"features: { edgeInsertion: true }"}</code>
+                {" in builder.ts is what makes every edge paint the framework's "}
+                <code>{'"+"'}</code>
+                {". A host decides it when it composes the builder, so this panel "}
+                {"reports it instead of pretending to switch it."}
+              </p>
+            </div>
+          </fieldset>
+
+          <fieldset className="demo-group">
+            <legend>Actions</legend>
+            <div className="demo-group-body">
+              <button
+                type="button"
+                className="demo-button"
+                data-demo-control="arrange"
+                onClick={arrange}
+              >
+                Arrange
+              </button>
+
+              <button
+                type="button"
+                className="demo-button"
+                data-demo-control="arrange-from-selection"
+                disabled={singleSelectedId === undefined}
+                onClick={arrangeFromSelection}
+              >
+                {singleSelectedId === undefined
+                  ? "Arrange from selection (select one node)"
+                  : `Arrange from "${singleSelectedId}"`}
+              </button>
+
+              <CreateNodeButton className="demo-button" label="Add node">
+                Add node…
+              </CreateNodeButton>
+
+              <button
+                type="button"
+                className="demo-button"
+                data-demo-control="remove-selection"
+                disabled={singleSelectedId === undefined}
+                onClick={removeSelected}
+              >
+                {singleSelectedId === undefined
+                  ? "Remove node (select one node)"
+                  : `Remove "${singleSelectedId}"`}
+              </button>
+
+              <button
+                type="button"
+                className="demo-button"
+                data-demo-control="reset"
+                onClick={resetGraph}
+              >
+                Reset graph
+              </button>
+
+              <p className="demo-note">
+                {"Removing goes through "}
+                <code>builder.graph.removeNode</code>
+                {", the only path the removal policy applies to; the canvas' own "}
+                {"Delete key goes through the application use case."}
+              </p>
+            </div>
+          </fieldset>
+        </div>
+      </section>
 
       <p className="demo-status" role="status" aria-live="polite">
         {`Strategy: ${strategyId} · ${status}`}
