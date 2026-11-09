@@ -61,6 +61,15 @@ export interface BuilderUiConfiguration {
 }
 
 /**
+ * What a structural change does with the positions the layout owns.
+ *
+ * `"never"` keeps today's rule: only an explicit `Arrange` moves a node.
+ * `"downstream"` arranges the changed node and its descendants after the change,
+ * as its own history unit. Host configuration, never a user toggle.
+ */
+export type ArrangeOnChange = "never" | "downstream";
+
+/**
  * How the builder places nodes: on add, and on an explicit `Arrange`.
  *
  * Configuration only, never a behaviour on its own and never a runtime toggle
@@ -68,7 +77,8 @@ export interface BuilderUiConfiguration {
  * add does with a node that carries no position; `strategy` decides which
  * placement implementation an explicit `builder.graph.arrange()` runs. Neither
  * moves a node on its own, and no add, edge change or read re-lays out an
- * existing graph.
+ * existing graph — unless the host asks for exactly that with
+ * `arrangeOnChange: "downstream"`.
  */
 export interface GraphLayoutConfiguration {
   /** `"free"` (default): the host positions every node. `"auto"`: the builder places the ones left unpositioned. */
@@ -103,6 +113,23 @@ export interface GraphLayoutConfiguration {
    * `builder.graphLayout.setDragPolicy`.
    */
   readonly drag?: "locked" | "snap-back";
+  /**
+   * What a structural change does with the positions the layout owns.
+   *
+   * `"never"` (the default) is today's rule: only an explicit
+   * `builder.graph.arrange()` moves a node. `"downstream"` arranges the node a
+   * successful `insertNode` created — and the target of a successful `connect` —
+   * together with its descendants, **after** the mutation and as its own history
+   * unit, so one undo steps the arrangement back and a second undo steps the
+   * mutation back. An arrangement the strategy refuses never fails the mutation
+   * that triggered it: it is reported on `builder.graph.lastAutoArrangement()`.
+   *
+   * It only takes effect while the layout owns the positions (`mode: "auto"`):
+   * in `"free"` mode the host places every node, so nothing is arranged
+   * automatically. The policy is host configuration, never a user toggle, and can
+   * be changed at runtime with `builder.graphLayout.setArrangeOnChange`.
+   */
+  readonly arrangeOnChange?: ArrangeOnChange;
   /**
    * Whether a person may draw a new connection on the canvas.
    *

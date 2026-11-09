@@ -575,6 +575,9 @@ Two further fields declare the surface of the same graph: `connections`
 (`"editable" | "fixed"`, default `"editable"`) and `ports`
 (`"visible" | "hidden"`, default `"visible"`) — see
 [Connections and ports](#connections-and-ports--graphlayoutconnections--graphlayoutports).
+A third pair declares what a structural change arranges: `arrangeOnChange`
+(`"never" | "downstream"`, default `"never"`) — see
+[Automatic downstream arrangement](#automatic-downstream-arrangement--graphlayoutarrangeonchange--setarrangeonchange).
 
 The assigned position belongs to the same history unit as the creation: `undo()`
 removes the node, `redo()` restores it where it was. A value outside these
@@ -585,7 +588,9 @@ created: nothing is guessed and no geometry is invented.
 
 Re-laying out an existing graph is **not** part of the add: adding an edge or a
 node never recalculates the whole graph. That is `graph.arrange()`, the explicit
-`Arrange` command described below.
+`Arrange` command described below. The one thing a structural change may write on
+its own is the position of the node it touched and its descendants, and only when
+the host declares `arrangeOnChange: "downstream"`.
 
 #### Where `mode: "auto"` puts the new node — `AddNodeRequest.after`
 
@@ -689,6 +694,57 @@ At construction an unknown value is `sdk.invalid-input` at
 runtime the same code and path is returned and the previous policy stays, with
 the UI state and its subscribers untouched.
 
+#### Automatic downstream arrangement — `graph.layout.arrangeOnChange` / `setArrangeOnChange`
+
+`graph.layout.arrangeOnChange` declares what a **structural change** does with the
+positions the layout owns. It is host configuration — never a control the
+framework puts in front of a user — and it is the only thing that moves a node
+without an explicit `Arrange`:
+
+| Policy | Declared as | What a structural change does |
+| --- | --- | --- |
+| `"never"` (default) | nothing, or `graph.layout.arrangeOnChange: "never"` | Today's behaviour, byte for byte: only `builder.graph.arrange()` moves a node. |
+| `"downstream"` | `graph.layout.arrangeOnChange: "downstream"` | After a successful `insertNode` and after a successful `connect`: **a second history unit** that arranges the touched node (`insertNode`: the one it created, `connect`: the new edge's target) and its descendants. Nothing else moves. |
+
+```ts
+createBuilder({ graph: { layout: { mode: "auto", arrangeOnChange: "downstream" } } });
+
+const insertion = assertValid(builder.graph.insertNode({ edgeId, type: "acme.retry" }));
+// history: the insertion, then the arrangement — one `undo()` each
+builder.graph.lastAutoArrangement(); // what the second unit did
+```
+
+Four properties are deliberate:
+
+- **The layout must own the positions.** The policy only takes effect in
+  `mode: "auto"`; in `"free"` mode the host places every node, so nothing is
+  arranged automatically, and `setArrangeOnChange` still reports what it stored.
+- **It is a second unit, never folded into the mutation.** One `undo()` steps the
+  arrangement back and a second one steps the deletion away, so a host never loses
+  the insertion because of a geometry write it did not request.
+- **It never fails the mutation.** A strategy that answers a diagnostic, or a
+  position the use case rejects, leaves the insertion or the edge exactly where it
+  is; the refusal is reported by `builder.graph.lastAutoArrangement()`, which
+  answers `"skipped"` / `"arranged"` (with the placed nodes) / `"refused"` (with
+  the structured issues). `connect` returns its edge and `insertNode` its node and
+  edges, so this read is how the SDK reports the second unit without changing
+  those results.
+- **A bare `addNode` arranges nothing.** An unconnected node has no downstream and
+  an edge change is what makes the hierarchy, so an add only takes its anchored
+  slot.
+
+```ts
+builder.graphLayout.arrangeOnChange();          // "never" | "downstream"
+assertOk(builder.graphLayout.setArrangeOnChange("downstream"));
+```
+
+Unlike the drag, connections and ports policies, this one is not presentation
+state: it decides what the SDK writes to the document, so it lives in the builder
+and never touches `builder.store`. A value outside the union is refused and the
+stored one stays: at construction it is `sdk.invalid-input` at
+`graph.layout.arrangeOnChange` and no builder is created; at runtime it is the
+same code and path, and the next mutation keeps behaving as before.
+
 ### Graph layout strategies — `builder.graphLayout`
 
 `builder.graph.arrange()` is explicit and all-or-nothing: it asks the selected
@@ -703,6 +759,27 @@ const arranged = assertOk(builder.graph.arrange());
 
 builder.graph.undo(); // every previous position, in one step
 ```
+
+### Scoped arrangement — `arrange({ from })`
+
+`arrange({ from })` decides **which computed positions are written**, not which
+ones are computed: the strategy still answers for the whole graph — a rank is a
+property of all of it — and the SDK writes only `from` and the nodes reachable
+from it by following edges **outward**, transitively. An edge that points *into*
+`from` never pulls its source into the subset, a cycle is harmless, and every
+other node keeps the position it had, untouched.
+
+```ts
+const moved = assertOk(builder.graph.arrange({ from: "node-fetch" }));
+// moved: the fetch node and everything downstream of it — nothing else
+builder.graph.undo(); // one step: every position that subset wrote is back
+```
+
+The return value is the written subset, still as **one** history unit, so one
+`undo()` restores exactly what the call changed. An unknown `from` is
+`sdk.invalid-input` at path `from` and moves nothing; a malformed one is the same
+code and path instead of a thrown `RangeError`. Without `from` the call arranges
+the whole graph exactly as before.
 
 A call may override the configured direction and spacings **for that one
 arrange**, and persists nothing: the next call without a request reads
@@ -728,9 +805,10 @@ nothing.
 
 Members of `builder.graphLayout`: `register(strategy)`, `setDefault(id)`,
 `active()` (the selected id), `all()` (every registered strategy), the drag policy
-pair `dragPolicy()` / `setDragPolicy(policy)` and the surface pairs
+pair `dragPolicy()` / `setDragPolicy(policy)`, the surface pairs
 `connectionsPolicy()` / `setConnectionsPolicy(policy)` and `portsPolicy()` /
-`setPortsPolicy(policy)` described above. The built-ins are
+`setPortsPolicy(policy)` and the automatic arrangement pair `arrangeOnChange()` /
+`setArrangeOnChange(policy)`, all described above. The built-ins are
 `nodera.graph-layout.free` (no-op) and `nodera.graph-layout.layered` (rank by
 longest path, in-rank order by node id, no crossing minimization); a used id is a
 `sdk.duplicate-id` and an unknown one is refused, so a plugin never shadows the

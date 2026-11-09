@@ -419,6 +419,137 @@ describe("graph arrange: per-call overrides", () => {
   });
 });
 
+/**
+ * Two chains and one upstream source: `up --> a --> b --> c` and `x --> y`.
+ *
+ * It has everything a scoped arrangement has to tell apart: an origin with
+ * transitive descendants, an edge pointing **into** the origin, and a branch
+ * that shares nothing with it but the strategy's answer.
+ */
+function branched(builder: Builder): void {
+  const coordinates: Readonly<Record<string, number>> = {
+    up: 100,
+    a: 200,
+    b: 300,
+    c: 400,
+    x: 500,
+    y: 600,
+  };
+  for (const [nodeId, coordinate] of Object.entries(coordinates)) {
+    added(builder, nodeId, { x: coordinate, y: coordinate });
+  }
+  connected(builder, "up", "a");
+  connected(builder, "a", "b");
+  connected(builder, "b", "c");
+  connected(builder, "x", "y");
+}
+
+function arrangedFrom(
+  builder: Builder,
+  from: string,
+): readonly NodeInstanceView[] {
+  const result = builder.graph.arrange({ from });
+  if (!result.ok) {
+    throw new Error(
+      `unexpected scoped arrange failure: ${result.error.map((issue) => issue.code).join(", ")}`,
+    );
+  }
+  return result.value;
+}
+
+describe("graph arrange: a scoped request", () => {
+  it("writes the origin and its descendants and leaves every other node where it was", () => {
+    const builder = builderWith();
+    branched(builder);
+
+    const moved = arrangedFrom(builder, "a");
+
+    expect(moved.map((node) => node.id)).toEqual(["a", "b", "c"]);
+    expect(positions(builder)).toEqual({
+      up: { x: 100, y: 100 },
+      a: { x: 240, y: 0 },
+      b: { x: 480, y: 0 },
+      c: { x: 720, y: 0 },
+      x: { x: 500, y: 500 },
+      y: { x: 600, y: 600 },
+    });
+  });
+
+  it("moves only the node itself when the origin is a leaf", () => {
+    const builder = builderWith();
+    branched(builder);
+
+    expect(arrangedFrom(builder, "c").map((node) => node.id)).toEqual(["c"]);
+    expect(positions(builder)).toEqual({
+      up: { x: 100, y: 100 },
+      a: { x: 200, y: 200 },
+      b: { x: 300, y: 300 },
+      c: { x: 720, y: 0 },
+      x: { x: 500, y: 500 },
+      y: { x: 600, y: 600 },
+    });
+  });
+
+  it("applies every written position as one history unit", () => {
+    const builder = builderWith();
+    branched(builder);
+
+    arrangedFrom(builder, "a");
+    expect(builder.graph.undo()).toBe(true);
+    expect(positions(builder)).toEqual({
+      up: { x: 100, y: 100 },
+      a: { x: 200, y: 200 },
+      b: { x: 300, y: 300 },
+      c: { x: 400, y: 400 },
+      x: { x: 500, y: 500 },
+      y: { x: 600, y: 600 },
+    });
+
+    expect(builder.graph.redo()).toBe(true);
+    expect(positions(builder)).toEqual({
+      up: { x: 100, y: 100 },
+      a: { x: 240, y: 0 },
+      b: { x: 480, y: 0 },
+      c: { x: 720, y: 0 },
+      x: { x: 500, y: 500 },
+      y: { x: 600, y: 600 },
+    });
+  });
+
+  it("refuses an unknown origin, moves nothing and pushes no history entry", () => {
+    const builder = builderWith();
+    branched(builder);
+    const before = positions(builder);
+
+    const result = builder.graph.arrange({ from: "missing" });
+    if (result.ok) {
+      throw new Error("expected the unknown origin to be refused");
+    }
+    expect(result.error[0]?.code).toBe("sdk.invalid-input");
+    expect(result.error[0]?.path).toEqual(["from"]);
+    expect(result.error[0]?.message).toContain("missing");
+    expect(positions(builder)).toEqual(before);
+
+    // The refusal pushed nothing: one undo still reverts the last connect.
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.nodeCount()).toBe(6);
+    expect(builder.graph.edgeCount()).toBe(3);
+  });
+
+  it("refuses a malformed origin id instead of throwing", () => {
+    const builder = builderWith();
+    branched(builder);
+
+    const result = builder.graph.arrange({ from: "not an id" });
+    if (result.ok) {
+      throw new Error("expected the malformed origin to be refused");
+    }
+    expect(result.error[0]?.code).toBe("sdk.invalid-input");
+    expect(result.error[0]?.path).toEqual(["from"]);
+    expect(builder.graph.nodes().every((node) => node.position === undefined)).toBe(false);
+  });
+});
+
 describe("graph arrange: lifecycle", () => {
   it("refuses to arrange with an override on a disposed builder", () => {
     const builder = builderWith();

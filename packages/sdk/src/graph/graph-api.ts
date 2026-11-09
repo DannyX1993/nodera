@@ -38,9 +38,11 @@ import {
 } from "@nodera/application";
 import type {
   GraphLayoutDiagnostic,
+  GraphLayoutPlacedNode,
   LayoutStrategyRegistry,
 } from "@nodera/graph-layout";
 import type { ValidationLevel, ValidationReport } from "@nodera/validation";
+import type { ArrangeOnChange } from "../builder/configuration.js";
 import {
   disposedIssue,
   isPlainObject,
@@ -142,20 +144,55 @@ export interface ArrangeRequest {
   readonly spacing?: number;
   /** Distance between consecutive ranks; defaults to the configured rank spacing. */
   readonly rankSpacing?: number;
+  /**
+   * Node the arrangement starts from: only it and its descendants are written.
+   *
+   * The strategy still computes the whole answer — there is no incremental
+   * ranker and none is needed — but the document (and the history) only receives
+   * the positions of `from` and of the nodes reachable from it by following
+   * edges **outward**, transitively, over the graph's edges. Every other node
+   * keeps the position it had, untouched. Omitting `from` arranges the whole
+   * graph, exactly as before.
+   *
+   * An id the graph does not contain is refused with `sdk.invalid-input` at path
+   * `from`, and nothing moves. The written subset is still one history unit.
+   */
+  readonly from?: string;
 }
 
 /**
- * What an explicit `Arrange` reads from the composition: the registry the
- * selected strategy is resolved from, and the rank distance the host declared.
+ * What the automatic downstream arrangement did after a structural change.
+ *
+ * `"skipped"` is the default, and the answer whenever the policy did not apply:
+ * `graph.layout.arrangeOnChange` is `"never"`, the layout does not own the
+ * positions (`mode: "free"`), or the mutation never attempted an arrangement
+ * (`addNode` does not arrange). `"arranged"` carries the nodes whose position
+ * was written; `"refused"` carries the strategy or use case diagnostics, and the
+ * mutation that triggered it stands, because the arrangement is a second history
+ * unit of its own.
+ */
+export type AutoArrangeOutcome =
+  | { readonly outcome: "skipped" }
+  | { readonly outcome: "arranged"; readonly nodes: readonly NodeInstanceView[] }
+  | { readonly outcome: "refused"; readonly issues: SdkIssues };
+
+/**
+ * What an explicit `Arrange` — and the automatic policy — reads from the
+ * composition: the registry the selected strategy is resolved from, the rank
+ * distance the host declared and the policy in effect today.
  *
  * The registry is passed instead of a resolved strategy so a host that selects
  * another strategy after construction (`builder.graphLayout.setDefault`) changes
- * what the very next `arrange()` runs, with no re-composition.
+ * what the very next `arrange()` runs, with no re-composition. The policy is read
+ * through a function for the same reason: `builder.graphLayout.setArrangeOnChange`
+ * changes what the next structural change does.
  */
 export interface ArrangeSettings {
   readonly strategies: LayoutStrategyRegistry;
   /** Distance between consecutive ranks; `graph.layout.rankSpacing ?? spacing`. */
   readonly rankSpacing: number;
+  /** Policy `graph.layout.arrangeOnChange` in effect today. */
+  readonly arrangeOnChange: () => ArrangeOnChange;
 }
 
 /**
@@ -193,8 +230,26 @@ export interface BuilderGraphApi {
    * definition, a taken instance id or a definition without a usable input /
    * output port come back as the use case's own structured diagnostic. Nothing is
    * written, pushed or emitted when any of them refuses.
+   *
+   * With `graph.layout.arrangeOnChange: "downstream"` and `mode: "auto"` the
+   * insertion is followed by a **second** history unit: the inserted node and its
+   * descendants are arranged (see {@link BuilderGraphApi.arrange}). One `undo()`
+   * steps the arrangement back and a second one removes the insertion, because
+   * folding the geometry into the mutation would hide a write behind an operation
+   * that did not ask for it. The mutation never fails because of it; a refused
+   * arrangement is reported by {@link BuilderGraphApi.lastAutoArrangement}.
    */
   insertNode(request: InsertNodeRequest): Result<InsertNodeResult, SdkIssues>;
+  /**
+   * Creates one edge between two node instances.
+   *
+   * With `graph.layout.arrangeOnChange: "downstream"` and `mode: "auto"` a
+   * successful connection is followed by a second history unit that arranges the
+   * new edge's **target** and its descendants: the node whose position the new
+   * relation changes. The edge is returned whatever happened to the arrangement;
+   * read {@link BuilderGraphApi.lastAutoArrangement} for that second unit. With
+   * `"never"` — the default — nothing but the edge is written.
+   */
   connect(request: ConnectRequest): Result<EdgeInstanceView, SdkIssues>;
   disconnect(edgeId: string): Result<EdgeInstanceView, SdkIssues>;
   /**
@@ -211,8 +266,29 @@ export interface BuilderGraphApi {
    * spacing that is not a positive finite number is `sdk.invalid-input` at its
    * field path, nothing is applied, and the next call without a request uses
    * the configured values again (S16).
+   *
+   * `request.from` scopes the **writes**, never the computation (S18). The
+   * strategy is still asked about the whole graph, because a rank is a property
+   * of the whole graph that an incremental ranker would have to reinvent; what
+   * changes is that only `from` and its descendants — reachable over the graph's
+   * edges outward, transitively — receive their computed position. Every other
+   * node keeps the position the document holds, and the written subset is still
+   * one history unit. Without `from` the answer is exactly what it was before.
    */
   arrange(request?: ArrangeRequest): Result<readonly NodeInstanceView[], SdkIssues>;
+  /**
+   * What the automatic downstream arrangement did after the last structural
+   * change, i.e. the second unit of `insertNode` and `connect`.
+   *
+   * It answers `"skipped"` when the policy did not apply (`"never"`,
+   * `mode: "free"`, or no `insertNode`/`connect` happened yet), `"arranged"` with
+   * the nodes it placed, and `"refused"` with the structured diagnostics when the
+   * strategy or a position was rejected — in which case the mutation that
+   * triggered it stands, because the two are separate history units. `connect`
+   * returns its edge and `insertNode` its node and edges, so this read is how the
+   * framework reports the second unit without changing those results.
+   */
+  lastAutoArrangement(): AutoArrangeOutcome;
   /** Every node of the graph, in the §9 instance vocabulary. */
   nodes(): readonly NodeInstanceView[];
   /** Every edge of the graph, flat, in the §9 instance vocabulary. */
@@ -521,6 +597,200 @@ function unknownAnchorIssue(anchorId: string): SdkIssue {
 }
 
 /**
+ * Issue for an `arrange` origin (`ArrangeRequest.from`) that is not in the graph.
+ *
+ * A scoped arrangement never guesses a subset it cannot resolve: the call is
+ * refused at the field the caller wrote and no position is applied.
+ */
+function unknownArrangeOriginIssue(fromId: string): SdkIssue {
+  return {
+    ...sdkError(
+      "sdk.invalid-input",
+      `Graph has no node with id "${fromId}" to arrange from`,
+      {
+        path: ["from"],
+        metadata: {
+          value: fromId,
+          useCaseCode: "node-not-found",
+          elementId: fromId,
+        },
+      },
+    ),
+    severity: "error",
+  };
+}
+
+/**
+ * Ids of `from` and of everything reachable from it by following edges outward.
+ *
+ * The reachability is transitive and direction-sensitive: an edge
+ * `source --> target` puts `target` downstream of `source`, so an edge pointing
+ * **into** the origin never pulls its source into the written subset. Cycles are
+ * harmless — the visited set is the loop guard — and every id is visited once,
+ * so the walk is linear in the edges of the graph.
+ */
+function downstreamNodeIds(editor: EditorEngine, from: string): ReadonlySet<string> {
+  const adjacency = new Map<string, string[]>();
+  for (const edge of editor.graph.getEdges()) {
+    const source = edge.connection.source.nodeId;
+    const targets = adjacency.get(source);
+    if (targets === undefined) {
+      adjacency.set(source, [edge.connection.target.nodeId]);
+    } else {
+      targets.push(edge.connection.target.nodeId);
+    }
+  }
+  const reachable = new Set<string>([from]);
+  const pending: string[] = [from];
+  for (let index = 0; index < pending.length; index += 1) {
+    const current = pending[index];
+    if (current === undefined) {
+      continue;
+    }
+    for (const target of adjacency.get(current) ?? []) {
+      if (reachable.has(target)) {
+        continue;
+      }
+      reachable.add(target);
+      pending.push(target);
+    }
+  }
+  return reachable;
+}
+
+/** One strategy answer, and the id it came from so diagnostics can name it. */
+interface PlacementAnswer {
+  readonly strategyId: string;
+  readonly positions: readonly GraphLayoutPlacedNode[];
+}
+
+/**
+ * Asks the selected strategy where the nodes of the whole graph go.
+ *
+ * It is the one place that resolves the strategy, translates the graph into
+ * plain data and reads the configured direction and spacings, so an explicit
+ * `arrange` and the automatic policy always compute the same whole answer. The
+ * per-call overrides win for this one call and are never written back (S16).
+ */
+function computePlacement(
+  editor: EditorEngine,
+  graphLayout: ResolvedGraphLayout,
+  settings: ArrangeSettings,
+  request?: ArrangeRequest | undefined,
+): Result<PlacementAnswer, SdkIssues> {
+  const strategyId = settings.strategies.defaultStrategyId;
+  const strategy = settings.strategies.get(strategyId);
+  if (strategy === undefined) {
+    return err([
+      unknownLayoutStrategyIssue(
+        strategyId,
+        settings.strategies.all().map((registered) => registered.id),
+        ["graph", "layout", "strategy"],
+      ),
+    ]);
+  }
+  // The graph is read here, not passed in: the strategy never sees a graph
+  // instance, a node class or a canvas, only plain data (S11).
+  const placed = strategy.place({
+    nodes: editor.graph.getNodes().map((node) => ({
+      id: node.id,
+      ...(node.position === undefined ? {} : { position: node.position }),
+    })),
+    edges: editor.graph.getEdges().map((edge) => ({
+      source: edge.connection.source.nodeId,
+      target: edge.connection.target.nodeId,
+    })),
+    options: {
+      direction: request?.direction ?? graphLayout.direction,
+      nodeSpacing: request?.spacing ?? graphLayout.spacing,
+      rankSpacing: request?.rankSpacing ?? settings.rankSpacing,
+      scope: "all",
+    },
+  });
+  return placed.ok
+    ? ok({ strategyId, positions: placed.value.positions })
+    : err([strategyDiagnosticIssue(placed.error, strategyId)]);
+}
+
+/**
+ * Applies the requested positions as one history unit through the use case.
+ *
+ * The subset arrives already decided: the use case validates what it is handed
+ * and writes exactly that, so an empty list stays an honest no-op that pushes no
+ * history entry.
+ */
+function applyPositions(
+  editor: EditorEngine,
+  positions: readonly GraphLayoutPlacedNode[],
+): Result<readonly NodeInstanceView[], SdkIssues> {
+  const applied = arrangeGraph(editor, {
+    moves: positions.map((entry) => ({
+      nodeId: entry.nodeId,
+      position: entry.position,
+    })),
+  });
+  return applied.ok
+    ? ok(applied.value.map(toNodeInstanceView))
+    : err([useCaseIssue(applied.error)]);
+}
+
+/**
+ * The computed positions of `from` and its descendants, in strategy order.
+ *
+ * The reachability is computed once for the call, not per position: it is a walk
+ * over the graph, while the answer is already in hand.
+ */
+function scopedTo(
+  editor: EditorEngine,
+  from: string,
+  positions: readonly GraphLayoutPlacedNode[],
+): readonly GraphLayoutPlacedNode[] {
+  const reachable = downstreamNodeIds(editor, from);
+  return positions.filter((entry) => reachable.has(entry.nodeId));
+}
+
+/**
+ * Arranges `from` and its descendants, or reports why it could not.
+ *
+ * The whole answer is computed and the subset is what gets written, which is the
+ * only scope that matters: every position written is document state and history
+ * (L6). It is one use case call, so it is one history unit — the second one after
+ * the mutation that triggered it, never folded into it.
+ */
+function arrangeDownstream(
+  editor: EditorEngine,
+  graphLayout: ResolvedGraphLayout,
+  settings: ArrangeSettings,
+  from: string,
+): AutoArrangeOutcome {
+  const computed = computePlacement(editor, graphLayout, settings);
+  if (!computed.ok) {
+    return { outcome: "refused", issues: computed.error };
+  }
+  const written = applyPositions(
+    editor,
+    scopedTo(editor, from, computed.value.positions),
+  );
+  return written.ok
+    ? { outcome: "arranged", nodes: written.value }
+    : { outcome: "refused", issues: written.error };
+}
+
+/**
+ * The automatic policy in effect.
+ *
+ * It only applies when the layout owns the positions: in `"free"` mode the host
+ * places every node, so arranging automatically would move a graph nobody asked
+ * the builder to own.
+ */
+function autoArrangePolicy(
+  graphLayout: ResolvedGraphLayout,
+  settings: ArrangeSettings,
+): ArrangeOnChange {
+  return graphLayout.mode === "auto" ? settings.arrangeOnChange() : "never";
+}
+
+/**
  * Builds the graph facade of a builder over its editing session.
  *
  * The editor owns the graph, the history and the events; this API owns only
@@ -533,7 +803,10 @@ function unknownAnchorIssue(anchorId: string): SdkIssue {
  * in `after` — never from a selection or a canvas, which this boundary cannot
  * see. `arrange` is the explicit opposite of that: it asks the selected strategy
  * about the whole graph and applies the answer as one history unit, with the
- * direction and spacings the call overrides, if any.
+ * direction and spacings the call overrides, if any. `arrange({ from })` narrows
+ * what is **written** to the origin and its descendants while the answer stays
+ * whole, and `graph.layout.arrangeOnChange: "downstream"` reuses that same scoped
+ * write after an `insertNode` or a `connect`, as a history unit of its own.
  * `isDisposed` is the builder's own lifecycle flag: a disposed builder refuses
  * every mutation with `sdk.disposed` and keeps every read working, because the
  * state the host already received must stay renderable.
@@ -544,6 +817,18 @@ export function createGraphApi(
   graphLayout: ResolvedGraphLayout,
   arrangeSettings: ArrangeSettings,
 ): BuilderGraphApi {
+  // What the automatic policy did after the latest structural change. It lives
+  // here, next to the mutations that produce it, because `connect` answers its
+  // edge and `insertNode` its node and edges: neither result can carry the second
+  // unit without changing a published shape.
+  let lastArrangement: AutoArrangeOutcome = { outcome: "skipped" };
+
+  /** Arranges `nodeId` and its descendants when the policy asks for it. */
+  const arrangeAfter = (nodeId: string): AutoArrangeOutcome =>
+    autoArrangePolicy(graphLayout, arrangeSettings) === "never"
+      ? { outcome: "skipped" }
+      : arrangeDownstream(editor, graphLayout, arrangeSettings, nodeId);
+
   return {
     addNode(request: AddNodeRequest): Result<NodeInstanceView, SdkIssues> {
       const closed = closedIssues(isDisposed, "graph.addNode");
@@ -691,6 +976,9 @@ export function createGraphApi(
       if (!inserted.ok) {
         return err([useCaseIssue(inserted.error)]);
       }
+      // The insertion already succeeded, so the automatic arrangement is a
+      // second history unit and can never fail this call.
+      lastArrangement = arrangeAfter(inserted.value.node.id);
       const edges: readonly [EdgeInstanceView, EdgeInstanceView] = [
         toEdgeInstanceView(inserted.value.edges[0]),
         toEdgeInstanceView(inserted.value.edges[1]),
@@ -741,7 +1029,14 @@ export function createGraphApi(
         ...(request.type === undefined ? {} : { definitionId: request.type }),
         ...(request.label === undefined ? {} : { label: request.label }),
       });
-      return connected.ok ? ok(toEdgeInstanceView(connected.value)) : err([useCaseIssue(connected.error)]);
+      if (!connected.ok) {
+        return err([useCaseIssue(connected.error)]);
+      }
+      // The new relation changes where its target sits, so that node and what
+      // hangs off it are what a downstream arrangement writes — again as its own
+      // unit, which cannot fail the connection.
+      lastArrangement = arrangeAfter(request.target);
+      return ok(toEdgeInstanceView(connected.value));
     },
 
     disconnect(edgeId: string): Result<EdgeInstanceView, SdkIssues> {
@@ -768,58 +1063,39 @@ export function createGraphApi(
       if (closed !== undefined) {
         return err(closed);
       }
-      const invalid = request === undefined ? undefined : arrangeRequestIssues(request);
+      const invalid =
+        request === undefined
+          ? undefined
+          : arrangeRequestIssues(request) ??
+            (request.from === undefined
+              ? undefined
+              : identifierIssues("Arrange origin node", request.from, ["from"]));
       if (invalid !== undefined) {
         return err(invalid);
       }
-      const strategyId = arrangeSettings.strategies.defaultStrategyId;
-      const strategy = arrangeSettings.strategies.get(strategyId);
-      if (strategy === undefined) {
-        return err([
-          unknownLayoutStrategyIssue(
-            strategyId,
-            arrangeSettings.strategies.all().map((registered) => registered.id),
-            ["graph", "layout", "strategy"],
-          ),
-        ]);
+      // The origin is resolved before the strategy runs: an id the graph does not
+      // hold is a refusal, never a subset the SDK guesses.
+      const from = request?.from;
+      if (from !== undefined && editor.getNode(from) === undefined) {
+        return err([unknownArrangeOriginIssue(from)]);
       }
-      // The overrides win for this one call and are never written back, so the
-      // configuration stays exactly what the host declared (S16).
-      const direction = request?.direction ?? graphLayout.direction;
-      const nodeSpacing = request?.spacing ?? graphLayout.spacing;
-      const rankSpacing = request?.rankSpacing ?? arrangeSettings.rankSpacing;
-      // The graph is read here, not passed in: the strategy never sees a graph
-      // instance, a node class or a canvas, only plain data (S11).
-      const placed = strategy.place({
-        nodes: editor.graph.getNodes().map((node) => ({
-          id: node.id,
-          ...(node.position === undefined ? {} : { position: node.position }),
-        })),
-        edges: editor.graph.getEdges().map((edge) => ({
-          source: edge.connection.source.nodeId,
-          target: edge.connection.target.nodeId,
-        })),
-        options: {
-          direction,
-          nodeSpacing,
-          rankSpacing,
-          scope: "all",
-        },
-      });
-      if (!placed.ok) {
-        return err([strategyDiagnosticIssue(placed.error, strategyId)]);
+      const computed = computePlacement(editor, graphLayout, arrangeSettings, request);
+      if (!computed.ok) {
+        return err(computed.error);
       }
-      // One use case, one history unit, all-or-nothing: the answer is applied
-      // entirely or not at all, so one undo restores every previous position.
-      const applied = arrangeGraph(editor, {
-        moves: placed.value.positions.map((entry) => ({
-          nodeId: entry.nodeId,
-          position: entry.position,
-        })),
-      });
-      return applied.ok
-        ? ok(applied.value.map(toNodeInstanceView))
-        : err([useCaseIssue(applied.error)]);
+      // A scoped request decides which computed positions are **written**; the
+      // answer itself is always the whole graph, because a rank is a property of
+      // all of it. One use case, one history unit, all-or-nothing: the written
+      // subset is applied entirely or not at all.
+      const written =
+        from === undefined
+          ? computed.value.positions
+          : scopedTo(editor, from, computed.value.positions);
+      return applyPositions(editor, written);
+    },
+
+    lastAutoArrangement(): AutoArrangeOutcome {
+      return lastArrangement;
     },
 
     edges(): readonly EdgeInstanceView[] {

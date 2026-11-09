@@ -28,7 +28,11 @@ import {
   type DragPolicy,
   type PortsPolicy,
 } from "./builder.js";
-import type { BuilderConfiguration, GraphLayoutConfiguration } from "./configuration.js";
+import type {
+  ArrangeOnChange,
+  BuilderConfiguration,
+  GraphLayoutConfiguration,
+} from "./configuration.js";
 
 const NodeRenderer = (): null => null;
 const OtherNodeRenderer = (): null => null;
@@ -1274,5 +1278,81 @@ describe("graph layout connections and ports policy", () => {
     expect(!otherRefused.ok && otherRefused.error[0]?.code).toBe("sdk.disposed");
     expect(builder.graphLayout.connectionsPolicy()).toBe("editable");
     expect(builder.graphLayout.portsPolicy()).toBe("visible");
+  });
+});
+
+describe("graph layout arrangeOnChange policy", () => {
+  it("arranges nothing automatically by default", () => {
+    expect(create().graphLayout.arrangeOnChange()).toBe("never");
+    expect(create({ graph: { layout: { mode: "auto" } } }).graphLayout.arrangeOnChange()).toBe(
+      "never",
+    );
+  });
+
+  it("declares the downstream policy from configuration", () => {
+    const builder = create({
+      graph: { layout: { mode: "auto", arrangeOnChange: "downstream" } },
+    });
+
+    expect(builder.graphLayout.arrangeOnChange()).toBe("downstream");
+  });
+
+  const refusedPolicies: readonly unknown[] = ["always", "", true, 42, null];
+  it.each(refusedPolicies)(
+    "refuses the arrangeOnChange policy %s at graph.layout.arrangeOnChange and creates no builder",
+    (arrangeOnChange) => {
+      const issues = fail({
+        graph: {
+          layout: { arrangeOnChange } as unknown as GraphLayoutConfiguration,
+        },
+      });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({
+        code: "sdk.invalid-input",
+        path: ["graph", "layout", "arrangeOnChange"],
+      });
+    },
+  );
+
+  it("round-trips the policy through the getter and the setter", () => {
+    const builder = create({
+      graph: { layout: { mode: "auto", arrangeOnChange: "downstream" } },
+    });
+
+    expect(builder.graphLayout.arrangeOnChange()).toBe("downstream");
+
+    const turnedOff = builder.graphLayout.setArrangeOnChange("never");
+    expect(turnedOff.ok && turnedOff.value).toBe("never");
+    expect(builder.graphLayout.arrangeOnChange()).toBe("never");
+
+    const turnedOn = builder.graphLayout.setArrangeOnChange("downstream");
+    expect(turnedOn.ok && turnedOn.value).toBe("downstream");
+    expect(builder.graphLayout.arrangeOnChange()).toBe("downstream");
+  });
+
+  it("refuses an unknown policy at runtime and keeps the stored one", () => {
+    const builder = create({
+      graph: { layout: { mode: "auto", arrangeOnChange: "downstream" } },
+    });
+
+    const refused = builder.graphLayout.setArrangeOnChange("always" as ArrangeOnChange);
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["graph", "layout", "arrangeOnChange"],
+    });
+    expect(builder.graphLayout.arrangeOnChange()).toBe("downstream");
+  });
+
+  it("refuses a policy change on a disposed builder", () => {
+    const builder = create();
+    builder.dispose();
+
+    const refused = builder.graphLayout.setArrangeOnChange("downstream");
+
+    expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
+    expect(builder.graphLayout.arrangeOnChange()).toBe("never");
   });
 });

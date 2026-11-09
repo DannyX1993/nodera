@@ -20,8 +20,9 @@ nothing moves unless the host asks.
 | --- | --- |
 | `mode: "free"` (the default) | The host. A node added without a position keeps no position; the canvas adapter decides how to render it until the host places it. |
 | `mode: "auto"` | The builder, and only for the nodes the host left unpositioned: the first free slot **forward** of the anchor the host names (`AddNodeRequest.after`), or the slot one step past the graph's extent when there is no anchor, at add time. A node that already carries a position is never moved. |
-| `Arrange` (explicit) | The selected strategy, for every node of the graph, when the host calls `builder.graph.arrange()`. One history unit. |
-| Edge insertion (`builder.graph.insertNode`) | The builder, in `mode: "auto"`, anchored on the edge's **source**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node and the two edges that replace the original. |
+| `Arrange` (explicit) | The selected strategy, for the whole graph when the host calls `builder.graph.arrange()`, or only for `from` and its descendants with `arrange({ from })`. One history unit either way. |
+| Downstream auto (`insertNode`, `connect`) | The selected strategy, for the node the change touched and its descendants, when the host declares `graph.layout.arrangeOnChange: "downstream"`. **A second** history unit, applied after the mutation (see [Automatic downstream arrangement](#automatic-downstream-arrangement)). |
+| Edge insertion (`builder.graph.insertNode`) | The builder, in `mode: "auto"`, anchored on the edge's **source**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node and the two edges that replace the original — plus, with `arrangeOnChange: "downstream"`, a second one for the downstream arrangement. |
 | Phantom "+" (`addNode({ after })` + `connect`) | The builder, in `mode: "auto"`, anchored on the node the placeholder followed — exactly the `after` rule. **Two** history units: the node, then the edge, because both are separate SDK calls (see [The phantom empty state](#the-phantom-empty-state)). |
 
 A host that declares a ranked layout applies it once at boot — compose, seed, then
@@ -33,7 +34,9 @@ explicit call.
 Three invariants hold in every mode:
 
 - **No framework default moves a node.** There is no automatic re-layout on an
-  add, on an edge change or on a read.
+  add, on an edge change or on a read. The one write a structural change may make
+  on its own is the node it touched and its descendants, and only when the host
+  declares `arrangeOnChange: "downstream"`.
 - **A position that exists is never overwritten implicitly.** `auto` places only
   the absent ones; replacing existing positions is the explicit `Arrange`.
 - **There is no runtime toggle.** Mode, direction and spacings are configuration
@@ -116,6 +119,7 @@ Two consequences worth stating, because they are easy to break:
 | `drag` | `"locked"` or `"snap-back"`: what a manual drag does when the layout owns the positions (inert under `mode: "free"`) | `"locked"` |
 | `connections` | `"editable"` or `"fixed"`: whether a person may draw a new connection (independent of `mode`) | `"editable"` |
 | `ports` | `"visible"` or `"hidden"`: whether the node surface paints a port handle at all (independent of `mode`) | `"visible"` |
+| `arrangeOnChange` | `"never"` or `"downstream"`: what a structural change arranges when the layout owns the positions | `"never"` |
 
 ```ts
 import { assertOk, assertValid, createBuilder } from "@nodera/sdk";
@@ -135,6 +139,7 @@ const builder = assertValid(
         drag: "locked",                          // default; or "snap-back"
         connections: "editable",                 // default; or "fixed"
         ports: "visible",                        // default; or "hidden"
+        arrangeOnChange: "never",                // default; or "downstream"
       },
     },
   }),
@@ -228,6 +233,62 @@ A request overrides `direction`, `spacing` and `rankSpacing` for that one call a
 persists nothing: the next call without a request reads `graph.layout` again, so a
 host can switch without rebuilding the builder. A bad override is
 `sdk.invalid-input` at that field and nothing moves.
+
+#### What "scoped" means — `arrange({ from })`
+
+The framework has no incremental ranker and does not need one. The expensive part
+of an arrangement is not the computation — the strategy ranks the whole graph in
+memory in one pass — it is what gets **written**: every position applied is
+document state and history. So `from` scopes the **writes**, never the
+computation:
+
+- The selected strategy is still asked about the whole graph (`scope: "all"`),
+  because a rank is a property of all of it and a partial answer would be a
+  different geometry.
+- The SDK writes the answer for `from` and for the nodes reachable from it by
+  following edges **outward**, transitively — an edge that points into `from`
+  never pulls its source in, and a cycle is harmless.
+- Everything else keeps the position the document already held. That is asserted,
+  not assumed: the tests check the untouched branch coordinate by coordinate.
+- The subset is still applied through one `arrangeGraph` call, so it is one
+  history unit and one `undo()` restores exactly what it wrote.
+- An unknown `from` is `sdk.invalid-input` at path `from` and moves nothing;
+  without `from` the call is byte-for-byte the whole-graph arrangement.
+
+```ts
+assertOk(builder.graph.arrange({ from: "acme.fetch" })); // its branch only
+```
+
+### Automatic downstream arrangement
+
+`graph.layout.arrangeOnChange` declares what a **structural change** does with the
+positions the layout owns:
+
+| Policy | What a structural change does | History |
+| --- | --- | --- |
+| `"never"` (default) | Nothing: only an explicit `Arrange` moves a node, exactly as before. | — |
+| `"downstream"` | After a successful `insertNode`, the inserted node and its descendants are placed; after a successful `connect`, the new edge's target and its descendants are. Nothing else moves. | A **second** unit, applied after the mutation: one `undo()` steps the arrangement back, a second one steps the mutation back. |
+
+It is host configuration, never a user toggle, and it only takes effect in
+`mode: "auto"`: in `"free"` mode the host owns every position, so nothing is
+arranged automatically whatever the field says. `builder.graphLayout` reports and
+changes it (`arrangeOnChange()` / `setArrangeOnChange(policy)`), and unlike the
+drag, connections and ports policies it is not presentation state — it decides
+document writes, so it lives in the builder and never touches `UiState`.
+
+Two consequences worth naming:
+
+- **The mutation always stands.** A strategy that refuses, or a position the use
+  case rejects, leaves the insertion or the edge exactly where it is; the refusal
+  is reported by `builder.graph.lastAutoArrangement()`, with the strategy's own
+  code in `metadata.strategyCode`. Folding the geometry into the mutation would
+  make an add fail for a reason the add did not cause.
+- **An add arranges nothing by itself.** An unconnected node has no descendants
+  and no edge to hang them from, so `addNode` only takes its anchored slot.
+
+At construction an unknown value is `sdk.invalid-input` at
+`graph.layout.arrangeOnChange` and no builder is created; at runtime it is the same
+code and path and the stored policy stays.
 
 Two honest no-ops: the `free` strategy returns no position, and so does an empty
 graph — neither pushes a history entry. A strategy that answers a diagnostic makes
@@ -439,11 +500,15 @@ Stated, not hidden:
   strategy produces a ranked, evenly spaced grid.
 - No node-size awareness: positions are computed from ids, edges and the declared
   spacings, so the result does not adapt to wide or tall node renderers.
-- `Arrange` always covers the whole graph (`scope: "all"` from the SDK). A partial
-  re-arrangement is not a supported request; the port itself can express
+- `Arrange` always **computes** the whole graph (`scope: "all"` from the SDK);
+  `arrange({ from })` only narrows which positions are written. There is no
+  incremental ranker and none is planned — the port itself can express
   `unpositioned` for a host that calls a strategy directly.
-- No framework toggle and no auto-arrange. Every re-placement is an explicit host
-  action.
+- No framework toggle. Every re-placement is a host action: an explicit `Arrange`,
+  or the `arrangeOnChange: "downstream"` policy the host declares in configuration.
+- The downstream policy arranges the touched node and its descendants, not their
+  neighbours in the same rank: a sibling of the inserted node moves only if its own
+  subtree is arranged.
 - The phantom empty state appends in **two** history units (create, then connect)
   instead of one. Only the edge "+" — which has an application use case —
   guarantees all-or-nothing; a single-unit append-and-connect is a pending use

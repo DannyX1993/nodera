@@ -99,6 +99,7 @@ import {
   type PluginInstallation,
 } from "../plugin/plugin.js";
 import type {
+  ArrangeOnChange,
   BuilderConfiguration,
   BuilderDocumentConfiguration,
   BuilderDocumentFormat,
@@ -268,6 +269,31 @@ export interface BuilderGraphLayoutApi {
    * `graph.layout.ports` and the previous policy stays.
    */
   setPortsPolicy(policy: PortsPolicy): Result<PortsPolicy, SdkIssues>;
+  /**
+   * What a structural change does with the positions the layout owns today.
+   *
+   * It is the policy declared in `graph.layout.arrangeOnChange` (`"never"` by
+   * default), unless the host changed it at runtime with
+   * {@link BuilderGraphLayoutApi.setArrangeOnChange}. `"downstream"` arranges the
+   * node an `insertNode` created — and the target of a `connect` — together with
+   * its descendants, after the mutation and as its own history unit.
+   *
+   * The policy only takes effect while the layout owns the positions
+   * (`mode: "auto"`): in `"free"` mode the host places every node, so nothing is
+   * arranged automatically whatever the value says. It is configuration a host
+   * writes, never a control the framework puts in front of a user.
+   */
+  arrangeOnChange(): ArrangeOnChange;
+  /**
+   * Changes what a structural change arranges automatically.
+   *
+   * Unlike the drag, connections and ports policies this one is not presentation
+   * state: it decides what the SDK writes to the document, so it lives in the
+   * builder and never touches the UI state. It writes no position on its own. A
+   * value outside the union is refused with `sdk.invalid-input` at
+   * `graph.layout.arrangeOnChange` and the previous policy stays.
+   */
+  setArrangeOnChange(policy: ArrangeOnChange): Result<ArrangeOnChange, SdkIssues>;
 }
 
 /**
@@ -599,6 +625,20 @@ function graphLayoutIssues(
       ),
     );
   }
+  const arrangeOnChange: unknown = Reflect.get(layout, "arrangeOnChange");
+  if (
+    arrangeOnChange !== undefined &&
+    arrangeOnChange !== "never" &&
+    arrangeOnChange !== "downstream"
+  ) {
+    issues.push(
+      shapeIssue(
+        'Builder graph layout arrangeOnChange must be "never" or "downstream"',
+        arrangeOnChange,
+        [...path, "arrangeOnChange"],
+      ),
+    );
+  }
   return issues;
 }
 
@@ -645,6 +685,21 @@ function resolveConnectionsPolicy(
  */
 function resolvePortsPolicy(configuration: GraphLayoutConfiguration | undefined): PortsPolicy {
   return configuration?.ports === "hidden" ? "hidden" : "visible";
+}
+
+/**
+ * Resolves the automatic arrangement policy a validated configuration declares.
+ *
+ * Fail-closed like the rest of the configuration: only `"downstream"` arranges
+ * anything, so an unknown value can never move a graph nobody asked to have
+ * moved. The placement mode is not folded in here — the policy is what the host
+ * declared, and `mode: "free"` is where it stops applying, which the graph API
+ * enforces so the getter keeps reporting the declaration.
+ */
+function resolveArrangeOnChange(
+  configuration: GraphLayoutConfiguration | undefined,
+): ArrangeOnChange {
+  return configuration?.arrangeOnChange === "downstream" ? "downstream" : "never";
 }
 
 /**
@@ -1137,6 +1192,8 @@ interface BuilderAssemblerOptions {
   readonly strategies: LayoutStrategyRegistry;
   /** Distance between consecutive `Arrange` ranks, resolved from configuration. */
   readonly rankSpacing: number;
+  /** What a structural change arranges automatically, resolved from configuration. */
+  readonly arrangeOnChange: ArrangeOnChange;
 }
 
 /** Concrete builder. Hosts only ever see the {@link Builder} contract. */
@@ -1165,6 +1222,14 @@ class SdkBuilder implements Builder {
   private readonly strategyRegistry: LayoutStrategyRegistry;
   private bindings: RendererBindings;
   private disposedFlag = false;
+  /**
+   * What a structural change arranges automatically.
+   *
+   * It is builder state rather than UI state because it decides document writes,
+   * not presentation: the graph API reads it through a function, so a runtime
+   * change applies to the next mutation with no re-composition.
+   */
+  private arrangeOnChangePolicy: ArrangeOnChange;
 
   constructor(options: BuilderAssemblerOptions) {
     this.id = options.id;
@@ -1181,6 +1246,7 @@ class SdkBuilder implements Builder {
     this.dialogRegistry = options.registries.dialogs;
     this.bindings = options.renderers;
     this.strategyRegistry = options.strategies;
+    this.arrangeOnChangePolicy = options.arrangeOnChange;
     // One adapter object per builder, so a host can hold on to it across reads.
     this.registries = {
       nodes: createNodeDefinitionRegistryView(this.nodeRegistry, () => this.disposedFlag),
@@ -1194,6 +1260,7 @@ class SdkBuilder implements Builder {
     this.graph = createGraphApi(this.editor, () => this.disposedFlag, options.graphLayout, {
       strategies: this.strategyRegistry,
       rankSpacing: options.rankSpacing,
+      arrangeOnChange: () => this.arrangeOnChangePolicy,
     });
     this.document = createDocumentApi(this.editor, this.documentFormat, () => this.disposedFlag);
     this.events = createBuilderEvents(this.editor.events);
@@ -1220,6 +1287,8 @@ class SdkBuilder implements Builder {
       setConnectionsPolicy: (policy) => this.selectConnectionsPolicy(policy),
       portsPolicy: () => this.store.getState().ports,
       setPortsPolicy: (policy) => this.selectPortsPolicy(policy),
+      arrangeOnChange: () => this.arrangeOnChangePolicy,
+      setArrangeOnChange: (policy) => this.selectArrangeOnChange(policy),
     };
     this.dialogs = {
       register: (dialog) => this.addDialog(dialog),
@@ -1547,6 +1616,30 @@ class SdkBuilder implements Builder {
     this.store.setPorts(policy);
     return ok(policy);
   }
+
+  /**
+   * Applies an automatic arrangement policy.
+   *
+   * Same contract as {@link selectDragPolicy} minus the UI state: the union is
+   * checked here because the value comes from a host, and a refused policy leaves
+   * the stored one — and therefore the next mutation — untouched.
+   */
+  private selectArrangeOnChange(policy: ArrangeOnChange): Result<ArrangeOnChange, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("graphLayout.setArrangeOnChange")]);
+    }
+    if (policy !== "never" && policy !== "downstream") {
+      return err([
+        shapeIssue(
+          'Builder graph layout arrangeOnChange must be "never" or "downstream"',
+          policy,
+          ["graph", "layout", "arrangeOnChange"],
+        ),
+      ]);
+    }
+    this.arrangeOnChangePolicy = policy;
+    return ok(policy);
+  }
 }
 
 /**
@@ -1806,6 +1899,7 @@ export function createBuilder(
     graphLayout,
     strategies,
     rankSpacing,
+    arrangeOnChange: resolveArrangeOnChange(declaredGraphLayout),
   });
 
   // Configured plugins run last, once every declarative registry is populated,

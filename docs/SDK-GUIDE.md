@@ -316,11 +316,17 @@ The whole feature — the two placement modes, the layer split, the defaults, th
 ### Arranging an existing graph
 
 `Arrange` is a command, never a side effect. Nothing arranges on an add, on an
-edge change or on a read: the host asks for it.
+edge change or on a read unless the host opts in with
+`graph.layout.arrangeOnChange: "downstream"` (below); otherwise the host asks for
+it.
 
 ```ts
 const moved = assertOk(builder.graph.arrange()); // one history unit, all-or-nothing
 builder.graph.undo(); // one undo: every previous position is back
+
+const scoped = assertOk(builder.graph.arrange({ from: "node-fetch" }));
+// only `node-fetch` and its descendants were written; every other node kept its
+// position, and one undo restores exactly the subset this call changed
 ```
 
 `arrange()` reads the graph, asks the strategy selected by `graph.layout.strategy`
@@ -329,6 +335,24 @@ with the host's `direction`, `spacing` (in-rank distance) and `rankSpacing`
 application layer. A strategy that answers a diagnostic makes it fail with
 `sdk.invalid-input` and moves nothing; `nodera.graph-layout.free` and an empty
 graph both return an empty list and push no history entry.
+
+`from` scopes the **writes**, never the computation: the strategy still answers for
+the whole graph, because a rank is a property of all of it, and the SDK applies
+only the positions of `from` and of the nodes reachable from it by following edges
+outward, transitively. An edge pointing into `from` does not pull its source in,
+and an unknown or malformed id is `sdk.invalid-input` at path `from` with nothing
+moved.
+
+When the host declares `graph.layout.arrangeOnChange: "downstream"` (and the
+layout owns the positions, `mode: "auto"`), a structural change arranges what it
+touched by itself: after `insertNode`, the inserted node and its descendants; after
+`connect`, the new edge's target and its descendants. It is applied **after** the
+mutation and as **its own history unit**, so one `undo()` steps the geometry back
+and a second one steps the mutation back — the insertion is never lost because of
+a write nobody asked for at that moment. It never fails the mutation: a refused
+arrangement is reported by `graph.lastAutoArrangement()` (`"skipped"`,
+`"arranged"`, `"refused"`). A bare `addNode` arranges nothing, and `"never"` — the
+default — keeps the previous rule that only an explicit `Arrange` moves nodes.
 
 **The strategy is host configuration, and it is replaceable.** `builder.graphLayout`
 registers implementations, selects one by id and reports what is installed:
@@ -489,8 +513,8 @@ below are the complete lists:
 | `theme.register`, `theme.setDefault` | `theme.active`, `theme.all` |
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
 | `dialogs.register` | `dialogs.all`, `builder.store` reads |
-| `graphLayout.register`, `graphLayout.setDefault` | `graphLayout.active`, `graphLayout.all` |
-| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo` |
+| `graphLayout.register`, `graphLayout.setDefault`, `setDragPolicy`, `setConnectionsPolicy`, `setPortsPolicy`, `setArrangeOnChange` | `graphLayout.active`, `graphLayout.all`, `dragPolicy`, `connectionsPolicy`, `portsPolicy`, `arrangeOnChange`, `lastAutoArrangement` |
+| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo`, `lastAutoArrangement` |
 | `graph.undo`, `graph.redo` — nothing is undone, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |
 

@@ -13,11 +13,17 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { err } from "@nodera/contracts";
+import type { Result } from "@nodera/contracts";
 import type { EdgeDefinitionInput } from "../authoring/edges.js";
 import type { NodeDefinitionInput } from "../authoring/nodes.js";
 import { createBuilder, type Builder } from "../builder/builder.js";
 import type { BuilderGraphConfiguration } from "../builder/configuration.js";
 import type { NodeInstanceView } from "../view/instances.js";
+import type {
+  GraphLayoutDiagnostic,
+  GraphLayoutStrategy,
+} from "../vocabulary.js";
 
 const SOURCE = "http.request";
 const MIDDLE = "http.middleware";
@@ -103,6 +109,18 @@ function inserted(builder: Builder, edgeId: string, extra: Record<string, unknow
     );
   }
   return result.value;
+}
+
+/** Positions of every node, keyed by instance id, as the host reads them. */
+function positionsOf(
+  builder: Builder,
+): Record<string, { readonly x: number; readonly y: number } | undefined> {
+  return Object.fromEntries(builder.graph.nodes().map((node) => [node.id, node.position]));
+}
+
+/** A host strategy that refuses to place anything, with a structured diagnostic. */
+function refusingStrategy(diagnostic: GraphLayoutDiagnostic): GraphLayoutStrategy {
+  return { id: "acme.refusing", place: () => err(diagnostic) };
 }
 
 describe("graph.insertNode: the insertion", () => {
@@ -281,5 +299,201 @@ describe("graph.insertNode: placement of the inserted node", () => {
     expect(
       builder.graph.nodes().find((node) => node.id === "node-middle")?.position,
     ).toBeUndefined();
+  });
+});
+
+/**
+ * `source --edge--> target`, plus a sibling branch off the same source.
+ *
+ * The sibling is a descendant of the source but **not** of the node inserted on
+ * the edge, so it is what tells a scoped arrangement apart from a whole-graph
+ * one. The coordinates are chosen so every written position differs from the
+ * one the node carried before.
+ */
+function fork(builder: Builder): string {
+  const source = added(builder, SOURCE, {
+    nodeId: "node-source",
+    position: { x: 0, y: 500 },
+  });
+  const sibling = added(builder, MIDDLE, {
+    nodeId: "node-sibling",
+    position: { x: 1000, y: 1000 },
+  });
+  const target = added(builder, TARGET, {
+    nodeId: "node-target",
+    position: { x: 900, y: 900 },
+  });
+  const edgeId = connectOrThrow(builder, source.id, target.id);
+  connectOrThrow(builder, source.id, sibling.id);
+  return edgeId;
+}
+
+describe("graph.insertNode: the downstream auto policy", () => {
+  it("re-places the inserted node and its descendants as their own history unit", () => {
+    const builder = create({ mode: "auto" });
+    const edgeId = fork(builder);
+    expect(builder.graphLayout.arrangeOnChange()).toBe("never");
+
+    // The policy is host configuration: the host can turn it on without a rebuild.
+    expect(builder.graphLayout.setArrangeOnChange("downstream").ok).toBe(true);
+
+    inserted(builder, edgeId, { nodeId: "node-middle" });
+
+    // The inserted node and its descendant take the arrangement; the source
+    // anchors it and the sibling branch keeps every coordinate it had.
+    expect(positionsOf(builder)).toEqual({
+      "node-source": { x: 0, y: 500 },
+      "node-sibling": { x: 1000, y: 1000 },
+      "node-target": { x: 480, y: 0 },
+      "node-middle": { x: 240, y: 0 },
+    });
+    const outcome = builder.graph.lastAutoArrangement();
+    if (outcome.outcome !== "arranged") {
+      throw new Error(`expected an arrangement, got ${outcome.outcome}`);
+    }
+    expect(outcome.nodes.map((node: NodeInstanceView) => node.id).sort()).toEqual([
+      "node-middle",
+      "node-target",
+    ]);
+
+    // One undo steps the arrangement back, not the insertion: it is a unit of
+    // its own, applied after the mutation.
+    expect(builder.graph.undo()).toBe(true);
+    expect(positionsOf(builder)).toEqual({
+      "node-source": { x: 0, y: 500 },
+      "node-sibling": { x: 1000, y: 1000 },
+      "node-target": { x: 900, y: 900 },
+      "node-middle": { x: 240, y: 500 },
+    });
+
+    // A second undo is the insertion itself.
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.nodeCount()).toBe(3);
+    expect(builder.graph.nodes().map((node) => node.id)).not.toContain("node-middle");
+  });
+
+  it("leaves every other node where it was when the policy is never", () => {
+    const builder = create({ mode: "auto" });
+    const edgeId = fork(builder);
+
+    inserted(builder, edgeId, { nodeId: "node-middle" });
+
+    expect(positionsOf(builder)).toEqual({
+      "node-source": { x: 0, y: 500 },
+      "node-sibling": { x: 1000, y: 1000 },
+      "node-target": { x: 900, y: 900 },
+      "node-middle": { x: 240, y: 500 },
+    });
+    expect(builder.graph.lastAutoArrangement()).toEqual({ outcome: "skipped" });
+
+    // One undo removes the insertion: there is no second unit to step through.
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.nodeCount()).toBe(3);
+  });
+
+  it("arranges nothing when an unconnected node is added", () => {
+    const builder = create({ mode: "auto", arrangeOnChange: "downstream" });
+    const source = added(builder, SOURCE, { nodeId: "node-source" });
+    const target = added(builder, TARGET, { nodeId: "node-target" });
+
+    expect(positionsOf(builder)).toEqual({
+      "node-source": { x: 0, y: 0 },
+      "node-target": { x: 240, y: 0 },
+    });
+    expect(builder.graph.lastAutoArrangement()).toEqual({ outcome: "skipped" });
+
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.nodeCount()).toBe(1);
+    expect(target.id).toBe("node-target");
+    expect(source.id).toBe("node-source");
+  });
+
+  it("arranges a connected target and its descendants as their own history unit", () => {
+    const builder = create({ mode: "auto", arrangeOnChange: "downstream" });
+    const first = added(builder, SOURCE, { nodeId: "node-first", position: { x: 0, y: 0 } });
+    const second = added(builder, MIDDLE, {
+      nodeId: "node-second",
+      position: { x: 700, y: 800 },
+    });
+    const third = added(builder, TARGET, {
+      nodeId: "node-third",
+      position: { x: 710, y: 810 },
+    });
+
+    connectOrThrow(builder, first.id, second.id);
+    expect(positionsOf(builder)).toEqual({
+      "node-first": { x: 0, y: 0 },
+      "node-second": { x: 240, y: 0 },
+      "node-third": { x: 710, y: 810 },
+    });
+
+    connectOrThrow(builder, second.id, third.id);
+    expect(positionsOf(builder)["node-third"]).toEqual({ x: 480, y: 0 });
+
+    const outcome = builder.graph.lastAutoArrangement();
+    if (outcome.outcome !== "arranged") {
+      throw new Error(`expected an arrangement, got ${outcome.outcome}`);
+    }
+    expect(outcome.nodes.map((node: NodeInstanceView) => node.id)).toEqual(["node-third"]);
+
+    // One undo steps the placement back and leaves the edge where it is.
+    expect(builder.graph.undo()).toBe(true);
+    expect(positionsOf(builder)["node-third"]).toEqual({ x: 710, y: 810 });
+    expect(builder.graph.edgeCount()).toBe(2);
+  });
+
+  it("arranges nothing when the host owns the positions", () => {
+    const builder = create({ mode: "free", arrangeOnChange: "downstream" });
+    const source = added(builder, SOURCE, {
+      nodeId: "node-source",
+      position: { x: 0, y: 0 },
+    });
+    const target = added(builder, TARGET, {
+      nodeId: "node-target",
+      position: { x: 900, y: 900 },
+    });
+    const edgeId = connectOrThrow(builder, source.id, target.id);
+
+    inserted(builder, edgeId, { nodeId: "node-middle" });
+
+    expect(positionsOf(builder)).toEqual({
+      "node-source": { x: 0, y: 0 },
+      "node-target": { x: 900, y: 900 },
+      "node-middle": undefined,
+    });
+    expect(builder.graph.lastAutoArrangement()).toEqual({ outcome: "skipped" });
+  });
+
+  it("reports a refused arrangement without failing the insertion", () => {
+    const builder = create({ mode: "auto" });
+    const edgeId = fork(builder);
+    const diagnostic: GraphLayoutDiagnostic = {
+      code: "graph-layout.invalid-options",
+      message: "acme refuses to arrange this graph",
+    };
+    builder.graphLayout.register(refusingStrategy(diagnostic));
+    builder.graphLayout.setDefault("acme.refusing");
+    expect(builder.graphLayout.setArrangeOnChange("downstream").ok).toBe(true);
+
+    inserted(builder, edgeId, { nodeId: "node-middle" });
+
+    expect(builder.graph.nodeCount()).toBe(4);
+    expect(positionsOf(builder)).toEqual({
+      "node-source": { x: 0, y: 500 },
+      "node-sibling": { x: 1000, y: 1000 },
+      "node-target": { x: 900, y: 900 },
+      "node-middle": { x: 240, y: 500 },
+    });
+    const outcome = builder.graph.lastAutoArrangement();
+    if (outcome.outcome !== "refused") {
+      throw new Error(`expected a refusal, got ${outcome.outcome}`);
+    }
+    expect(outcome.issues[0]?.code).toBe("sdk.invalid-input");
+    expect(outcome.issues[0]?.message).toBe(diagnostic.message);
+    expect(outcome.issues[0]?.metadata?.["strategyCode"]).toBe(diagnostic.code);
+
+    // The refusal pushed no unit: one undo removes the insertion.
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.nodes().map((node) => node.id)).not.toContain("node-middle");
   });
 });
