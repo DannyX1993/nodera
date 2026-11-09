@@ -63,7 +63,6 @@ describe("UiStateStore", () => {
       activeDialogId: undefined,
       pendingEdgeInsertId: undefined,
       pendingAppendAnchorId: undefined,
-      pendingBranchInsertId: undefined,
       dragPolicy: "free",
       nodeTransition: "instant",
       connections: "editable",
@@ -152,26 +151,8 @@ describe("UiStateStore", () => {
     expect(store.getState().pendingEdgeInsertId).toBe("edge-1");
   });
 
-  it("records the node a branching insertion is pending for and notifies once per change", () => {
-    const store = createStore();
-    const seen: (string | undefined)[] = [];
-    store.subscribe((state) => seen.push(state.pendingBranchInsertId));
-
-    store.setPendingBranchInsertId("node-1");
-    store.setPendingBranchInsertId("node-1");
-
-    expect(store.getState().pendingBranchInsertId).toBe("node-1");
-    expect(seen).toEqual(["node-1"]);
-
-    store.setPendingBranchInsertId(undefined);
-
-    expect(store.getState().pendingBranchInsertId).toBeUndefined();
-    expect(seen).toEqual(["node-1", undefined]);
-  });
-
-  it("clears the pending branch insertion together with every other session when the dialog closes", () => {
+  it("clears the pending insertion session together when the dialog closes", () => {
     const store = createDialogStore();
-    store.setPendingBranchInsertId("node-1");
     store.setPendingEdgeInsertId("edge-1");
     store.setPendingAppendAnchorId("node-2");
     store.openDialog("acme.dialog.create-node");
@@ -180,7 +161,6 @@ describe("UiStateStore", () => {
 
     store.closeDialog();
 
-    expect(store.getState().pendingBranchInsertId).toBeUndefined();
     expect(store.getState().pendingEdgeInsertId).toBeUndefined();
     expect(store.getState().pendingAppendAnchorId).toBeUndefined();
     // One commit: a closed dialog never leaves half of its session behind.

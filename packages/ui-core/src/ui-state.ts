@@ -140,17 +140,6 @@ export interface UiState {
    */
   readonly pendingAppendAnchorId: string | undefined;
   /**
-   * Node whose split a node-creation dialog will insert before, if one was
-   * opened from the branching "+" affordance (S23).
-   *
-   * Presentation state only: it tells the host which parent the chosen
-   * definition branches from — the new node points the parent at it and every
-   * former successor edge leaves from it — so it never enters the portable
-   * document, and it is cleared when the dialog closes
-   * (see {@link UiStateStore.closeDialog}) or when the insertion completes.
-   */
-  readonly pendingBranchInsertId: string | undefined;
-  /**
    * What a manual drag does with the positions the layout assigned.
    *
    * The canvas adapter reads it reactively (a policy change re-renders without
@@ -266,7 +255,6 @@ export class UiStateStore {
       activeDialogId: undefined,
       pendingEdgeInsertId: undefined,
       pendingAppendAnchorId: undefined,
-      pendingBranchInsertId: undefined,
       dragPolicy: options.dragPolicy ?? "free",
       nodeTransition: options.nodeTransition ?? "instant",
       connections: options.connections ?? "editable",
@@ -430,36 +418,18 @@ export class UiStateStore {
   }
 
   /**
-   * Records (or clears, with `undefined`) the node a branching insertion starts
-   * from.
-   *
-   * The node is the parent whose successors the new node replaces, so the host
-   * inserts before its split instead of appending after it. The node id is
-   * opaque here: the store is framework-agnostic and does not check it against a
-   * graph. Setting the value already stored notifies nobody.
-   */
-  setPendingBranchInsertId(pendingBranchInsertId: string | undefined): void {
-    if (pendingBranchInsertId === this.state.pendingBranchInsertId) {
-      return;
-    }
-    this.commit({ ...this.state, pendingBranchInsertId });
-  }
-
-  /**
    * Closes the open dialog, if any, and ends its insertion session.
    *
-   * The pending edge, the pending append anchor and the pending branch parent
-   * live exactly as long as the dialog they were opened for, so every field is
-   * cleared in one commit: a closed dialog can never leave a later `add-node`
-   * guessing that it has to insert into an edge, follow an anchor or branch from
-   * a node nobody selected anymore.
+   * The pending edge and the pending append anchor live exactly as long as the
+   * dialog they were opened for, so every field is cleared in one commit: a
+   * closed dialog can never leave a later `add-node` guessing that it has to
+   * insert into an edge or follow an anchor nobody selected anymore.
    */
   closeDialog(): void {
     if (
       this.state.activeDialogId === undefined &&
       this.state.pendingEdgeInsertId === undefined &&
-      this.state.pendingAppendAnchorId === undefined &&
-      this.state.pendingBranchInsertId === undefined
+      this.state.pendingAppendAnchorId === undefined
     ) {
       return;
     }
@@ -468,7 +438,6 @@ export class UiStateStore {
       activeDialogId: undefined,
       pendingEdgeInsertId: undefined,
       pendingAppendAnchorId: undefined,
-      pendingBranchInsertId: undefined,
     });
   }
 
