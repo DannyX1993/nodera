@@ -150,8 +150,8 @@ function regionContent(panelIds: readonly string[]): ReactNode {
  *
  * Every prop comes from the binding or from the builder: the editor session,
  * the registries the provider resolved, the interaction mode and the drag,
- * connections and ports policies of the UI state, the color scheme of the applied
- * theme and the feature flags.
+ * connections, ports and insert-handles policies of the UI state, the color
+ * scheme of the applied theme and the feature flags.
  * A palette drop becomes `builder.graph.addNode`, so the drop path is the SDK's
  * use case and not a second mutation route.
  */
@@ -177,6 +177,7 @@ function DefaultCanvasRegion(props: {
           dragPolicy={ui.dragPolicy}
           connectionsPolicy={ui.connections}
           portsPolicy={ui.ports}
+          insertHandles={ui.insertHandles}
           colorMode={theme.colorScheme ?? "light"}
           showMinimap={builder.features.minimap}
           showControls={builder.adapter?.capabilities.controls ?? true}

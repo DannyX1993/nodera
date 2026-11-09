@@ -54,6 +54,24 @@ export type ConnectionsPolicy = "editable" | "fixed";
  */
 export type PortsPolicy = "visible" | "hidden";
 
+/**
+ * Where the edge insertion "+" affordance sits when a node has several
+ * successors (S23).
+ *
+ * Host configuration, reflected in the UI state so the canvas re-renders when
+ * the host changes it:
+ *
+ * - `"each-edge"` (the default, and today's behaviour): one "+" per edge.
+ * - `"before-branching"`: a parent with two or more successors gets a single
+ *   "+" on its outgoing side, before the edges split, and those edges carry none
+ *   of their own. Every other edge keeps its per-edge "+".
+ * - `"both"`: the branching "+" and the per-edge ones, side by side.
+ *
+ * Pure presentation policy: it writes no document state, pushes no history entry
+ * and emits no event by itself.
+ */
+export type InsertHandlesPolicy = "each-edge" | "before-branching" | "both";
+
 /** Element a context menu was opened for. */
 export type MenuTargetKind = "node" | "edge" | "pane" | "canvas";
 
@@ -126,6 +144,17 @@ export interface UiState {
    */
   readonly pendingAppendAnchorId: string | undefined;
   /**
+   * Node whose split a node-creation dialog will insert before, if one was
+   * opened from the branching "+" affordance (S23).
+   *
+   * Presentation state only: it tells the host which parent the chosen
+   * definition branches from — the new node points the parent at it and every
+   * former successor edge leaves from it — so it never enters the portable
+   * document, and it is cleared when the dialog closes
+   * (see {@link UiStateStore.closeDialog}) or when the insertion completes.
+   */
+  readonly pendingBranchInsertId: string | undefined;
+  /**
    * What a manual drag does with the positions the layout assigned.
    *
    * The canvas adapter reads it reactively (a policy change re-renders without
@@ -152,6 +181,15 @@ export interface UiState {
    * nothing: the port data still reaches every node renderer.
    */
   readonly ports: PortsPolicy;
+  /**
+   * Where the edge insertion "+" sits when a node has several successors.
+   *
+   * The canvas adapter reads it reactively (a policy change re-renders without a
+   * rebuild); the builder seeds it from `graph.layout.insertHandles` and changes
+   * it through `builder.graphLayout.setInsertHandlesPolicy`. It never writes an
+   * edge or a node by itself.
+   */
+  readonly insertHandles: InsertHandlesPolicy;
 }
 
 /** Initial values accepted by {@link UiStateStore}. */
@@ -183,6 +221,11 @@ export interface UiStateStoreOptions {
    * behaviour.
    */
   readonly ports?: PortsPolicy;
+  /**
+   * Where the insert "+" affordance sits when a node has several successors.
+   * Defaults to `"each-edge"`, today's behaviour.
+   */
+  readonly insertHandles?: InsertHandlesPolicy;
 }
 
 /** Listener notified after every state change. */
@@ -213,9 +256,11 @@ export class UiStateStore {
       activeDialogId: undefined,
       pendingEdgeInsertId: undefined,
       pendingAppendAnchorId: undefined,
+      pendingBranchInsertId: undefined,
       dragPolicy: options.dragPolicy ?? "free",
       connections: options.connections ?? "editable",
       ports: options.ports ?? "visible",
+      insertHandles: options.insertHandles ?? "each-edge",
     };
   }
 
@@ -374,18 +419,36 @@ export class UiStateStore {
   }
 
   /**
+   * Records (or clears, with `undefined`) the node a branching insertion starts
+   * from.
+   *
+   * The node is the parent whose successors the new node replaces, so the host
+   * inserts before its split instead of appending after it. The node id is
+   * opaque here: the store is framework-agnostic and does not check it against a
+   * graph. Setting the value already stored notifies nobody.
+   */
+  setPendingBranchInsertId(pendingBranchInsertId: string | undefined): void {
+    if (pendingBranchInsertId === this.state.pendingBranchInsertId) {
+      return;
+    }
+    this.commit({ ...this.state, pendingBranchInsertId });
+  }
+
+  /**
    * Closes the open dialog, if any, and ends its insertion session.
    *
-   * The pending edge and the pending append anchor live exactly as long as the
-   * dialog they were opened for, so every field is cleared in one commit: a
-   * closed dialog can never leave a later `add-node` guessing that it has to
-   * insert into an edge or follow an anchor nobody selected anymore.
+   * The pending edge, the pending append anchor and the pending branch parent
+   * live exactly as long as the dialog they were opened for, so every field is
+   * cleared in one commit: a closed dialog can never leave a later `add-node`
+   * guessing that it has to insert into an edge, follow an anchor or branch from
+   * a node nobody selected anymore.
    */
   closeDialog(): void {
     if (
       this.state.activeDialogId === undefined &&
       this.state.pendingEdgeInsertId === undefined &&
-      this.state.pendingAppendAnchorId === undefined
+      this.state.pendingAppendAnchorId === undefined &&
+      this.state.pendingBranchInsertId === undefined
     ) {
       return;
     }
@@ -394,6 +457,7 @@ export class UiStateStore {
       activeDialogId: undefined,
       pendingEdgeInsertId: undefined,
       pendingAppendAnchorId: undefined,
+      pendingBranchInsertId: undefined,
     });
   }
 
@@ -437,6 +501,20 @@ export class UiStateStore {
       return;
     }
     this.commit({ ...this.state, ports });
+  }
+
+  /**
+   * Applies the insert-handle placement policy of the canvas.
+   *
+   * The builder is what validates the value (`builder.graphLayout
+   * .setInsertHandlesPolicy`), so an invalid policy never reaches the store;
+   * setting the policy already applied notifies nobody.
+   */
+  setInsertHandles(insertHandles: InsertHandlesPolicy): void {
+    if (insertHandles === this.state.insertHandles) {
+      return;
+    }
+    this.commit({ ...this.state, insertHandles });
   }
 
   private commit(next: UiState): void {

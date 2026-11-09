@@ -48,6 +48,9 @@ export const DEMO_LAYOUT = {
   // control applies when the host switches back to `layered`.
   connections: "fixed",
   ports: "hidden",
+  // Both affordances at boot, so the demo shows the per-edge "+" and the one
+  // before a split side by side; the panel switches between the three policies.
+  insertHandles: "both",
 } as const satisfies GraphLayoutConfiguration;
 
 /** Nodes of the seed graph, added without a position. */

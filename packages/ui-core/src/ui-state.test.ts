@@ -4,6 +4,7 @@ import {
   UiStateStore,
   type ConnectionsPolicy,
   type DragPolicy,
+  type InsertHandlesPolicy,
   type PortsPolicy,
 } from "./ui-state.js";
 import type { LayoutState } from "./layout.js";
@@ -62,9 +63,11 @@ describe("UiStateStore", () => {
       activeDialogId: undefined,
       pendingEdgeInsertId: undefined,
       pendingAppendAnchorId: undefined,
+      pendingBranchInsertId: undefined,
       dragPolicy: "free",
       connections: "editable",
       ports: "visible",
+      insertHandles: "each-edge",
     });
   });
 
@@ -146,6 +149,41 @@ describe("UiStateStore", () => {
     store.openDialog("acme.dialog.create-node");
 
     expect(store.getState().pendingEdgeInsertId).toBe("edge-1");
+  });
+
+  it("records the node a branching insertion is pending for and notifies once per change", () => {
+    const store = createStore();
+    const seen: (string | undefined)[] = [];
+    store.subscribe((state) => seen.push(state.pendingBranchInsertId));
+
+    store.setPendingBranchInsertId("node-1");
+    store.setPendingBranchInsertId("node-1");
+
+    expect(store.getState().pendingBranchInsertId).toBe("node-1");
+    expect(seen).toEqual(["node-1"]);
+
+    store.setPendingBranchInsertId(undefined);
+
+    expect(store.getState().pendingBranchInsertId).toBeUndefined();
+    expect(seen).toEqual(["node-1", undefined]);
+  });
+
+  it("clears the pending branch insertion together with every other session when the dialog closes", () => {
+    const store = createDialogStore();
+    store.setPendingBranchInsertId("node-1");
+    store.setPendingEdgeInsertId("edge-1");
+    store.setPendingAppendAnchorId("node-2");
+    store.openDialog("acme.dialog.create-node");
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.closeDialog();
+
+    expect(store.getState().pendingBranchInsertId).toBeUndefined();
+    expect(store.getState().pendingEdgeInsertId).toBeUndefined();
+    expect(store.getState().pendingAppendAnchorId).toBeUndefined();
+    // One commit: a closed dialog never leaves half of its session behind.
+    expect(notifications).toBe(1);
   });
 
   it("seeds the drag policy the host declares", () => {
@@ -419,6 +457,47 @@ describe("UiStateStore connections and ports policies", () => {
     store.subscribe(() => notifications++);
 
     store.setPorts("visible");
+
+    expect(notifications).toBe(0);
+    expect(store.getState()).toBe(before);
+  });
+});
+
+describe("UiStateStore insert handles policy", () => {
+  it("defaults to one handle per edge", () => {
+    expect(createStore().getState().insertHandles).toBe("each-edge");
+  });
+
+  it("seeds the policy the host declares", () => {
+    const store = new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      layout: emptyLayout,
+      insertHandles: "before-branching",
+    });
+
+    expect(store.getState().insertHandles).toBe("before-branching");
+  });
+
+  it("changes the policy and notifies its subscribers once", () => {
+    const store = createStore();
+    const seen: InsertHandlesPolicy[] = [];
+    store.subscribe((state) => seen.push(state.insertHandles));
+
+    store.setInsertHandles("both");
+    store.setInsertHandles("both");
+
+    expect(store.getState().insertHandles).toBe("both");
+    expect(seen).toEqual(["both"]);
+  });
+
+  it("notifies nobody when the policy already matches", () => {
+    const store = createStore();
+    const before = store.getState();
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.setInsertHandles("each-edge");
 
     expect(notifications).toBe(0);
     expect(store.getState()).toBe(before);

@@ -26,6 +26,7 @@ import {
   type Builder,
   type ConnectionsPolicy,
   type DragPolicy,
+  type InsertHandlesPolicy,
   type PortsPolicy,
 } from "./builder.js";
 import type {
@@ -1425,5 +1426,86 @@ describe("graph layout removal policy", () => {
 
     expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
     expect(builder.graphLayout.removalPolicy()).toBe("detach");
+  });
+});
+
+describe("graph layout insert-handle placement", () => {
+  it("keeps one handle per edge by default", () => {
+    expect(create().graphLayout.insertHandlesPolicy()).toBe("each-edge");
+    expect(create().store.getState().insertHandles).toBe("each-edge");
+  });
+
+  it("declares the placement from configuration and seeds the UI state with it", () => {
+    const branching = create({ graph: { layout: { insertHandles: "before-branching" } } });
+    const both = create({ graph: { layout: { insertHandles: "both" } } });
+
+    expect(branching.graphLayout.insertHandlesPolicy()).toBe("before-branching");
+    expect(branching.store.getState().insertHandles).toBe("before-branching");
+    expect(both.graphLayout.insertHandlesPolicy()).toBe("both");
+    expect(both.store.getState().insertHandles).toBe("both");
+  });
+
+  const refusedPolicies: readonly unknown[] = ["per-edge", "before", "", true, 42, null];
+  it.each(refusedPolicies)(
+    "refuses the insert-handle policy %s at graph.layout.insertHandles and creates no builder",
+    (insertHandles) => {
+      const issues = fail({
+        graph: {
+          layout: { insertHandles } as unknown as GraphLayoutConfiguration,
+        },
+      });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({
+        code: "sdk.invalid-input",
+        path: ["graph", "layout", "insertHandles"],
+      });
+    },
+  );
+
+  it("round-trips the policy through the getter and the setter", () => {
+    const builder = create({ graph: { layout: { insertHandles: "both" } } });
+
+    expect(builder.graphLayout.insertHandlesPolicy()).toBe("both");
+
+    const branching = builder.graphLayout.setInsertHandlesPolicy("before-branching");
+    expect(branching.ok && branching.value).toBe("before-branching");
+    expect(builder.graphLayout.insertHandlesPolicy()).toBe("before-branching");
+    expect(builder.store.getState().insertHandles).toBe("before-branching");
+
+    const perEdge = builder.graphLayout.setInsertHandlesPolicy("each-edge");
+    expect(perEdge.ok && perEdge.value).toBe("each-edge");
+    expect(builder.graphLayout.insertHandlesPolicy()).toBe("each-edge");
+  });
+
+  it("refuses an unknown policy at runtime and keeps the stored one", () => {
+    const builder = create({ graph: { layout: { insertHandles: "both" } } });
+    const before = builder.store.getState();
+    let notifications = 0;
+    builder.store.subscribe(() => notifications++);
+
+    const refused = builder.graphLayout.setInsertHandlesPolicy(
+      "each-branch" as InsertHandlesPolicy,
+    );
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["graph", "layout", "insertHandles"],
+    });
+    expect(builder.graphLayout.insertHandlesPolicy()).toBe("both");
+    expect(builder.store.getState()).toBe(before);
+    expect(notifications).toBe(0);
+  });
+
+  it("refuses a policy change on a disposed builder", () => {
+    const builder = create();
+    builder.dispose();
+
+    const refused = builder.graphLayout.setInsertHandlesPolicy("both");
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
+    expect(builder.graphLayout.insertHandlesPolicy()).toBe("each-edge");
   });
 });

@@ -23,6 +23,7 @@ nothing moves unless the host asks.
 | `Arrange` (explicit) | The selected strategy, for the whole graph when the host calls `builder.graph.arrange()`, or only for `from` and its descendants with `arrange({ from })`. One history unit either way. |
 | Downstream auto (`insertNode`, `connect`) | The selected strategy, for the node the change touched and its descendants, when the host declares `graph.layout.arrangeOnChange: "downstream"`. **A second** history unit, applied after the mutation (see [Automatic downstream arrangement](#automatic-downstream-arrangement)). |
 | Edge insertion (`builder.graph.insertNode`) | The builder, in `mode: "auto"`, anchored on the edge's **source**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node and the two edges that replace the original — plus, with `arrangeOnChange: "downstream"`, a second one for the downstream arrangement. |
+| Branching insertion (`builder.graph.insertNodeBeforeBranching`) | The builder, in `mode: "auto"`, anchored on the **parent**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node, the relation to the parent and every re-pointed successor relation — plus, with `arrangeOnChange: "downstream"`, a second one for the downstream arrangement. A parent with no successor degrades to the ordinary append, i.e. two units. |
 | Removal splice (`graph.layout.onRemove: "splice"`) | The selected strategy, for the spliced predecessors and their descendants, when `arrangeOnChange: "downstream"` and the layout owns the positions. The removal writes no position at all: it and its spliced edges are one unit of their own, the arrangement is a **second** one. |
 | Placeholder "+" (`addNode({ after })` + `connect`) | The builder, in `mode: "auto"`, anchored on the node the placeholder followed — exactly the `after` rule. The empty state covers a graph with at most one node (S7); from two nodes on, every leaf gets its own successor placeholder (S21). **Two** history units: the node, then the edge, because both are separate SDK calls (see [The phantom empty state](#the-phantom-empty-state)). |
 
@@ -120,6 +121,7 @@ Two consequences worth stating, because they are easy to break:
 | `drag` | `"locked"` or `"snap-back"`: what a manual drag does when the layout owns the positions (inert under `mode: "free"`) | `"locked"` |
 | `connections` | `"editable"` or `"fixed"`: whether a person may draw a new connection (independent of `mode`) | `"editable"` |
 | `ports` | `"visible"` or `"hidden"`: whether the node surface paints a port handle at all (independent of `mode`) | `"visible"` |
+| `insertHandles` | `"each-edge"`, `"before-branching"` or `"both"`: where the insert "+" sits when a node has several successors (independent of `mode`) | `"each-edge"` |
 | `arrangeOnChange` | `"never"` or `"downstream"`: what a structural change arranges when the layout owns the positions | `"never"` |
 | `onRemove` | `"detach"` or `"splice"`: what removing a node does with the relations it carried (independent of `mode`) | `"detach"` |
 
@@ -141,6 +143,7 @@ const builder = assertValid(
         drag: "locked",                          // default; or "snap-back"
         connections: "editable",                 // default; or "fixed"
         ports: "visible",                        // default; or "hidden"
+        insertHandles: "each-edge",              // default; or "before-branching" / "both"
         arrangeOnChange: "never",                // default; or "downstream"
         onRemove: "detach",                      // default; or "splice"
       },
@@ -368,6 +371,38 @@ Nothing is guessed when the request is refused: an unknown `edgeId` is
 definition without a usable input / output port carry the use case's own code in
 `metadata.useCaseCode`, and no graph write, history entry or event happens.
 
+### `builder.graph.insertNodeBeforeBranching(request)`
+
+A node with several successors has a **split**, and the branching "+" replaces the
+whole split with one node. `insertNodeBeforeBranching` creates the node, points
+the parent at it and re-points **every** former successor edge to leave from it —
+`parent --> s1`, `parent --> s2` becomes `parent --> node --> s1`,
+`node --> s2` — through the `insert-node-before-branching` application use case, as
+**one** history unit. One `undo()` restores the parent's original edges with their
+ids and ports and removes the node.
+
+```ts
+const branched = assertValid(
+  builder.graph.insertNodeBeforeBranching({ nodeId: parentId, type: "acme.http.retry" }),
+);
+branched.edge; // parent → node
+branched.edges; // node → each former successor
+builder.graph.undo(); // one step: the parent's original edges are back
+```
+
+Ports come from the edges that were replaced (the parent's from its own outgoing
+edge, each successor's from its own), the new relations inherit the replaced
+edges' definition type, and a successor relation whose endpoints and ports are
+already written is skipped instead of duplicated.
+
+Placement is the rule of [Where an added node lands](#where-an-added-node-lands)
+with the **parent as the anchor**, decided before the use case runs so it belongs
+to the same history unit. A parent with **no** outgoing edge has no split to
+replace, so the call is the ordinary append the rule names —
+`addNode({ after: nodeId })` plus `connect`, i.e. **two** history units. Refusals
+are structured exactly like `insertNode`'s: an unknown parent is
+`sdk.invalid-input` at path `nodeId`, and nothing is written, pushed or emitted.
+
 ### The "+" on an edge
 
 `features.edgeInsertion` is the host-side switch for the affordance, and it is
@@ -502,6 +537,39 @@ The axis comes from the host, because the canvas cannot read
 `PHANTOM_NODE_OFFSET` (240 flow units), the adapter's documented default — it
 cannot see `graph.layout.spacing` either.
 
+### Insert-handle placement: one "+" before a split (S23)
+
+`graph.layout.insertHandles` declares where the affordance sits when a node has
+several successors:
+
+| Policy | What the canvas draws |
+| --- | --- |
+| `"each-edge"` (default) | Today's behaviour: one "+" per edge, on every edge. |
+| `"before-branching"` | One "+" on a branching parent's outgoing side, before the edges split, and none of its own on those edges. Every other edge keeps its per-edge "+", so a linear chain stays editable. |
+| `"both"` | The branching "+" and the per-edge ones, side by side. |
+
+"A split" is **two or more outgoing edges**: a single-successor parent always
+keeps the ordinary per-edge affordance, because there is nothing to put a handle
+before. The branching handle is a `ViewportPortal` overlay like the placeholders —
+never a React Flow node or edge, never document state — one documented step (240
+flow units) past the parent along `layoutDirection` and centred on its row, with
+the accessible name `"Insert node before the branches"`. Activating it records the
+parent in `UiState.pendingBranchInsertId` and opens the node-creation dialog; the
+host runs `builder.graph.insertNodeBeforeBranching`, so **one** node covers the
+whole split.
+
+```ts
+builder.graphLayout.insertHandlesPolicy();       // "each-edge" | "before-branching" | "both"
+assertOk(builder.graphLayout.setInsertHandlesPolicy("before-branching"));
+```
+
+The policy lands in `builder.store.getState().insertHandles`, so a presentation
+binding re-renders without a rebuild, and `<NoderaEditor>` passes it to the canvas
+as `GraphCanvas.insertHandles`. It is presentation only: it writes no node, edge,
+event or history entry by itself, and the whole placement needs
+`features.edgeInsertion` to be on. An invalid value is refused at
+`graph.layout.insertHandles` and the stored one stays.
+
 ### `builder.graphLayout`
 
 The composition point of the port:
@@ -554,6 +622,13 @@ every layout action in its own toolbar **above** the canvas:
   `features: { edgeInsertion: true }`: the dialog opens on that edge and the same
   host handler inserts with `builder.graph.insertNode`, so the node lands between
   the two endpoints as one history unit — one undo restores the edge;
+- an insert-handle select calling
+  `builder.graphLayout.setInsertHandlesPolicy(policy)`, seeded from
+  `builder.graphLayout.insertHandlesPolicy()`: choosing `before-branching` or
+  `both` makes every node with two successors paint one "+" before its split, and
+  the same host handler then inserts with
+  `builder.graph.insertNodeBeforeBranching` — one node for the whole split, one
+  history unit;
 - a status line printing what moved, or the `sdk.invalid-input` diagnostic that
   refused the call (an emptied spacing field is refused, not hidden).
 
@@ -593,6 +668,12 @@ Stated, not hidden:
 
 - No crossing minimization, no edge bend points, no edge routing. The layered
   strategy produces a ranked, evenly spaced grid.
+- The branching "+" records the parent in the UI state and the **host** runs
+  `insertNodeBeforeBranching`. The framework's built-in dialog command
+  (`{ kind: "insert-node" }`) covers the per-edge insertion only, so a host that
+  wants the branching handle must supply the dialog's `onAddNode` handler, as
+  `examples/layout-switch-demo` does. Adding a branching command to the shared
+  command bus is a follow-up in `@nodera/ui-react`.
 - No node-size awareness: positions are computed from ids, edges and the declared
   spacings, so the result does not adapt to wide or tall node renderers.
 - `Arrange` always **computes** the whole graph (`scope: "all"` from the SDK);
@@ -616,6 +697,6 @@ Stated, not hidden:
   their node, and the axis is whatever the host passes as `layoutDirection`
   (`"horizontal"` by default), because the canvas adapter can see neither
   `graph.layout.spacing` nor `graph.layout.direction`.
-- A successor placeholder marks a leaf, not a possible position: with
-  `insertHandles` (S23) and any branching handle the framework may add later it
-  stays one placeholder per leaf, never one per branch.
+- A successor placeholder marks a leaf, not a possible position: it stays one
+  placeholder per leaf, never one per branch, and the branching "+" of
+  `insertHandles` (S23) is a separate overlay with its own rule.

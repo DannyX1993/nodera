@@ -18,6 +18,7 @@
  * | Surface | Manual drag           | `builder.graphLayout.setDragPolicy(policy)`                    |
  * | Surface | Connections           | `builder.graphLayout.setConnectionsPolicy(policy)`             |
  * | Surface | Ports                 | `builder.graphLayout.setPortsPolicy(policy)`                   |
+ * | Surface | Insert handles        | `builder.graphLayout.setInsertHandlesPolicy(policy)`           |
  * | Surface | Edge "+"              | `builder.features.edgeInsertion` — construction-time, reported |
  * | Actions | Arrange               | `builder.graph.arrange({ … })` — one explicit history unit     |
  * | Actions | Arrange from a node   | `builder.graph.arrange({ from, … })` — the scoped call         |
@@ -26,6 +27,8 @@
  * | Actions | Reset graph           | `resetDemoGraph` — wipe, then seed again                       |
  * | canvas  | "+" on an edge        | `features.edgeInsertion` → the canvas affordance → the dialog,  |
  * |         |                       | whose selection the host inserts with `builder.graph.insertNode` |
+ * | canvas  | "+" before a split    | the same dialog, opened from the branching handle: the host     |
+ * |         |                       | calls `builder.graph.insertNodeBeforeBranching` (one unit)      |
  * | canvas  | "+" on the phantom    | the same affordance on the phantom empty state and on every    |
  * |         |                       | leaf's successor placeholder: the host appends with            |
  * |         |                       | `addNode({ after })` + `connect` (two units)                   |
@@ -80,6 +83,9 @@ type ConnectionsPolicy = ReturnType<Builder["graphLayout"]["connectionsPolicy"]>
 /** Whether the node surface paints its port handles. */
 type PortsPolicy = ReturnType<Builder["graphLayout"]["portsPolicy"]>;
 
+/** Where the insert "+" sits when a node has several successors. */
+type InsertHandlesPolicy = ReturnType<Builder["graphLayout"]["insertHandlesPolicy"]>;
+
 /** What a structural change arranges by itself. */
 type ArrangeOnChange = ReturnType<Builder["graphLayout"]["arrangeOnChange"]>;
 
@@ -124,6 +130,21 @@ const PORTS_POLICIES = ["visible", "hidden"] as const satisfies readonly PortsPo
 const PORTS_POLICY_LABEL: Readonly<Record<PortsPolicy, string>> = {
   visible: "every port is painted as a handle a connection can attach to",
   hidden: "no handle is painted; node renderers still receive their ports",
+};
+
+/** Insert-handle placements the host offers, in the order it shows them. */
+const INSERT_HANDLES_POLICIES = [
+  "each-edge",
+  "before-branching",
+  "both",
+] as const satisfies readonly InsertHandlesPolicy[];
+
+/** What each insert-handle placement does, in the host's own words. */
+const INSERT_HANDLES_POLICY_LABEL: Readonly<Record<InsertHandlesPolicy, string>> = {
+  "each-edge": "one \"+\" on every edge, so each relation is inserted into on its own",
+  "before-branching":
+    "one \"+\" on a node's outgoing side before the split; those edges carry none of their own",
+  both: "the branching \"+\" and the per-edge ones, side by side",
 };
 
 /** Automatic arrangement policies the host offers. */
@@ -226,6 +247,9 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     builder.graphLayout.connectionsPolicy(),
   );
   const [ports, setPorts] = useState<PortsPolicy>(() => builder.graphLayout.portsPolicy());
+  const [insertHandles, setInsertHandles] = useState<InsertHandlesPolicy>(() =>
+    builder.graphLayout.insertHandlesPolicy(),
+  );
   const [arrangeOnChange, setArrangeOnChange] = useState<ArrangeOnChange>(() =>
     builder.graphLayout.arrangeOnChange(),
   );
@@ -377,6 +401,23 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     setStatus(`Ports "${changed.value}": ${PORTS_POLICY_LABEL[changed.value]}.`);
   };
 
+  /** Changes where the insert "+" sits when a node has several successors. */
+  const selectInsertHandles = (reported: string): void => {
+    const policy = offered(INSERT_HANDLES_POLICIES, reported);
+    if (policy === undefined) {
+      return;
+    }
+    const changed = builder.graphLayout.setInsertHandlesPolicy(policy);
+    if (!changed.ok) {
+      setStatus(`Insert handles "${reported}" were not applied — ${issueSummary(changed.error)}`);
+      return;
+    }
+    setInsertHandles(changed.value);
+    setStatus(
+      `Insert handles "${changed.value}": ${INSERT_HANDLES_POLICY_LABEL[changed.value]}.`,
+    );
+  };
+
   /** Changes what a structural change arranges by itself. */
   const selectArrangeOnChange = (reported: string): void => {
     const policy = offered(ARRANGE_ON_CHANGE_POLICIES, reported);
@@ -485,9 +526,13 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   /**
    * Creates the node the dialog offered.
    *
-   * One dialog, three creation paths, each identified by the presentation state
+   * One dialog, four creation paths, each identified by the presentation state
    * the affordance that opened it recorded:
    *
+   * - a branching "+" (`pendingBranchInsertId`): the definition is inserted
+   *   **between** that node and all of its successors with
+   *   `builder.graph.insertNodeBeforeBranching`, one history unit, so one undo
+   *   restores the parent's original edges;
    * - an edge "+" (`pendingEdgeInsertId`): the definition is inserted **into**
    *   that edge with `builder.graph.insertNode`, one history unit, so one undo
    *   restores the original edge;
@@ -509,6 +554,31 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
    * there is no transaction here that could roll it back.
    */
   const addNode = (definitionId: string): void => {
+    const branchParentId = ui.pendingBranchInsertId;
+    if (branchParentId !== undefined) {
+      const branched = builder.graph.insertNodeBeforeBranching({
+        nodeId: branchParentId,
+        type: definitionId,
+      });
+      if (!branched.ok) {
+        setStatus(
+          `Node "${definitionId}" was not inserted before the branches of ` +
+            `"${branchParentId}" — ${issueSummary(branched.error)}`,
+        );
+        return;
+      }
+      const repointed =
+        branched.value.edges.length === 0
+          ? "the parent had no successor, so it was simply appended (two history units)"
+          : `${String(branched.value.edges.length)} successor edge(s) re-pointed through it`;
+      setStatus(
+        `Node "${branched.value.node.id}" inserted before the branches of ` +
+          `"${branchParentId}" at ${positionLabel(branched.value.node.position)}; ` +
+          `${repointed}. One undo restores the parent's edges.`,
+      );
+      return;
+    }
+
     const edgeId = ui.pendingEdgeInsertId;
     if (edgeId !== undefined) {
       const inserted = builder.graph.insertNode({ edgeId, type: definitionId });
@@ -583,6 +653,7 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     `drag ${drag}`,
     `connections ${connections}`,
     `ports ${ports}`,
+    `insert handles ${insertHandles}`,
     `arrange on ${arrangeOnChange}`,
     `remove ${removal}`,
     `edge "+" ${edgeInsertion ? "on" : "off"}`,
@@ -798,6 +869,24 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
                 </select>
               </label>
 
+              <label className="demo-control">
+                Insert handles
+                <select
+                  className="demo-select"
+                  data-demo-control="insert-handles"
+                  value={insertHandles}
+                  onChange={(event) => {
+                    selectInsertHandles(event.target.value);
+                  }}
+                >
+                  {INSERT_HANDLES_POLICIES.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <p className="demo-state" data-demo-state="edge-insertion">
                 {`edge "+" ${edgeInsertion ? "on" : "off"}`}
               </p>
@@ -807,7 +896,11 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
                 {" in builder.ts is what makes every edge paint the framework's "}
                 <code>{'"+"'}</code>
                 {". A host decides it when it composes the builder, so this panel "}
-                {"reports it instead of pretending to switch it."}
+                {"reports it instead of pretending to switch it. The branching "}
+                <code>{'"+"'}</code>
+                {" it also paints before a split appears only when "}
+                <code>Insert handles</code>
+                {" asks for it."}
               </p>
             </div>
           </fieldset>

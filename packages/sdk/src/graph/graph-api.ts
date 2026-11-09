@@ -24,6 +24,7 @@ import {
   arrangeGraph,
   clearSelection,
   createEdge,
+  insertNodeBeforeBranching,
   insertNodeOnEdge,
   moveNode,
   redo,
@@ -106,6 +107,38 @@ export interface InsertNodeResult {
   readonly node: NodeInstanceView;
   /** The two edges replacing the original, in flow order: source → node, node → target. */
   readonly edges: readonly [EdgeInstanceView, EdgeInstanceView];
+}
+
+/**
+ * One node to insert **before the split** of an existing node, in the public
+ * `type` vocabulary.
+ *
+ * The parent's outgoing edges are replaced by one relation from the parent to
+ * the new node plus one relation from the new node to each former successor:
+ * `parent --> s1`, `parent --> s2` becomes `parent --> node --> s1`,
+ * `node --> s2`. `type` is the definition of the **inserted** node; the new
+ * relations take the ports of the edges they replaced and, from the first of
+ * them, their definition type.
+ */
+export interface InsertNodeBeforeBranchingRequest {
+  /** Parent whose outgoing edges the new node is inserted before. */
+  readonly nodeId: string;
+  /** Globally qualified definition type of the inserted node, e.g. `http.retry`. */
+  readonly type: string;
+  /** Explicit instance id of the inserted node; generated when omitted. */
+  readonly newNodeId?: string;
+  readonly properties?: Readonly<Record<string, unknown>>;
+}
+
+/** What a successful branching insertion created, in the §9 instance vocabulary. */
+export interface InsertNodeBeforeBranchingResult {
+  readonly node: NodeInstanceView;
+  /** The one edge from the parent to the inserted node. */
+  readonly edge: EdgeInstanceView;
+  /** One edge per former successor relation, all leaving from the inserted node. */
+  readonly edges: readonly EdgeInstanceView[];
+  /** Every edge the insertion replaced; one `undo()` restores them with their ids. */
+  readonly replacedEdges: readonly EdgeInstanceView[];
 }
 
 /** One edge to create between two node instances. */
@@ -282,6 +315,45 @@ export interface BuilderGraphApi {
    * arrangement is reported by {@link BuilderGraphApi.lastAutoArrangement}.
    */
   insertNode(request: InsertNodeRequest): Result<InsertNodeResult, SdkIssues>;
+  /**
+   * Inserts one node **between a parent and all of its successors** (S23).
+   *
+   * The request names the parent node the branching "+" represents. The
+   * parent's outgoing edges are replaced — in **one** history unit,
+   * all-or-nothing — by one relation `parent --> node` and one relation
+   * `node --> successor` per former successor edge. The ports come from the
+   * edges that were replaced (the parent's from its own edge, each successor's
+   * from its own edge) and the new relations take the definition type of the
+   * first replaced edge. A successor relation whose endpoints and ports would
+   * duplicate one already written is skipped, so two equivalent successor edges
+   * collapse into one relation instead of leaving a duplicate behind.
+   *
+   * One `undo()` restores the parent's original edges with their ids and removes
+   * the node. The request is validated exactly like {@link
+   * BuilderGraphApi.insertNode}: an unknown parent is `sdk.invalid-input` at path
+   * `nodeId`, and an unknown definition, a taken instance id (`newNodeId`) or a
+   * definition without a usable input / output port come back as the use case's
+   * own structured diagnostic. Nothing is written, pushed or emitted when any of
+   * them refuses.
+   *
+   * Placement follows the add rule: in `mode: "auto"` the node lands one step
+   * past the parent along the declared axis — the same anchor rule the palette
+   * uses — and `mode: "free"` invents no position. The position is decided before
+   * the use case runs, so it belongs to the same history unit as the insertion.
+   *
+   * A parent with no outgoing edge degrades to the ordinary append the rule
+   * names: `addNode({ after: nodeId })` plus `connect`, i.e. **two** history
+   * units, exactly like the phantom append of the canvas.
+   *
+   * With `graph.layout.arrangeOnChange: "downstream"` and `mode: "auto"` the
+   * insertion is followed by a second history unit that arranges the inserted
+   * node and its descendants (see {@link BuilderGraphApi.arrange}); the mutation
+   * never fails because of it and a refusal is reported by {@link
+   * BuilderGraphApi.lastAutoArrangement}.
+   */
+  insertNodeBeforeBranching(
+    request: InsertNodeBeforeBranchingRequest,
+  ): Result<InsertNodeBeforeBranchingResult, SdkIssues>;
   /**
    * Creates one edge between two node instances.
    *
@@ -567,6 +639,28 @@ function missingEdgeIssue(edgeId: string): SdkIssue {
       "sdk.invalid-input",
       `Graph has no edge with id "${edgeId}" to insert a node on`,
       { path: ["edgeId"], metadata: { useCaseCode: "edge-not-found", elementId: edgeId } },
+    ),
+    severity: "error",
+  };
+}
+
+/**
+ * Issue for a branching parent (`InsertNodeBeforeBranchingRequest.nodeId`) that
+ * is not in the graph.
+ *
+ * Placement anchors on the parent and the use case re-points its edges, so a
+ * missing parent is refused at the field the caller wrote instead of reaching the
+ * use case as a bare failure.
+ */
+function unknownBranchParentIssue(nodeId: string): SdkIssue {
+  return {
+    ...sdkError(
+      "sdk.invalid-input",
+      `Graph has no node with id "${nodeId}" to insert a node before its branches`,
+      {
+        path: ["nodeId"],
+        metadata: { value: nodeId, useCaseCode: "node-not-found", elementId: nodeId },
+      },
     ),
     severity: "error",
   };
@@ -884,7 +978,7 @@ export function createGraphApi(
       ? { outcome: "skipped" }
       : arrangeDownstream(editor, graphLayout, arrangeSettings, origins);
 
-  return {
+  const api: BuilderGraphApi = {
     addNode(request: AddNodeRequest): Result<NodeInstanceView, SdkIssues> {
       const closed = closedIssues(isDisposed, "graph.addNode");
       if (closed !== undefined) {
@@ -1051,6 +1145,92 @@ export function createGraphApi(
         toEdgeInstanceView(inserted.value.edges[1]),
       ];
       return ok({ node: toNodeInstanceView(inserted.value.node), edges });
+    },
+
+    insertNodeBeforeBranching(
+      request: InsertNodeBeforeBranchingRequest,
+    ): Result<InsertNodeBeforeBranchingResult, SdkIssues> {
+      const closed = closedIssues(isDisposed, "graph.insertNodeBeforeBranching");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const invalid =
+        requestIssues(
+          request,
+          "Insert-before-branching request must be an object declaring the parent and a node type",
+        ) ??
+        identifierIssues("Node", request.nodeId, ["nodeId"]) ??
+        textIssues("Insert-before-branching request", "type", request.type, ["type"]) ??
+        (request.newNodeId === undefined
+          ? undefined
+          : identifierIssues("Node", request.newNodeId, ["newNodeId"])) ??
+        (request.properties === undefined
+          ? undefined
+          : propertyMapIssues(request.properties));
+      if (invalid !== undefined) {
+        return err(invalid);
+      }
+      // The parent is resolved before anything is created because placement
+      // anchors on it: an id the graph does not hold is a refusal, never a guess.
+      const parent = editor.getNode(request.nodeId);
+      if (parent === undefined) {
+        return err([unknownBranchParentIssue(request.nodeId)]);
+      }
+      const successors = editor.graph
+        .getEdgesOf(parent.id)
+        .filter((edge) => edge.connection.source.nodeId === parent.id);
+      if (successors.length === 0) {
+        // No split to replace: the rule names the ordinary append instead, which
+        // is two history units (create, then connect), exactly like the phantom
+        // append of the canvas.
+        const added = api.addNode({
+          type: request.type,
+          after: request.nodeId,
+          ...(request.newNodeId === undefined ? {} : { nodeId: request.newNodeId }),
+          ...(request.properties === undefined ? {} : { properties: request.properties }),
+        });
+        if (!added.ok) {
+          return err(added.error);
+        }
+        const connected = api.connect({
+          source: request.nodeId,
+          target: added.value.id,
+        });
+        if (!connected.ok) {
+          return err(connected.error);
+        }
+        lastArrangement = arrangeAfter([added.value.id]);
+        return ok({
+          node: added.value,
+          edge: connected.value,
+          edges: [],
+          replacedEdges: [],
+        });
+      }
+      const position = placeUnpositionedNode(
+        occupiedPositions(editor.graph.getNodes()),
+        graphLayout,
+        parent.position,
+      );
+      const inserted = insertNodeBeforeBranching(editor, {
+        nodeId: request.nodeId,
+        definitionId: request.type,
+        ...(request.newNodeId === undefined ? {} : { newNodeId: request.newNodeId }),
+        ...(request.properties === undefined ? {} : { properties: request.properties }),
+        ...(position === undefined ? {} : { position }),
+      });
+      if (!inserted.ok) {
+        return err([useCaseIssue(inserted.error)]);
+      }
+      // The insertion already succeeded, so the automatic arrangement is a
+      // second history unit and can never fail this call.
+      lastArrangement = arrangeAfter([inserted.value.node.id]);
+      return ok({
+        node: toNodeInstanceView(inserted.value.node),
+        edge: toEdgeInstanceView(inserted.value.edge),
+        edges: inserted.value.edges.map(toEdgeInstanceView),
+        replacedEdges: inserted.value.replacedEdges.map(toEdgeInstanceView),
+      });
     },
 
     connect(request: ConnectRequest): Result<EdgeInstanceView, SdkIssues> {
@@ -1264,4 +1444,5 @@ export function createGraphApi(
       return editor.getSelectedEdges();
     },
   };
+  return api;
 }

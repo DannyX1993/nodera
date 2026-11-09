@@ -39,7 +39,12 @@ import {
 } from "@xyflow/react";
 
 import type { EditorEngine } from "@nodera/application";
-import type { ConnectionsPolicy, DragPolicy, PortsPolicy } from "@nodera/ui-core";
+import type {
+  ConnectionsPolicy,
+  DragPolicy,
+  InsertHandlesPolicy,
+  PortsPolicy,
+} from "@nodera/ui-core";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
 import { useEdgeInsertActions, useNoderaUi } from "@nodera/ui-react";
 import {
@@ -680,6 +685,199 @@ export const CanvasPlaceholderOverlay: FC<{
 };
 
 /* ------------------------------------------------------------------ */
+/*  Insert-handle placement (S23): the branching "+", also an overlay  */
+/* ------------------------------------------------------------------ */
+
+/** Accessible name of the framework's branching "+" button. */
+export const BRANCH_INSERT_LABEL = "Insert node before the branches";
+
+/** One branching affordance, in flow coordinates. Never a node or an edge. */
+export interface BranchHandle {
+  /** Parent whose split the insertion replaces. */
+  readonly nodeId: string;
+  readonly x: number;
+  readonly y: number;
+}
+
+/** What {@link canvasBranchHandles} needs to derive the branching handles. */
+export interface CanvasBranchHandleInput {
+  /** The `edgeInsertion` flag: off means the canvas paints none of them. */
+  readonly enabled: boolean;
+  /** `graph.layout.insertHandles`, reflected in the UI state; defaults to `"each-edge"`. */
+  readonly policy?: InsertHandlesPolicy | undefined;
+  /** Axis the host declares; defaults to `"horizontal"`. */
+  readonly axis?: PlaceholderAxis | undefined;
+  readonly nodes: readonly PlaceholderNodeInput[];
+  /** Edges of the document; two outgoing edges are what a split is. */
+  readonly edges: ReadonlyArray<{ readonly source: string; readonly target: string }>;
+}
+
+/**
+ * Whether a policy asks for the branching "+" at all.
+ *
+ * `"each-edge"` — the default — is today's behaviour and draws none of them.
+ */
+export function wantsBranchHandle(policy: InsertHandlesPolicy | undefined): boolean {
+  return policy === "before-branching" || policy === "both";
+}
+
+/**
+ * Ids of the nodes with two or more outgoing edges: the nodes with a split to
+ * insert before.
+ *
+ * Two outgoing edges, not two distinct targets: a parallel relation to the same
+ * successor is still a relation the insertion replaces, and counting targets
+ * would hide one handle for a shape that needs it.
+ */
+export function branchingNodeIds(
+  edges: ReadonlyArray<{ readonly source: string }>,
+): ReadonlySet<string> {
+  const counts = new Map<string, number>();
+  for (const edge of edges) {
+    counts.set(edge.source, (counts.get(edge.source) ?? 0) + 1);
+  }
+  const branching = new Set<string>();
+  for (const [nodeId, count] of counts) {
+    if (count >= 2) {
+      branching.add(nodeId);
+    }
+  }
+  return branching;
+}
+
+/**
+ * Derives every branching "+" the canvas draws, in flow coordinates.
+ *
+ * One handle per parent with at least two outgoing edges, one documented step
+ * past the node along the declared axis and centred on its row — i.e. on the
+ * parent's outgoing side, before the edges split. Like the phantom placeholders
+ * the result is geometry, not graph elements: the canvas paints it through
+ * `ViewportPortal`, so it can never reach the React Flow `nodes` / `edges`
+ * arrays, the document, an event or a history entry.
+ */
+export function canvasBranchHandles(
+  input: CanvasBranchHandleInput,
+): readonly BranchHandle[] {
+  if (!input.enabled || !wantsBranchHandle(input.policy)) {
+    return [];
+  }
+  const axis = input.axis ?? "horizontal";
+  const branching = branchingNodeIds(input.edges);
+  const handles: BranchHandle[] = [];
+  for (const node of input.nodes) {
+    if (!branching.has(node.id)) {
+      continue;
+    }
+    const width = node.width ?? PLACEHOLDER_NODE_SIZE.width;
+    const height = node.height ?? PLACEHOLDER_NODE_SIZE.height;
+    const { x, y } = node.position;
+    handles.push(
+      axis === "vertical"
+        ? { nodeId: node.id, x: x + width / 2, y: y + PHANTOM_NODE_OFFSET }
+        : { nodeId: node.id, x: x + PHANTOM_NODE_OFFSET, y: y + height / 2 },
+    );
+  }
+  return handles;
+}
+
+/** What {@link edgeOffersInsertHandle} needs to decide about one edge. */
+export interface EdgeInsertPlacementInput {
+  readonly policy?: InsertHandlesPolicy | undefined;
+  /** Source node of the edge being asked about. */
+  readonly sourceId: string;
+  /** Nodes with two or more outgoing edges; see {@link branchingNodeIds}. */
+  readonly branchNodeIds: ReadonlySet<string>;
+}
+
+/**
+ * Whether one edge keeps its own "+" under the policy in effect.
+ *
+ * `"each-edge"` and `"both"` keep every per-edge handle. `"before-branching"`
+ * draws one handle **instead of** the per-edge ones on a branching parent, and
+ * leaves every other edge alone: a single-successor parent keeps the ordinary
+ * affordance, because there is no split to put a handle before.
+ */
+export function edgeOffersInsertHandle(input: EdgeInsertPlacementInput): boolean {
+  if (input.policy !== "before-branching") {
+    return true;
+  }
+  return !input.branchNodeIds.has(input.sourceId);
+}
+
+/**
+ * The framework's branching "+": records the parent the dialog branches from
+ * and opens the node-creation dialog.
+ *
+ * A native `button`, so `Enter` and `Space` activate it and it takes part in the
+ * tab order without a key handler of its own. Like the other affordances it
+ * writes presentation state only — `UiState.pendingBranchInsertId` — and clears
+ * the sessions of the other affordances first, so a pick can never be read as an
+ * insertion into an edge or as an append after a node.
+ */
+export const DefaultBranchInsertButton: FC<{ readonly nodeId: string }> = ({ nodeId }) => {
+  const { store } = useNoderaUi();
+
+  return (
+    <button
+      type="button"
+      data-nodera-branch-insert=""
+      data-nodera-branch-insert-for={nodeId}
+      aria-label={BRANCH_INSERT_LABEL}
+      aria-haspopup="dialog"
+      style={EDGE_INSERT_BUTTON_STYLE}
+      onClick={(event) => {
+        event.stopPropagation();
+        const opened = store.openDialog(NODERA_CREATE_NODE_DIALOG_ID);
+        if (!opened.ok) {
+          return;
+        }
+        store.setPendingEdgeInsertId(undefined);
+        store.setPendingAppendAnchorId(undefined);
+        store.setPendingBranchInsertId(nodeId);
+      }}
+    >
+      +
+    </button>
+  );
+};
+
+/**
+ * The branching overlay: the "+" of every split, drawn inside the viewport.
+ *
+ * `<ViewportPortal>` keeps it in the viewport's transform layer, so it shares
+ * the nodes' coordinate system and pans and zooms with them, while staying out of
+ * React Flow's `nodes` and `edges` arrays — the separation that keeps a
+ * presentation control from ever becoming a graph element.
+ */
+export const CanvasBranchHandleOverlay: FC<{
+  readonly handles: readonly BranchHandle[];
+}> = ({ handles }) => {
+  if (handles.length === 0) {
+    return null;
+  }
+
+  return (
+    <ViewportPortal>
+      {handles.map((handle) => (
+        <div
+          key={handle.nodeId}
+          data-nodera-branch-handle={handle.nodeId}
+          style={{
+            position: "absolute",
+            transform: `translate(-50%, -50%) translate(${String(handle.x)}px, ${String(
+              handle.y,
+            )}px)`,
+            pointerEvents: "none",
+          }}
+        >
+          <DefaultBranchInsertButton nodeId={handle.nodeId} />
+        </div>
+      ))}
+    </ViewportPortal>
+  );
+};
+
+/* ------------------------------------------------------------------ */
 /*  Drag commit                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -925,6 +1123,18 @@ export interface GraphCanvasProps {
    */
   readonly portsPolicy?: PortsPolicy;
   /**
+   * Where the insert "+" affordance sits when a node has several successors
+   * (S23).
+   *
+   * The host owns the value (it is UI state in `@nodera/ui-core`, seeded from
+   * `graph.layout.insertHandles`). `"each-edge"` — the default — keeps one "+" on
+   * every edge. `"before-branching"` draws a single "+" on a branching parent's
+   * outgoing side, before the edges split, and those edges lose their own handle
+   * while every other edge keeps it. `"both"` draws both. Only meaningful while
+   * `edgeInsertion` is on: with the affordance off nothing is drawn either way.
+   */
+  readonly insertHandles?: InsertHandlesPolicy;
+  /**
    * Render the "+" affordance centred on every edge (S6).
    *
    * Off by default: the canvas adds no control the host did not ask for.
@@ -1021,6 +1231,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   connectionsPolicy = "editable",
   portsPolicy = "visible",
   edgeInsertion = false,
+  insertHandles = "each-edge",
   layoutDirection = "horizontal",
   renderEdgeInsert,
   className,
@@ -1069,23 +1280,39 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [nodesWithDims, nodeTypes],
   );
 
+  // Which nodes have a split to insert before, and which edges therefore lose
+  // their own "+" under `"before-branching"` (S23).
+  const branchNodeIds = useMemo(() => branchingNodeIds(edges), [edges]);
+  const edgeSources = useMemo(
+    () => new Map(edges.map((edge) => [edge.id, edge.source])),
+    [edges],
+  );
+
   // Build edgeTypes map: registry renderers + default sentinel. When the
   // affordance is enabled every type is wrapped, so a custom renderer keeps its
   // own "+" instead of losing the feature.
-  const edgeTypes = useMemo(
-    () =>
-      canvasEdgeTypes(
-        edgeRenderers,
-        edgeInsertion
-          ? {
-              render:
-                renderEdgeInsert ??
-                ((edgeId: string) => <DefaultEdgeInsertButton edgeId={edgeId} />),
-            }
-          : undefined,
-      ),
-    [edgeRenderers, edgeInsertion, renderEdgeInsert],
-  );
+  const edgeTypes = useMemo(() => {
+    if (!edgeInsertion) {
+      return canvasEdgeTypes(edgeRenderers);
+    }
+    const hostRender = renderEdgeInsert;
+    return canvasEdgeTypes(edgeRenderers, {
+      render: (edgeId: string): ReactNode => {
+        const sourceId = edgeSources.get(edgeId);
+        if (
+          sourceId !== undefined &&
+          !edgeOffersInsertHandle({ policy: insertHandles, sourceId, branchNodeIds })
+        ) {
+          return null;
+        }
+        return hostRender === undefined ? (
+          <DefaultEdgeInsertButton edgeId={edgeId} />
+        ) : (
+          hostRender(edgeId)
+        );
+      },
+    });
+  }, [edgeRenderers, edgeInsertion, renderEdgeInsert, insertHandles, branchNodeIds, edgeSources]);
 
   // Phantom placeholders (S7, S21): an overlay, never graph elements. The
   // boxes are derived from what the document holds on every render — positions,
@@ -1109,6 +1336,26 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         edges,
       }),
     [edgeInsertion, layoutDirection, nodesWithTypes, edges],
+  );
+
+  // The branching "+" (S23): the same overlay discipline as the placeholders —
+  // geometry derived from the document on every render, painted through
+  // `ViewportPortal`, never an element React Flow manages.
+  const branchHandles = useMemo(
+    () =>
+      canvasBranchHandles({
+        enabled: edgeInsertion,
+        policy: insertHandles,
+        axis: layoutDirection,
+        nodes: nodesWithTypes.map((node) => ({
+          id: node.id,
+          position: node.position,
+          width: node.measured?.width ?? node.width,
+          height: node.measured?.height ?? node.height,
+        })),
+        edges,
+      }),
+    [edgeInsertion, insertHandles, layoutDirection, nodesWithTypes, edges],
   );
 
   // Interaction mode → React Flow drag props (pure mapping, see
@@ -1376,6 +1623,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       >
         <Background {...canvasBackgroundOptions()} />
         <CanvasPlaceholderOverlay placeholders={placeholders} />
+        <CanvasBranchHandleOverlay handles={branchHandles} />
         {showMinimap && (
           <MiniMap nodeColor={minimapNodeColor} pannable zoomable />
         )}

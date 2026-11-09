@@ -260,3 +260,50 @@ describe("<NoderaEditor> host composition", () => {
     expect(palette?.size).toBe(300);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  Insert-handle placement (S23)                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The placement of the insert affordance is host configuration, so the editor's
+ * only job is the passthrough: `graph.layout.insertHandles` reaches the UI state
+ * and the UI state reaches the canvas. A broken wire would leave the canvas on
+ * its own default, which is exactly what these two cases tell apart.
+ */
+describe("<NoderaEditor> insert-handle placement", () => {
+  /** Builder with the affordance on and a `n1 --> { n2, n3 }` fork. */
+  function forkingBuilder(insertHandles: "each-edge" | "before-branching"): Builder {
+    const builder = assertOk(
+      createBuilder({
+        registry: { nodes: [NODE] },
+        features: { edgeInsertion: true },
+        graph: { layout: { insertHandles } },
+      }),
+    );
+    for (const nodeId of ["n1", "n2", "n3"]) {
+      assertOk(builder.graph.addNode({ type: "acme.http-request", nodeId }));
+    }
+    assertOk(builder.graph.connect({ source: "n1", target: "n2" }));
+    assertOk(builder.graph.connect({ source: "n1", target: "n3" }));
+    return builder;
+  }
+
+  it("draws the branching + when the configuration asks for it", () => {
+    const builder = forkingBuilder("before-branching");
+
+    const { container } = render(editor({ builder }));
+
+    expect(builder.store.getState().insertHandles).toBe("before-branching");
+    expect(container.querySelector("[data-nodera-branch-insert-for='n1']")).not.toBeNull();
+  });
+
+  it("draws none when the configuration keeps one handle per edge", () => {
+    const builder = forkingBuilder("each-edge");
+
+    const { container } = render(editor({ builder }));
+
+    expect(builder.store.getState().insertHandles).toBe("each-edge");
+    expect(container.querySelector("[data-nodera-branch-insert]")).toBeNull();
+  });
+});

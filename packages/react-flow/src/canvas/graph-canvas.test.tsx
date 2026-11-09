@@ -28,12 +28,14 @@ import { NoderaUiProvider } from "@nodera/ui-react";
 import {
   GraphCanvas,
   canvasBackgroundOptions,
+  canvasBranchHandles,
   canvasEdgeTypes,
   canvasPlaceholders,
   commitConnection,
   commitDraggedNodes,
   commitSelectionFromReactFlow,
   DefaultEdgeInsertButton,
+  edgeOffersInsertHandle,
 } from "./graph-canvas.js";
 import type { GraphCanvasProps } from "./graph-canvas.js";
 import { NODE_DEFINITION_MIME_TYPE } from "./definition-drop.js";
@@ -1323,5 +1325,302 @@ describe("GraphCanvas connections and ports policy", () => {
       expect(handle.style.opacity).toBe("0");
       expect(handle.style.pointerEvents).toBe("none");
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  J: insert-handle placement (S23)                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The branching affordance is the second half of the insert-handle placement:
+ * a parent with two or more successors gets **one** "+" before the split instead
+ * of one per edge, when the host asks for it.
+ *
+ * Like the phantom placeholders it is an **overlay** (`ViewportPortal`): never a
+ * React Flow node or edge, never document state. The rules are pinned at the two
+ * boundaries that own them — the pure derivation (`canvasBranchHandles`, and
+ * `edgeOffersInsertHandle` for which edges keep their own "+") and the rendered
+ * canvas for what a person sees and what the click records.
+ */
+describe("GraphCanvas insert-handle placement (S23)", () => {
+  afterEach(cleanup);
+
+  function branchStore(): UiStateStore {
+    const dialogs = new DialogRegistry();
+    dialogs.register(CREATE_NODE_DIALOG);
+    return new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      dialogRegistry: dialogs,
+    });
+  }
+
+  function renderHandles(
+    engine: EditorEngine,
+    props: Partial<GraphCanvasProps> = {},
+  ) {
+    return render(
+      <NoderaUiProvider store={branchStore()} editor={engine}>
+        <div style={{ width: 800, height: 600 }}>
+          <ReactFlowProvider>
+            <GraphCanvas editor={engine} edgeInsertion {...props} />
+          </ReactFlowProvider>
+        </div>
+      </NoderaUiProvider>,
+    );
+  }
+
+  /** What React Flow holds while the branching overlay is drawn. */
+  function flowContents(
+    engine: EditorEngine,
+  ): { readonly nodes: readonly string[]; readonly edges: readonly string[] } {
+    const seen = { nodes: [] as readonly string[], edges: [] as readonly string[] };
+    function FlowProbe(): null {
+      const nodes = useNodes();
+      const edges = useEdges();
+      seen.nodes = nodes.map((node) => node.id);
+      seen.edges = edges.map((edge) => edge.id);
+      return null;
+    }
+    render(
+      <NoderaUiProvider store={branchStore()} editor={engine}>
+        <div style={{ width: 800, height: 600 }}>
+          <ReactFlowProvider>
+            <GraphCanvas editor={engine} edgeInsertion insertHandles="before-branching" />
+            <FlowProbe />
+          </ReactFlowProvider>
+        </div>
+      </NoderaUiProvider>,
+    );
+    return seen;
+  }
+
+  /** `n1 --> { n2, n3 }`: the branching shape the affordance exists for. */
+  function forkingGraph(engine: EditorEngine = makeEngine()): EditorEngine {
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 240, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n3", position: { x: 240, y: 200 } });
+    createEdge(engine, {
+      source: { nodeId: "n1", portId: "out-1" },
+      target: { nodeId: "n2", portId: "in-1" },
+    });
+    createEdge(engine, {
+      source: { nodeId: "n1", portId: "out-1" },
+      target: { nodeId: "n3", portId: "in-1" },
+    });
+    return engine;
+  }
+
+  const FORK_NODES = [
+    { id: "n1", position: { x: 0, y: 0 }, width: 140, height: 40 },
+    { id: "n2", position: { x: 240, y: 0 } },
+    { id: "n3", position: { x: 240, y: 200 } },
+  ] as const;
+
+  const FORK_EDGES = [
+    { source: "n1", target: "n2" },
+    { source: "n1", target: "n3" },
+  ] as const;
+
+  it("derives one handle per branching parent under the two policies that ask for it", () => {
+    for (const policy of ["before-branching", "both"] as const) {
+      const handles = canvasBranchHandles({
+        enabled: true,
+        policy,
+        nodes: FORK_NODES,
+        edges: FORK_EDGES,
+      });
+
+      expect(handles.map((handle) => handle.nodeId)).toEqual(["n1"]);
+    }
+  });
+
+  it("derives no handle under the per-edge policy, which is the default", () => {
+    expect(
+      canvasBranchHandles({ enabled: true, nodes: FORK_NODES, edges: FORK_EDGES }),
+    ).toEqual([]);
+    expect(
+      canvasBranchHandles({
+        enabled: true,
+        policy: "each-edge",
+        nodes: FORK_NODES,
+        edges: FORK_EDGES,
+      }),
+    ).toEqual([]);
+  });
+
+  it("derives nothing for a parent with fewer than two outgoing edges", () => {
+    const single = canvasBranchHandles({
+      enabled: true,
+      policy: "both",
+      nodes: [FORK_NODES[0], FORK_NODES[1]],
+      edges: [{ source: "n1", target: "n2" }],
+    });
+    const none = canvasBranchHandles({
+      enabled: true,
+      policy: "both",
+      nodes: [FORK_NODES[0]],
+      edges: [],
+    });
+
+    expect(single).toEqual([]);
+    expect(none).toEqual([]);
+  });
+
+  it("derives nothing when the affordance is disabled", () => {
+    expect(
+      canvasBranchHandles({
+        enabled: false,
+        policy: "both",
+        nodes: FORK_NODES,
+        edges: FORK_EDGES,
+      }),
+    ).toEqual([]);
+  });
+
+  it("places the handle one step along the axis, on the parent's row", () => {
+    const horizontal = canvasBranchHandles({
+      enabled: true,
+      policy: "both",
+      nodes: FORK_NODES,
+      edges: FORK_EDGES,
+    });
+    const vertical = canvasBranchHandles({
+      enabled: true,
+      policy: "both",
+      axis: "vertical",
+      nodes: FORK_NODES,
+      edges: FORK_EDGES,
+    });
+
+    // One documented step (240 flow units) from the parent, centred on its row.
+    expect(horizontal[0]).toEqual({ nodeId: "n1", x: 240, y: 20 });
+    expect(vertical[0]).toEqual({ nodeId: "n1", x: 70, y: 240 });
+  });
+
+  it("suppresses the per-edge handle of a branching parent under the branching policy only", () => {
+    const branchNodeIds = new Set(["n1"]);
+
+    expect(
+      edgeOffersInsertHandle({ policy: "each-edge", sourceId: "n1", branchNodeIds }),
+    ).toBe(true);
+    expect(
+      edgeOffersInsertHandle({ policy: "both", sourceId: "n1", branchNodeIds }),
+    ).toBe(true);
+    // One "+" before the split means the edges of the split have none of their own.
+    expect(
+      edgeOffersInsertHandle({
+        policy: "before-branching",
+        sourceId: "n1",
+        branchNodeIds,
+      }),
+    ).toBe(false);
+    // A single-successor parent keeps the ordinary per-edge affordance.
+    expect(
+      edgeOffersInsertHandle({
+        policy: "before-branching",
+        sourceId: "n2",
+        branchNodeIds,
+      }),
+    ).toBe(true);
+  });
+
+  it("draws the branching + for a forking parent under the branching policy", () => {
+    const { container } = renderHandles(forkingGraph(), {
+      insertHandles: "before-branching",
+    });
+
+    const button = screen.getByRole("button", { name: "Insert node before the branches" });
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.getAttribute("aria-haspopup")).toBe("dialog");
+    // An overlay inside the viewport, never an element of the node layer.
+    expect(
+      container.querySelector(".react-flow__viewport-portal [data-nodera-branch-insert]"),
+    ).not.toBeNull();
+    expect(
+      container.querySelector(
+        ".react-flow__nodes [data-nodera-branch-insert], .react-flow__edges [data-nodera-branch-insert]",
+      ),
+    ).toBeNull();
+    expect(
+      container.querySelector("[data-nodera-branch-insert-for='n1']"),
+    ).not.toBeNull();
+    // One handle for the split, not one per successor edge.
+    expect(container.querySelectorAll("[data-nodera-branch-insert]")).toHaveLength(1);
+  });
+
+  it("draws no branching + under the per-edge policy", () => {
+    const { container } = renderHandles(forkingGraph());
+
+    expect(container.querySelector("[data-nodera-branch-insert]")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Insert node before the branches" }),
+    ).toBeNull();
+  });
+
+  it("keeps the branching + as a native, keyboard-reachable dialog trigger", () => {
+    renderHandles(forkingGraph(), { insertHandles: "both" });
+
+    const button = screen.getByRole("button", {
+      name: "Insert node before the branches",
+    }) as HTMLButtonElement;
+    button.focus();
+
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.tabIndex).toBe(0);
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("records the parent and opens the dialog when the branching + is activated", () => {
+    const store = branchStore();
+    const engine = forkingGraph();
+    // Sessions left over from another affordance must not survive the click.
+    store.setPendingEdgeInsertId("edge-1");
+    store.setPendingAppendAnchorId("n2");
+    const { container } = render(
+      <NoderaUiProvider store={store} editor={engine}>
+        <div style={{ width: 800, height: 600 }}>
+          <ReactFlowProvider>
+            <GraphCanvas editor={engine} edgeInsertion insertHandles="before-branching" />
+          </ReactFlowProvider>
+        </div>
+      </NoderaUiProvider>,
+    );
+
+    fireEvent.click(
+      container.querySelector("[data-nodera-branch-insert-for='n1']") as HTMLElement,
+    );
+
+    expect(store.getState().pendingBranchInsertId).toBe("n1");
+    expect(store.getState().pendingEdgeInsertId).toBeUndefined();
+    expect(store.getState().pendingAppendAnchorId).toBeUndefined();
+    expect(store.getState().activeDialogId).toBe(NODERA_CREATE_NODE_DIALOG_ID);
+  });
+
+  it("writes nothing into the graph, its history or its events, and keeps every real edge", () => {
+    const engine = forkingGraph();
+    const nodeCreated = vi.fn();
+    const edgeCreated = vi.fn();
+    engine.events.subscribe("node.created", nodeCreated);
+    engine.events.subscribe("edge.created", edgeCreated);
+    const before = {
+      nodes: engine.graph.getNodes().map((node) => String(node.id)),
+      edges: engine.graph.getEdges().map((edge) => String(edge.id)),
+      history: engine.history.size(),
+    };
+
+    const { container } = renderHandles(engine, { insertHandles: "both" });
+
+    const contents = flowContents(engine);
+    expect([...contents.nodes].sort()).toEqual(["n1", "n2", "n3"]);
+    expect(contents.edges).toEqual(before.edges);
+    expect(container.querySelectorAll(".react-flow__node")).toHaveLength(3);
+    expect(engine.graph.getNodes().map((node) => String(node.id))).toEqual(before.nodes);
+    expect(engine.graph.getEdges().map((edge) => String(edge.id))).toEqual(before.edges);
+    expect(engine.history.size()).toBe(before.history);
+    expect(nodeCreated).not.toHaveBeenCalled();
+    expect(edgeCreated).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-nodera-branch-insert]")).not.toBeNull();
   });
 });

@@ -497,3 +497,248 @@ describe("graph.insertNode: the downstream auto policy", () => {
     expect(builder.graph.nodes().map((node) => node.id)).not.toContain("node-middle");
   });
 });
+
+/**
+ * `builder.graph.insertNodeBeforeBranching` (odd S23): one node inserted between
+ * a parent and **all** of its successors.
+ *
+ * The graph shape is the one the affordance exists for — a parent with two
+ * outgoing edges — and every assertion goes through the public builder surface,
+ * exactly like the per-edge insertion above: §9 instance views, reads through
+ * `nodes()` / `edges()`, history only through `undo()` / `redo()`.
+ */
+describe("graph.insertNodeBeforeBranching: the branching insertion", () => {
+  /** Parent with two successors, in `mode: "auto"` at explicit coordinates. */
+  function fork(layout: Record<string, unknown> = {}): {
+    readonly builder: Builder;
+    readonly parentId: string;
+  } {
+    const builder = create({ mode: "auto", ...layout });
+    const parent = added(builder, SOURCE, {
+      nodeId: "node-parent",
+      position: { x: 0, y: 0 },
+    });
+    const first = added(builder, MIDDLE, {
+      nodeId: "node-first",
+      position: { x: 1000, y: 0 },
+    });
+    const second = added(builder, TARGET, {
+      nodeId: "node-second",
+      position: { x: 1200, y: 0 },
+    });
+    connectOrThrow(builder, parent.id, first.id);
+    connectOrThrow(builder, parent.id, second.id);
+    return { builder, parentId: parent.id };
+  }
+
+  it("points the parent at one node and re-points every successor edge, as one history unit", () => {
+    const { builder, parentId } = fork();
+    const before = builder.graph.edges();
+
+    const inserted = builder.graph.insertNodeBeforeBranching({
+      nodeId: parentId,
+      type: MIDDLE,
+      newNodeId: "node-middle",
+    });
+    if (!inserted.ok) {
+      throw new Error(
+        `unexpected branching insert failure: ${inserted.error.map((issue) => issue.code).join(", ")}`,
+      );
+    }
+
+    expect(inserted.value.node).toMatchObject({ id: "node-middle", type: MIDDLE });
+    expect(inserted.value.edge).toMatchObject({
+      source: "node-parent",
+      sourcePort: "out",
+      target: "node-middle",
+      targetPort: "in",
+      type: FLOW,
+    });
+    expect(inserted.value.edges.map((edge) => edge.target)).toEqual([
+      "node-first",
+      "node-second",
+    ]);
+    for (const edge of inserted.value.edges) {
+      expect(edge).toMatchObject({
+        source: "node-middle",
+        sourcePort: "out",
+        targetPort: "in",
+        type: FLOW,
+      });
+    }
+    expect(inserted.value.replacedEdges).toEqual(before);
+    expect(builder.graph.edges()).toHaveLength(3);
+    expect(builder.graph.nodes().map((node) => node.id)).toContain("node-middle");
+
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.edges()).toEqual(before);
+    expect(builder.graph.nodes().map((node) => node.id)).not.toContain("node-middle");
+
+    expect(builder.graph.redo()).toBe(true);
+    expect(builder.graph.edges()).toHaveLength(3);
+    expect(builder.graph.nodes()).toHaveLength(4);
+  });
+
+  it("places the node one step past the parent in auto mode and invents no position in free mode", () => {
+    const auto = fork();
+    const placed = auto.builder.graph.insertNodeBeforeBranching({
+      nodeId: auto.parentId,
+      type: MIDDLE,
+      newNodeId: "node-middle",
+    });
+    if (!placed.ok) {
+      throw new Error("unexpected refusal");
+    }
+    expect(placed.value.node.position).toEqual({ x: 240, y: 0 });
+
+    const free = create();
+    const parent = added(free, SOURCE, { nodeId: "node-parent", position: { x: 0, y: 0 } });
+    const successor = added(free, TARGET, { nodeId: "node-successor" });
+    connectOrThrow(free, parent.id, successor.id);
+
+    const unpositioned = free.graph.insertNodeBeforeBranching({
+      nodeId: "node-parent",
+      type: MIDDLE,
+      newNodeId: "node-middle",
+    });
+    if (!unpositioned.ok) {
+      throw new Error("unexpected refusal");
+    }
+    expect(unpositioned.value.node.position).toBeUndefined();
+  });
+
+  it("skips a successor relation that would duplicate one it already wrote", () => {
+    const builder = create();
+    const parent = added(builder, SOURCE, { nodeId: "node-parent" });
+    const first = added(builder, MIDDLE, { nodeId: "node-first" });
+    const second = added(builder, TARGET, { nodeId: "node-second" });
+    // Two equivalent relations to the same successor and port: the graph allows
+    // them, but re-pointing both would leave two identical edges behind.
+    connectOrThrow(builder, parent.id, first.id);
+    connectOrThrow(builder, parent.id, first.id);
+    connectOrThrow(builder, parent.id, second.id);
+
+    const inserted = builder.graph.insertNodeBeforeBranching({
+      nodeId: "node-parent",
+      type: MIDDLE,
+      newNodeId: "node-middle",
+    });
+    if (!inserted.ok) {
+      throw new Error("unexpected refusal");
+    }
+
+    expect(inserted.value.replacedEdges).toHaveLength(3);
+    expect(inserted.value.edges.map((edge) => edge.target)).toEqual([
+      "node-first",
+      "node-second",
+    ]);
+    expect(inserted.value.edges.map((edge) => edge.target)).not.toEqual([
+      "node-first",
+      "node-first",
+      "node-second",
+    ]);
+  });
+
+  it("degrades to the ordinary append when the parent has no successor", () => {
+    const builder = create({ mode: "auto" });
+    added(builder, SOURCE, { nodeId: "node-parent", position: { x: 0, y: 0 } });
+
+    const appended = builder.graph.insertNodeBeforeBranching({
+      nodeId: "node-parent",
+      type: MIDDLE,
+      newNodeId: "node-middle",
+    });
+    if (!appended.ok) {
+      throw new Error("unexpected refusal");
+    }
+
+    // The ordinary append the rule names: `addNode({ after })` plus `connect`.
+    expect(appended.value.edge).toMatchObject({
+      source: "node-parent",
+      target: "node-middle",
+    });
+    expect(appended.value.edges).toEqual([]);
+    expect(appended.value.replacedEdges).toEqual([]);
+    expect(appended.value.node.position).toEqual({ x: 240, y: 0 });
+
+    // Two history units, exactly like the phantom append: the edge, then the node.
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.edgeCount()).toBe(0);
+    expect(builder.graph.nodes()).toHaveLength(2);
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.nodes().map((node) => node.id)).toEqual(["node-parent"]);
+  });
+
+  it("refuses like insertNode and changes nothing", () => {
+    const { builder, parentId } = fork();
+    const before = { nodes: builder.graph.nodes(), edges: builder.graph.edges() };
+
+    const unknownParent = builder.graph.insertNodeBeforeBranching({
+      nodeId: "node-ghost",
+      type: MIDDLE,
+    });
+    const unknownDefinition = builder.graph.insertNodeBeforeBranching({
+      nodeId: parentId,
+      type: "http.unknown",
+    });
+    const takenId = builder.graph.insertNodeBeforeBranching({
+      nodeId: parentId,
+      type: MIDDLE,
+      newNodeId: "node-first",
+    });
+    const malformedId = builder.graph.insertNodeBeforeBranching({
+      nodeId: "not an id",
+      type: MIDDLE,
+    });
+
+    expect(unknownParent.ok).toBe(false);
+    expect(unknownDefinition.ok).toBe(false);
+    expect(takenId.ok).toBe(false);
+    expect(malformedId.ok).toBe(false);
+    if (unknownParent.ok || unknownDefinition.ok || takenId.ok || malformedId.ok) {
+      return;
+    }
+    expect(unknownParent.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["nodeId"],
+      metadata: { useCaseCode: "node-not-found" },
+    });
+    expect(unknownDefinition.error[0]?.metadata).toMatchObject({
+      useCaseCode: "node-definition-not-found",
+    });
+    expect(takenId.error[0]?.metadata).toMatchObject({
+      useCaseCode: "duplicate-node-id",
+    });
+    expect(malformedId.error[0]?.path).toEqual(["nodeId"]);
+
+    expect(builder.graph.nodes()).toEqual(before.nodes);
+    expect(builder.graph.edges()).toEqual(before.edges);
+  });
+
+  it("arranges the inserted node and its descendants when the policy asks for it", () => {
+    const { builder, parentId } = fork();
+    expect(builder.graphLayout.setArrangeOnChange("downstream").ok).toBe(true);
+
+    const inserted = builder.graph.insertNodeBeforeBranching({
+      nodeId: parentId,
+      type: MIDDLE,
+      newNodeId: "node-middle",
+    });
+    if (!inserted.ok) {
+      throw new Error("unexpected refusal");
+    }
+
+    const outcome = builder.graph.lastAutoArrangement();
+    if (outcome.outcome !== "arranged") {
+      throw new Error(`expected an arrangement, got ${outcome.outcome}`);
+    }
+    expect(outcome.nodes.map((node: NodeInstanceView) => node.id).sort()).toEqual([
+      "node-first",
+      "node-middle",
+      "node-second",
+    ]);
+    // One undo steps the arrangement back and leaves the insertion in place.
+    expect(builder.graph.undo()).toBe(true);
+    expect(builder.graph.nodes().map((node) => node.id)).toContain("node-middle");
+  });
+});

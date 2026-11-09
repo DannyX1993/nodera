@@ -188,6 +188,23 @@ export interface GraphLayoutConfiguration {
    * policy can be changed at runtime with `builder.graphLayout.setPortsPolicy`.
    */
   readonly ports?: "visible" | "hidden";
+  /**
+   * Where the edge insertion "+" affordance sits when a node has several
+   * successors (S23).
+   *
+   * `"each-edge"` (the default) is today's behaviour: one "+" per edge.
+   * `"before-branching"` draws a single "+" on a branching parent's outgoing
+   * side, before the edges split, and those edges carry none of their own —
+   * every other edge keeps its per-edge "+". `"both"` draws both. Activating the
+   * branching "+" inserts **one** node between the parent and all of its
+   * successors (`builder.graph.insertNodeBeforeBranching`), not one node per
+   * branch.
+   *
+   * It is presentation policy, so it applies whatever owns the positions: no
+   * document write, no history entry and no event on its own. The policy can be
+   * changed at runtime with `builder.graphLayout.setInsertHandlesPolicy`.
+   */
+  readonly insertHandles?: "each-edge" | "before-branching" | "both";
 }
 
 /** Initial graph of the builder's own editing session. */
