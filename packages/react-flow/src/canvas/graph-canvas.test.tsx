@@ -972,6 +972,138 @@ describe("GraphCanvas phantom placeholders", () => {
     });
   });
 
+  /*
+   * A placeholder occupies a slot like a node does: it never overlaps a real
+   * node or another placeholder (user report: "los nodos fantasma del modo
+   * layered no deben taparse con otros nodos. Son nodos como tal asi que no
+   * deben solaparse"). The rule is a forward walk along the layout axis, so
+   * every assertion below reads the chosen boxes by x/y/width/height instead of
+   * trusting a rendering.
+   */
+
+  /** Box in flow coordinates, as the derivation reports it. */
+  interface Box {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  }
+
+  /** A leaf that can be continued: an output port is what the "+" needs. */
+  function leaf(id: string, x: number, y: number) {
+    return { id, position: { x, y }, ports: [{ direction: "output" as const }] };
+  }
+
+  /** Whether two boxes share any area at all. */
+  function intersects(a: Box, b: Box): boolean {
+    return (
+      a.x < b.x + b.width &&
+      b.x < a.x + a.width &&
+      a.y < b.y + b.height &&
+      b.y < a.y + a.height
+    );
+  }
+
+  /** The chosen boxes, in the order the derivation reports them. */
+  function boxesOf(placeholders: readonly { readonly box: Box }[]): readonly Box[] {
+    return placeholders.map((placeholder) => placeholder.box);
+  }
+
+  /** The box at `index`, refusing to continue when the derivation returned none. */
+  function boxAt(placeholders: readonly { readonly box: Box }[], index: number): Box {
+    const box = placeholders[index]?.box;
+    if (box === undefined) {
+      throw new Error(`the derivation returned no placeholder at index ${String(index)}`);
+    }
+    return box;
+  }
+
+  it("pushes a placeholder past the real node its first step would land on", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      nodes: [
+        leaf("n1", 0, 0),
+        // A real node exactly where n1's first step lands. It carries no output
+        // port, so this case isolates the collision rule from the leaf rule.
+        { id: "n2", position: { x: 240, y: 0 } },
+      ],
+      edges: [],
+    });
+
+    // One whole step further than the candidate that was occupied.
+    expect(boxesOf(placeholders)).toEqual([{ x: 480, y: 0, width: 140, height: 40 }]);
+    const pushed = boxAt(placeholders, 0);
+    expect(intersects(pushed, { x: 240, y: 0, width: 140, height: 40 })).toBe(false);
+    expect(intersects(pushed, { x: 0, y: 0, width: 140, height: 40 })).toBe(false);
+  });
+
+  it("gives two leaves whose first-step placeholders would collide distinct free slots", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      // Both leaves would step to x = 240, i.e. one on top of the other.
+      nodes: [leaf("n1", 0, 0), leaf("n2", 240, 0)],
+      edges: [],
+    });
+
+    expect(boxesOf(placeholders)).toEqual([
+      { x: 480, y: 0, width: 140, height: 40 },
+      { x: 720, y: 0, width: 140, height: 40 },
+    ]);
+    // Neither placeholder sits on a node or on the other placeholder.
+    const first = boxAt(placeholders, 0);
+    const second = boxAt(placeholders, 1);
+    const occupiedNode = { x: 240, y: 0, width: 140, height: 40 };
+    expect(intersects(first, second)).toBe(false);
+    expect(intersects(first, occupiedNode)).toBe(false);
+    expect(intersects(second, occupiedNode)).toBe(false);
+  });
+
+  it("spans the connector over the real distance to the chosen slot", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      nodes: [leaf("n1", 0, 0), { id: "n2", position: { x: 240, y: 0 } }],
+      edges: [],
+    });
+
+    const box = boxAt(placeholders, 0);
+    const connector = placeholders[0]?.connector;
+    // The dashed line starts where the node ends and stops where the pushed
+    // box begins: 340, not the 100 of the first (occupied) candidate.
+    expect(connector).toEqual({ x: 140, y: 20, length: 340, axis: "horizontal" });
+    expect((connector?.x ?? 0) + (connector?.length ?? 0)).toBe(box.x);
+  });
+
+  it("derives the same slots whatever order the nodes arrive in", () => {
+    const nodes = [leaf("n1", 0, 0), leaf("n2", 240, 0)];
+
+    const forward = canvasPlaceholders({ enabled: true, nodes, edges: [] });
+    const reversed = canvasPlaceholders({ enabled: true, nodes: [...nodes].reverse(), edges: [] });
+
+    expect(reversed).toEqual(forward);
+  });
+
+  it("keeps today's positions when nothing overlaps", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      // Two leaves on different rows: each first step is already free.
+      nodes: [leaf("n1", 0, 0), leaf("n2", 0, 200)],
+      edges: [],
+    });
+
+    expect(boxesOf(placeholders)).toEqual([
+      { x: 240, y: 0, width: 140, height: 40 },
+      { x: 240, y: 200, width: 140, height: 40 },
+    ]);
+  });
+
+  it("keeps the empty-graph placeholder at the origin", () => {
+    const placeholders = canvasPlaceholders({ enabled: true, nodes: [], edges: [] });
+
+    expect(boxesOf(placeholders)).toEqual([{ x: 0, y: 0, width: 140, height: 40 }]);
+    expect(placeholders[0]?.kind).toBe("empty-state");
+    expect(placeholders[0]?.connector).toBeUndefined();
+  });
+
   it("draws the empty-state placeholder in an empty graph", () => {
     const { container } = renderPlaceholders(makeEngine(), placeholderStore());
 

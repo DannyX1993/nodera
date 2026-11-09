@@ -447,6 +447,31 @@ like every other control the framework paints):
 | Exactly one node | The same phantom node one visual step past it, plus a dashed **phantom edge** from the real node to the placeholder; the "`+`" sits **inside the dashed box**, centred, in both cases. |
 | Two nodes or more | No empty-state phantom. Every leaf gets its own [successor placeholder](#successor-placeholders-s21) instead — never both for the same node. |
 
+A placeholder **occupies a free slot next to its node and never overlaps a real
+node or another placeholder** (user report: the ghost nodes of the layered mode
+must not cover other nodes, they behave like nodes as far as arrangement goes).
+Because a placeholder is **not part of the document**, nothing reserves space for
+it: the arrangement does not know it exists and cannot leave a hole. The
+placeholder avoids the collision itself, on every render:
+
+- the canvas starts from the occupied set — every real node's box, using the
+  measured `width`/`height` React Flow reports and the token-sized default
+  before the first measurement;
+- for each node that qualifies (leaf successors in **node id order**, so the
+  result never depends on the order the document reported them in) it takes the
+  **first slot along the layout axis that intersects no occupied box**, and adds
+  the accepted placeholder to the occupied set before deriving the next one;
+- the walk starts one step past the node (`PHANTOM_NODE_OFFSET`, and never
+  shorter than the node plus `PHANTOM_CONNECTOR_MIN_LENGTH` so the connector
+  cannot collapse) and advances by whole steps while the candidate box hits
+  something. It only pushes **forward along the axis**: the cross-axis position
+  stays on the node's own row, because a placeholder belongs next to its node and
+  not somewhere else on the canvas. The walk is bounded by the farthest occupied
+  edge along the axis, so it always terminates on a free slot;
+- the connector spans the **actual distance** to the chosen box, so a pushed
+  placeholder keeps its dashed line attached — a collision never detaches it or
+  leaves it pointing at the slot the placeholder did not take.
+
 The phantoms are **presentation only**, and that is enforced, not promised:
 
 - they are drawn as an **overlay**: plain boxes rendered through
@@ -508,7 +533,10 @@ hierarchy ends — gets one dashed phantom successor one step past it along the
 axis the host declares, joined by a dashed phantom edge, with the "`+`" inside the
 dashed box, centred — one control in one place, whether or not a connector joins
 it. It is the image the feature was asked for: a node, a dashed edge down, a
-dashed placeholder below carrying the "`+`".
+dashed placeholder below carrying the "`+`". The step is the **first free slot**
+next to the node: a real node or another placeholder already sitting there pushes
+it forward along the axis instead of being covered (see
+[the collision rule](#the-phantom-empty-state)).
 
 | The graph | What the canvas draws |
 | --- | --- |
@@ -707,7 +735,10 @@ Stated, not hidden:
 - Placeholders sit a fixed distance (`PHANTOM_NODE_OFFSET`, 240 flow units) past
   their node, and the axis is whatever the host passes as `layoutDirection`
   (`"horizontal"` by default), because the canvas adapter can see neither
-  `graph.layout.spacing` nor `graph.layout.direction`.
+  `graph.layout.spacing` nor `graph.layout.direction`. A collision with a real
+  node or another placeholder pushes the placeholder forward by whole steps
+  along that axis — the distance is no longer always one step, the **slot** is
+  always the first free one.
 - A successor placeholder marks a leaf, not a possible position: it stays one
   placeholder per leaf, never one per branch, and the branching "+" of
   `insertHandles` (S23) is a separate overlay with its own rule.

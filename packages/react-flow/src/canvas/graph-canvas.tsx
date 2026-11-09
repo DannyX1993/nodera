@@ -327,8 +327,9 @@ export type PlaceholderAxis = "horizontal" | "vertical";
  *
  * The canvas cannot see `graph.layout.spacing` (the placement rule lives in the
  * SDK, the geometry in `@nodera/graph-layout`), so the adapter owns this
- * documented numeric default — one visual step past the node, which is all a
- * placeholder needs.
+ * documented numeric default: the **first** step of the walk that looks for a
+ * free slot past the node. That one step is all a placeholder needs; when
+ * something already occupies it, {@link firstFreeSlot} moves on by whole steps.
  */
 const PHANTOM_NODE_OFFSET = 240;
 
@@ -480,45 +481,101 @@ function sourceCapable(node: PlaceholderNodeInput): boolean {
   );
 }
 
-/** One placeholder one step past `node` along `axis`. */
+/** One placeholder in the first free slot past `node` along `axis`.
+ *
+ * The placeholder occupies a slot like a node does (user report: the ghost
+ * nodes of the layered mode must not cover other nodes), so the walk starts at
+ * the documented step and moves forward by whole steps while the candidate box
+ * intersects anything already there. Only the axis moves: the cross-axis
+ * coordinate stays on the node's row, because a placeholder belongs next to its
+ * own node and not somewhere else on the canvas.
+ */
 function placeholderAfter(
   anchorId: string,
   kind: PlaceholderKind,
   node: PlaceholderNodeInput,
   axis: PlaceholderAxis,
+  occupied: readonly PlaceholderBox[],
 ): PhantomPlaceholder {
   const width = node.width ?? PLACEHOLDER_NODE_SIZE.width;
   const height = node.height ?? PLACEHOLDER_NODE_SIZE.height;
   const { x, y } = node.position;
-
   // One step past the node, but never so short that the connector disappears.
-  if (axis === "vertical") {
-    const step = Math.max(PHANTOM_NODE_OFFSET, height + PHANTOM_CONNECTOR_MIN_LENGTH);
-    return {
-      anchorId,
-      kind,
-      box: { x, y: y + step, width, height },
-      connector: {
-        x: x + width / 2,
-        y: y + height,
-        length: step - height,
-        axis,
-      },
-    };
-  }
+  const step = Math.max(
+    PHANTOM_NODE_OFFSET,
+    (axis === "vertical" ? height : width) + PHANTOM_CONNECTOR_MIN_LENGTH,
+  );
+  const box = firstFreeSlot(node, axis, step, occupied);
+  const distance = axis === "vertical" ? box.y - (y + height) : box.x - (x + width);
 
-  const step = Math.max(PHANTOM_NODE_OFFSET, width + PHANTOM_CONNECTOR_MIN_LENGTH);
   return {
     anchorId,
     kind,
-    box: { x: x + step, y, width, height },
-    connector: {
-      x: x + width,
-      y: y + height / 2,
-      length: step - width,
-      axis,
-    },
+    box,
+    connector:
+      axis === "vertical"
+        ? { x: x + width / 2, y: y + height, length: distance, axis }
+        : { x: x + width, y: y + height / 2, length: distance, axis },
   };
+}
+
+/** Whether two boxes share any area at all. */
+function intersects(a: PlaceholderBox, b: PlaceholderBox): boolean {
+  return (
+    a.x < b.x + b.width &&
+    b.x < a.x + a.width &&
+    a.y < b.y + b.height &&
+    b.y < a.y + a.height
+  );
+}
+
+/** The box the node occupies, so the walk can treat it like any other. */
+function nodeBox(node: PlaceholderNodeInput): PlaceholderBox {
+  return {
+    x: node.position.x,
+    y: node.position.y,
+    width: node.width ?? PLACEHOLDER_NODE_SIZE.width,
+    height: node.height ?? PLACEHOLDER_NODE_SIZE.height,
+  };
+}
+
+/**
+ * First free slot for `node` along `axis`, walking forward from its first step.
+ *
+ * The walk is bounded instead of open-ended: every occupied box ends at or
+ * before `farEdge` along the axis, so a candidate that starts past it cannot
+ * intersect anything. That ceiling makes the loop terminate on a free slot for
+ * any input — including boxes wider than one step or boxes belonging to other
+ * placeholders — with no retry, no randomness and no second scan.
+ */
+function firstFreeSlot(
+  node: PlaceholderNodeInput,
+  axis: PlaceholderAxis,
+  step: number,
+  occupied: readonly PlaceholderBox[],
+): PlaceholderBox {
+  const width = node.width ?? PLACEHOLDER_NODE_SIZE.width;
+  const height = node.height ?? PLACEHOLDER_NODE_SIZE.height;
+  const start = axis === "vertical" ? node.position.y : node.position.x;
+  const farEdge = occupied.reduce(
+    (far, box) => Math.max(far, axis === "vertical" ? box.y + box.height : box.x + box.width),
+    start,
+  );
+  const candidateAt = (slot: number): PlaceholderBox =>
+    axis === "vertical"
+      ? { x: node.position.x, y: start + slot * step, width, height }
+      : { x: start + slot * step, y: node.position.y, width, height };
+
+  // The first slot past every occupied far edge is free by construction.
+  const limit = Math.max(1, Math.ceil((farEdge - start) / step)) + 1;
+  for (let slot = 1; slot <= limit; slot += 1) {
+    const candidate = candidateAt(slot);
+    if (!occupied.some((box) => intersects(candidate, box))) {
+      return candidate;
+    }
+  }
+  // Unreachable: the loop's last slot already starts past every occupied edge.
+  return candidateAt(limit);
 }
 
 /**
@@ -528,12 +585,18 @@ function placeholderAfter(
  * for itself:
  *
  * - the **empty state** (S7): with no node at all, the placeholder sits at the
- *   origin and has no connector; with exactly one node it sits one step past it
- *   and a dashed connector joins the two;
+ *   origin and has no connector; with exactly one node it sits one free step
+ *   past it and a dashed connector joins the two;
  * - the **successor placeholders** (S21): from two nodes on, every node with no
  *   outgoing edge *and* a source-capable port gets one — a leaf is where the
  *   hierarchy ends, so a successor is unambiguous there. A leaf with no output
  *   port gets nothing.
+ *
+ * Every placeholder takes the first slot along the axis that intersects no
+ * occupied box, and each accepted one joins the occupied set, so a placeholder
+ * behaves like a node for the ones derived after it: leaves are walked in node
+ * id order, which makes the result independent of the order the document (or a
+ * React Flow measurement) reported them in.
  *
  * The result is geometry, not graph elements: the canvas paints it through
  * `ViewportPortal`, so nothing here can reach the React Flow `nodes` / `edges`
@@ -557,13 +620,23 @@ export function canvasPlaceholders(
   }
 
   if (input.nodes.length === 1 && anchor !== undefined) {
-    return [placeholderAfter(anchor.id, "empty-state", anchor, axis)];
+    return [
+      placeholderAfter(anchor.id, "empty-state", anchor, axis, [nodeBox(anchor)]),
+    ];
   }
 
   const hasSuccessor = new Set(input.edges.map((edge) => edge.source));
-  return input.nodes
+  const occupied: PlaceholderBox[] = input.nodes.map((node) => nodeBox(node));
+  // Node id order, so the arrangement never depends on iteration order.
+  const leaves = input.nodes
     .filter((node) => !hasSuccessor.has(node.id) && sourceCapable(node))
-    .map((node) => placeholderAfter(node.id, "successor", node, axis));
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  return leaves.map((node) => {
+    const placeholder = placeholderAfter(node.id, "successor", node, axis, occupied);
+    occupied.push(placeholder.box);
+    return placeholder;
+  });
 }
 
 /**
@@ -1180,9 +1253,11 @@ export interface GraphCanvasProps {
    *
    * The host declares it, because the canvas adapter can read neither
    * `graph.layout.direction` nor `graph.layout.spacing`: one step is the
-   * adapter's documented `PHANTOM_NODE_OFFSET` (240 flow units). Defaults to
-   * `"horizontal"`. It changes no document state; a host composing
-   * `<NoderaEditor>` passes the same value as `NoderaEditor.layoutDirection`.
+   * adapter's documented `PHANTOM_NODE_OFFSET` (240 flow units), and a
+   * collision with a real node or another placeholder pushes the box forward by
+   * whole steps along this axis. Defaults to `"horizontal"`. It changes no
+   * document state; a host composing `<NoderaEditor>` passes the same value as
+   * `NoderaEditor.layoutDirection`.
    */
   readonly layoutDirection?: PlaceholderAxis;
   /**
