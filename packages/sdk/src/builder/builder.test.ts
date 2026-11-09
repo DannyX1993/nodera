@@ -97,6 +97,7 @@ describe("createBuilder defaults", () => {
       history: true,
       validation: true,
       edgeInsertion: false,
+      setEdgeInsertion: expect.any(Function),
     });
     expect(builder.registries.nodes.size).toBe(0);
     expect(builder.registries.edges.size).toBe(0);
@@ -230,6 +231,7 @@ describe("feature configuration", () => {
       history: true,
       validation: true,
       edgeInsertion: false,
+      setEdgeInsertion: expect.any(Function),
     });
     expect(create({ features: { history: false } }).features.history).toBe(false);
   });

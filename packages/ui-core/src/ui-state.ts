@@ -186,6 +186,15 @@ export interface UiState {
    * nothing: the port data still reaches every node renderer.
    */
   readonly ports: PortsPolicy;
+  /**
+   * Whether the canvas paints the per-edge "+" insertion affordance.
+   *
+   * The builder seeds it from `features.edgeInsertion` and changes it at
+   * runtime through `builder.features.setEdgeInsertion`; the canvas adapter
+   * reads it reactively, so flipping it re-renders without a rebuild. Hiding
+   * the affordance writes nothing: the graph data is untouched.
+   */
+  readonly edgeInsertion: boolean;
 }
 
 /** Initial values accepted by {@link UiStateStore}. */
@@ -222,6 +231,11 @@ export interface UiStateStoreOptions {
    * behaviour.
    */
   readonly ports?: PortsPolicy;
+  /**
+   * Per-edge "+" insertion affordance. Defaults to `false`, the behaviour of
+   * a canvas whose host did not ask for the affordance.
+   */
+  readonly edgeInsertion?: boolean;
 }
 
 /** Listener notified after every state change. */
@@ -257,6 +271,7 @@ export class UiStateStore {
       nodeTransition: options.nodeTransition ?? "instant",
       connections: options.connections ?? "editable",
       ports: options.ports ?? "visible",
+      edgeInsertion: options.edgeInsertion ?? false,
     };
   }
 
@@ -511,6 +526,22 @@ export class UiStateStore {
       return;
     }
     this.commit({ ...this.state, ports });
+  }
+
+  /**
+   * Applies the per-edge "+" insertion affordance.
+   *
+   * Presentation state only: the builder seeds it from
+   * `features.edgeInsertion` and flips it at runtime through
+   * `builder.features.setEdgeInsertion`, so an invalid value never reaches
+   * the store; setting the value it already holds notifies nobody, which
+   * keeps snapshots stable for subscribers that re-derive on notification.
+   */
+  setEdgeInsertion(edgeInsertion: boolean): void {
+    if (edgeInsertion === this.state.edgeInsertion) {
+      return;
+    }
+    this.commit({ ...this.state, edgeInsertion });
   }
 
   private commit(next: UiState): void {

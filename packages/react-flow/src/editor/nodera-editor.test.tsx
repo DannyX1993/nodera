@@ -262,6 +262,51 @@ describe("<NoderaEditor> host composition", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  Edge insertion passthrough                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The per-edge "+" is runtime state now: the editor reads it from the UI
+ * store (`builder.features.setEdgeInsertion` writes it), so toggling the
+ * affordance must reach the canvas without a rebuild.
+ */
+describe("<NoderaEditor> edge insertion passthrough", () => {
+  it("paints the per-edge \"+\" only while the affordance is enabled", async () => {
+    const builder = assertOk(
+      createBuilder({
+        registry: { nodes: [NODE] },
+        features: { edgeInsertion: true },
+      }),
+    );
+    assertOk(builder.graph.addNode({ type: "acme.http-request", nodeId: "n1" }));
+    assertOk(builder.graph.addNode({ type: "acme.http-request", nodeId: "n2" }));
+    assertOk(builder.graph.connect({ source: "n1", target: "n2" }));
+
+    const { container } = render(editor({ builder }));
+
+    expect(
+      container.querySelector('button[aria-label="Insert node"]'),
+    ).not.toBeNull();
+
+    assertOk(builder.features.setEdgeInsertion(false));
+
+    await waitFor(() => {
+      expect(
+        container.querySelector('button[aria-label="Insert node"]'),
+      ).toBeNull();
+    });
+
+    assertOk(builder.features.setEdgeInsertion(true));
+
+    await waitFor(() => {
+      expect(
+        container.querySelector('button[aria-label="Insert node"]'),
+      ).not.toBeNull();
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /*  Node transition passthrough                                        */
 /* ------------------------------------------------------------------ */
 

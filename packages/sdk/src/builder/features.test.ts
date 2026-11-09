@@ -172,3 +172,49 @@ describe("builder.features.edgeInsertion", () => {
     expect(builder.graph.edgeCount()).toBe(1);
   });
 });
+
+describe("builder.features.setEdgeInsertion", () => {
+  it("toggles the affordance at runtime and keeps the UI state in sync", () => {
+    const builder = createGraphBuilder(false);
+
+    const enabled = builder.features.setEdgeInsertion(true);
+
+    expect(enabled).toEqual({ ok: true, value: true });
+    expect(builder.features.edgeInsertion).toBe(true);
+    expect(builder.store.getState().edgeInsertion).toBe(true);
+
+    const disabled = builder.features.setEdgeInsertion(false);
+
+    expect(disabled).toEqual({ ok: true, value: false });
+    expect(builder.features.edgeInsertion).toBe(false);
+    expect(builder.store.getState().edgeInsertion).toBe(false);
+  });
+
+  it("refuses a non-boolean with sdk.invalid-input and leaves the state untouched", () => {
+    const builder = createGraphBuilder(false);
+
+    const refused = builder.features.setEdgeInsertion("yes" as unknown as boolean);
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["features", "edgeInsertion"],
+    });
+    expect(builder.features.edgeInsertion).toBe(false);
+    expect(builder.store.getState().edgeInsertion).toBe(false);
+  });
+
+  it("refuses on a disposed builder and keeps the state it had", () => {
+    const builder = createGraphBuilder(true);
+    builder.dispose();
+
+    const refused = builder.features.setEdgeInsertion(false);
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error[0]?.code).toBe("sdk.disposed");
+    expect(builder.features.edgeInsertion).toBe(true);
+    expect(builder.store.getState().edgeInsertion).toBe(true);
+  });
+});

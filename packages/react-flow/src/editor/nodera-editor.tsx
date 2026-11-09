@@ -68,8 +68,9 @@ export interface NoderaEditorProps {
    * The canvas keeps the midpoint position and the activation path (the edge
    * becomes the pending insertion and the node-creation dialog opens); this prop
    * only changes what the control looks like, so a host can ship an icon, a
-   * different label or its own component. The affordance itself is still enabled
-   * by `features.edgeInsertion`, never by rendering it. The other control has
+   * different label or its own component. The affordance itself is runtime
+   * state (`builder.features.setEdgeInsertion` writes the UI store), never
+   * enabled by rendering it. The other control has
    * its own prop ({@link NoderaEditorProps.renderPlaceholder}), because it records
    * a different anchor than an edge id and would not run a button wired to
    * `useEdgeInsertActions`.
@@ -194,7 +195,7 @@ function DefaultCanvasRegion(props: {
           colorMode={theme.colorScheme ?? "light"}
           showMinimap={builder.features.minimap}
           showControls={builder.adapter?.capabilities.controls ?? true}
-          edgeInsertion={builder.features.edgeInsertion}
+          edgeInsertion={ui.edgeInsertion}
           {...(props.layoutDirection === undefined
             ? {}
             : { layoutDirection: props.layoutDirection })}

@@ -68,6 +68,7 @@ describe("UiStateStore", () => {
       nodeTransition: "instant",
       connections: "editable",
       ports: "visible",
+      edgeInsertion: false,
     });
   });
 
@@ -483,6 +484,55 @@ describe("UiStateStore connections and ports policies", () => {
     store.subscribe(() => notifications++);
 
     store.setPorts("visible");
+
+    expect(notifications).toBe(0);
+    expect(store.getState()).toBe(before);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Edge insertion affordance                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The per-edge "+" is presentation state: the builder seeds it from
+ * `features.edgeInsertion` and a host flips it at runtime through
+ * `builder.features.setEdgeInsertion`, which lands here.
+ */
+describe("UiStateStore edge insertion", () => {
+  it("defaults the edge insertion affordance to off", () => {
+    expect(createStore().getState().edgeInsertion).toBe(false);
+  });
+
+  it("seeds the edge insertion affordance from the builder features", () => {
+    const store = new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      layout: emptyLayout,
+      edgeInsertion: true,
+    });
+
+    expect(store.getState().edgeInsertion).toBe(true);
+  });
+
+  it("toggles the edge insertion affordance and notifies once", () => {
+    const store = createStore();
+    const seen: boolean[] = [];
+    store.subscribe((state) => seen.push(state.edgeInsertion));
+
+    store.setEdgeInsertion(true);
+
+    expect(store.getState().edgeInsertion).toBe(true);
+    expect(seen).toEqual([true]);
+  });
+
+  it("notifies nobody when the edge insertion affordance already matches", () => {
+    const store = createStore();
+    const before = store.getState();
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.setEdgeInsertion(false);
 
     expect(notifications).toBe(0);
     expect(store.getState()).toBe(before);

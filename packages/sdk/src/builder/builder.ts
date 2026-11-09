@@ -107,13 +107,24 @@ import type {
   GraphLayoutConfiguration,
   RemovalPolicy,
 } from "./configuration.js";
-import { resolveFeatures, type ResolvedFeatures } from "./features.js";
+import {
+  createFeaturesApi,
+  resolveFeatures,
+  type BuilderFeaturesApi,
+  type ResolvedFeatures,
+} from "./features.js";
 
 /**
  * Drag policy of a manual node drag, re-exported from `@nodera/ui-core` because
  * it is part of what `builder.graphLayout` reads and writes.
  */
 export type { DragPolicy } from "@nodera/ui-core";
+
+/**
+ * Runtime feature API of an assembled builder, resolved and bound by
+ * `createBuilder` (`builder.features`).
+ */
+export type { BuilderFeaturesApi } from "./features.js";
 
 /**
  * Connections policy of the canvas, re-exported from `@nodera/ui-core` because
@@ -367,7 +378,7 @@ export interface Builder {
   /** Presentation engine the host selected, if any. */
   readonly adapter: BuilderAdapter | undefined;
   /** Feature flags the builder resolved from the configuration. */
-  readonly features: ResolvedFeatures;
+  readonly features: BuilderFeaturesApi;
   /**
    * Non-fatal diagnostics of the composition, currently the capability gaps
    * between the selected adapter and the authored definitions.
@@ -1300,12 +1311,11 @@ interface BuilderAssemblerOptions {
   /** What removing a node does with the relations it carried. */
   readonly onRemove: RemovalPolicy;
 }
-
 /** Concrete builder. Hosts only ever see the {@link Builder} contract. */
 class SdkBuilder implements Builder {
   readonly id: string;
   readonly adapter: BuilderAdapter | undefined;
-  readonly features: ResolvedFeatures;
+  readonly features: BuilderFeaturesApi;
   readonly diagnostics: SdkIssues;
   readonly registries: BuilderRegistries;
   readonly properties: RegistryStore<PropertyDefinition>;
@@ -1347,7 +1357,7 @@ class SdkBuilder implements Builder {
   constructor(options: BuilderAssemblerOptions) {
     this.id = options.id;
     this.adapter = options.adapter;
-    this.features = options.features;
+    this.features = createFeaturesApi(options.features, options.store, () => this.disposedFlag);
     this.diagnostics = options.diagnostics;
     this.properties = options.properties;
     this.editor = options.editor;
@@ -2028,6 +2038,7 @@ export function createBuilder(
     nodeTransition: resolveNodeTransition(declaredGraphLayout),
     connections: resolveConnectionsPolicy(declaredGraphLayout),
     ports: resolvePortsPolicy(declaredGraphLayout),
+    edgeInsertion: features.value.edgeInsertion,
   });
 
   const graph = configuration.graph;
