@@ -86,7 +86,9 @@ export interface NodeCreationDialogProps {
  * recorded (`UiState.pendingEdgeInsertId`) and adds a node otherwise, so an edge
  * `+` and the toolbar `+` never need two surfaces. A phantom append
  * (`UiState.pendingAppendAnchorId`) is **not** an insertion: it takes the add
- * path, and the host honours the anchor by passing it as `addNode({ after })`
+ * path, whether it came from the empty-state placeholder or from the successor
+ * placeholder of a leaf, and the host honours the anchor by passing it as
+ * `addNode({ after })`
  * from its `onAddNode` handler. The pending edge and the pending anchor are
  * cleared as soon as the selection is accepted, and the store clears both on
  * close, so a closed dialog can never make the next add insert somewhere

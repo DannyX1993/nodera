@@ -26,8 +26,9 @@
  * | Actions | Reset graph           | `resetDemoGraph` — wipe, then seed again                       |
  * | canvas  | "+" on an edge        | `features.edgeInsertion` → the canvas affordance → the dialog,  |
  * |         |                       | whose selection the host inserts with `builder.graph.insertNode` |
- * | canvas  | "+" on the phantom    | the same affordance on the phantom empty state: the host       |
- * |         |                       | appends with `addNode({ after })` + `connect` (two units)      |
+ * | canvas  | "+" on the phantom    | the same affordance on the phantom empty state and on every    |
+ * |         |                       | leaf's successor placeholder: the host appends with            |
+ * |         |                       | `addNode({ after })` + `connect` (two units)                   |
  *
  * Nothing is persisted by the per-call overrides: they win for the one `Arrange`
  * call that carries them, and the next call without them reads `graph.layout`
@@ -577,6 +578,7 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   // The header reports every option the panel holds, so the state is readable
   // with the panel collapsed.
   const summary = [
+    `DEBUG nodes ${String(builder.graph.nodeCount())} edges ${String(builder.graph.edgeCount())}`,
     `${shortStrategy(strategyId)} ${direction}`,
     `spacing ${spacing}/${rankSpacing}`,
     `drag ${drag}`,

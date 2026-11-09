@@ -114,17 +114,22 @@ default; `NoderaEditor.renderEdgeInsert` replaces it when a host wants its own
 icon or control.
 
 An empty graph has no edge to paint a "+" on, so the same flag also paints the
-**phantom empty state**: with no node the canvas draws a dashed placeholder node
-carrying the "`+`", and with exactly one node it adds the dashed placeholder
-beside it plus a phantom edge between the two. Clicking that "`+`" opens the same
-dialog and the host sees `pendingAppendAnchorId` in the UI state: it appends with
+**placeholders**. With no node the canvas draws a dashed placeholder node carrying
+the "`+`"; with exactly one node it adds the dashed placeholder past it plus a
+phantom edge between the two; from two nodes on, every **leaf** (a node with no
+outgoing edge) gets one dashed successor placeholder of its own, one step past it
+along the arranged axis, joined by a dashed edge with the "`+`" at its midpoint.
+Clicking any of those "`+`" opens the same dialog and the host sees
+`pendingAppendAnchorId` in the UI state: it appends with
 `builder.graph.addNode({ type, after: anchor })` and then connects the pair with
 `builder.graph.connect`. That is **two history units** — create, then connect —
 which the status line says out loud, because one undo removes the edge and a
 second removes the node; a single-unit append needs an application use case the
-framework does not have yet. The phantoms themselves are presentation only: they
-never reach `builder.graph.nodes()`, the history or the minimap, and they vanish
-once the graph holds two nodes.
+framework does not have yet. The demo passes its own `direction` as
+`NoderaEditor.layoutDirection`, so switching to a vertical arrangement steps the
+placeholders downwards. The placeholders themselves are presentation only: they
+never reach `builder.graph.nodes()`, the history or the minimap, and each one
+disappears as soon as its node gains a successor.
 
 **`Reset graph`** empties the graph through the public API — every edge, then
 every node, so the result does not depend on `onRemove` — and re-seeds it with

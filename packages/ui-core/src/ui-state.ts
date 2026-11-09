@@ -111,7 +111,8 @@ export interface UiState {
   readonly pendingEdgeInsertId: string | undefined;
   /**
    * Node a phantom append places the chosen definition after, if one was opened
-   * from the phantom empty state of the canvas.
+   * from a placeholder of the canvas: the phantom empty state (one node or none)
+   * or the successor placeholder of a leaf (S21).
    *
    * Presentation state only: it tells the host which node the new node follows
    * (`addNode({ after })`), so it never enters the portable document, and it is
@@ -359,8 +360,11 @@ export class UiStateStore {
   /**
    * Records (or clears, with `undefined`) the node a phantom append follows.
    *
-   * The node id is opaque here: the store is framework-agnostic and does not
-   * check it against a graph. Setting the value already stored notifies nobody.
+   * The anchor is the node the placeholder followed, so the same call serves the
+   * near-empty phantom (one node or none) and the successor placeholder of a leaf
+   * (S21): in both cases the host appends after it with `addNode({ after })`. The
+   * node id is opaque here: the store is framework-agnostic and does not check it
+   * against a graph. Setting the value already stored notifies nobody.
    */
   setPendingAppendAnchorId(pendingAppendAnchorId: string | undefined): void {
     if (pendingAppendAnchorId === this.state.pendingAppendAnchorId) {

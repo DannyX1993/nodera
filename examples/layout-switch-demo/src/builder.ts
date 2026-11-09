@@ -57,6 +57,10 @@ const SEED_NODES: readonly { readonly nodeId: string; readonly type: string }[] 
   { nodeId: "enrich", type: TRANSFORM_NODE_TYPE },
   { nodeId: "score", type: TRANSFORM_NODE_TYPE },
   { nodeId: "publish", type: OUTPUT_NODE_TYPE },
+  // A second leaf that can still grow: `audit` keeps an output port, so the
+  // successor placeholder appears after it. `publish` is a real sink and gets
+  // none — the affordance never promises an edge its node cannot start.
+  { nodeId: "audit", type: TRANSFORM_NODE_TYPE },
 ];
 
 /**
@@ -72,6 +76,7 @@ const SEED_EDGES: readonly (readonly [string, string])[] = [
   ["parse", "score"],
   ["enrich", "score"],
   ["score", "publish"],
+  ["parse", "audit"],
 ];
 
 /**

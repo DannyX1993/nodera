@@ -201,18 +201,24 @@ handles the selection itself (`onAddNode`) receives the definition id and reads
 
 ### Growing a graph from nothing: the phantom "+"
 
-`GraphCanvas.edgeInsertion` also covers the two states that have no edge to put a
-"+" on. With no node at all the canvas draws a dashed, muted **phantom node**
-carrying the "`+`"; with exactly one node it draws that placeholder beside the
-node plus a dashed **phantom edge** from the node to it, "`+`" at the midpoint.
-From two nodes on there is no phantom at all. The phantoms live only in the
-arrays the canvas hands to React Flow: never in the document, never in
+`GraphCanvas.edgeInsertion` also covers the states that have no edge to put a "+"
+on. With no node at all the canvas draws a dashed, muted **phantom node** carrying
+the "`+`"; with exactly one node it draws that placeholder one step past the node
+plus a dashed **phantom edge** from the node to it, "`+`" at the midpoint. From
+two nodes on there is no empty-state phantom: every **leaf** (a node with no
+outgoing edge) gets its own successor placeholder one step past it along
+`layoutDirection`, joined by a dashed placeholder edge with the "`+`" at its
+midpoint. The set is derived from the edges on every render, so a placeholder
+disappears as soon as its node stops being a leaf — and a graph with a single
+node never gets two placeholders for it. All of them live only in the arrays the
+canvas hands to React Flow: never in the document, never in
 `builder.graph.nodes()`/`edges()`, no event, no history entry, nothing to select,
 drag or delete, and the minimap skips them.
 
-Activating the phantom "`+`" writes `pendingAppendAnchorId` (the single node's id,
-absent on an empty graph) to the UI store, clears any `pendingEdgeInsertId`, and
-opens the same `nodera.dialog.create-node`. `NodeCreationDialog` treats that
+Activating any of those "`+`" writes `pendingAppendAnchorId` (the node the
+placeholder followed: absent on an empty graph, the single node's id in the
+empty state, the leaf's id from two nodes on) to the UI store, clears any
+`pendingEdgeInsertId`, and opens the same `nodera.dialog.create-node`. `NodeCreationDialog` treats that
 session as an **add**, never as an edge insertion, and clears the anchor on an
 accepted selection — exactly like the pending edge. The anchor reaches the graph
 through the host's `onAddNode`:
@@ -228,8 +234,11 @@ if (added.ok && anchorId !== undefined) {
 ```
 
 This path is **two history units** — create, then connect — unlike the edge "+",
-whose insertion is one reversible unit. The framework does not hide that: one
-`undo()` removes the edge, a second removes the node. A single-unit
+whose insertion is one reversible unit, and it is the same path for both
+placeholders. The framework does not hide that: one `undo()` removes the edge, a
+second removes the node. The axis the placeholders step along comes from the host
+(`GraphCanvas.layoutDirection`, `NoderaEditor.layoutDirection`, `"horizontal"` by
+default), because the canvas cannot read `graph.layout.direction`. A single-unit
 append-and-connect needs its own application use case, which does not exist yet,
 so no API here promises atomicity for it. Both calls are reported to the host, and
 a refused `connect` leaves the node it already created (there is no transaction to
@@ -253,7 +262,7 @@ theme variables on its wrapper element.
   refuses an id its `DialogRegistry` does not know
 - `useEdgeInsertActions` — `begin(edgeId)`: records the edge as the pending
   insertion and opens the node-creation dialog
-- `useUiState().pendingAppendAnchorId` — the anchor a phantom "`+`" recorded; the
+- `useUiState().pendingAppendAnchorId` — the anchor a placeholder "`+`" recorded; the
   store exposes `setPendingAppendAnchorId(id | undefined)` and `closeDialog()`
   clears it together with `pendingEdgeInsertId` in one commit
 - `useLayoutActions` — apply/reset layouts, resize, show/hide/toggle, dock, float,
