@@ -206,14 +206,20 @@ on. With no node at all the canvas draws a dashed, muted **phantom node** carryi
 the "`+`"; with exactly one node it draws that placeholder one step past the node
 plus a dashed **phantom edge** from the node to it, "`+`" at the midpoint. From
 two nodes on there is no empty-state phantom: every **leaf** (a node with no
-outgoing edge) gets its own successor placeholder one step past it along
-`layoutDirection`, joined by a dashed placeholder edge with the "`+`" at its
-midpoint. The set is derived from the edges on every render, so a placeholder
-disappears as soon as its node stops being a leaf — and a graph with a single
-node never gets two placeholders for it. All of them live only in the arrays the
-canvas hands to React Flow: never in the document, never in
-`builder.graph.nodes()`/`edges()`, no event, no history entry, nothing to select,
-drag or delete, and the minimap skips them.
+outgoing edge and a source-capable port) gets its own successor placeholder one
+step past it along `layoutDirection`, joined by a dashed placeholder edge with
+the "`+`" at its midpoint. A leaf with no output port gets nothing: the affordance
+never promises an insertion the graph cannot perform. The set is derived from the
+edges on every render, so a placeholder disappears as soon as its node stops
+being a leaf — and a graph with a single node never gets two placeholders for it.
+All of them are drawn as an **overlay** (`ViewportPortal`, in flow coordinates):
+never in the document, never in `builder.graph.nodes()`/`edges()`, no event, no
+history entry, nothing to select, drag or delete, and never in the `nodes` /
+`edges` arrays the canvas hands to React Flow either. That last part is a bug the
+adapter already shipped once: a placeholder node in React Flow's `nodes` array has
+no resolvable handles, and React Flow reacts by silently emptying the whole edge
+layer, so every real edge vanishes. The overlay cannot do that, and a regression
+test counts the real edges while the placeholders are drawn.
 
 Activating any of those "`+`" writes `pendingAppendAnchorId` (the node the
 placeholder followed: absent on an empty graph, the single node's id in the

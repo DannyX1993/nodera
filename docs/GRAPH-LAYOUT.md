@@ -24,7 +24,7 @@ nothing moves unless the host asks.
 | Downstream auto (`insertNode`, `connect`) | The selected strategy, for the node the change touched and its descendants, when the host declares `graph.layout.arrangeOnChange: "downstream"`. **A second** history unit, applied after the mutation (see [Automatic downstream arrangement](#automatic-downstream-arrangement)). |
 | Edge insertion (`builder.graph.insertNode`) | The builder, in `mode: "auto"`, anchored on the edge's **source**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node and the two edges that replace the original — plus, with `arrangeOnChange: "downstream"`, a second one for the downstream arrangement. |
 | Removal splice (`graph.layout.onRemove: "splice"`) | The selected strategy, for the spliced predecessors and their descendants, when `arrangeOnChange: "downstream"` and the layout owns the positions. The removal writes no position at all: it and its spliced edges are one unit of their own, the arrangement is a **second** one. |
-| Phantom "+" (`addNode({ after })` + `connect`) | The builder, in `mode: "auto"`, anchored on the node the placeholder followed — exactly the `after` rule. **Two** history units: the node, then the edge, because both are separate SDK calls (see [The phantom empty state](#the-phantom-empty-state)). |
+| Placeholder "+" (`addNode({ after })` + `connect`) | The builder, in `mode: "auto"`, anchored on the node the placeholder followed — exactly the `after` rule. The empty state covers a graph with at most one node (S7); from two nodes on, every leaf gets its own successor placeholder (S21). **Two** history units: the node, then the edge, because both are separate SDK calls (see [The phantom empty state](#the-phantom-empty-state)). |
 
 A host that declares a ranked layout applies it once at boot — compose, seed, then
 `builder.graph.arrange()` — otherwise the first paint shows the add-time grid
@@ -409,19 +409,31 @@ like every other control the framework paints):
 | The graph | What the canvas draws |
 | --- | --- |
 | No node at all | A dashed, muted **phantom node** — `data-nodera-phantom-node="inactive"` — carrying the same "`+`" (`aria-label="Insert node"`). |
-| Exactly one node | The same phantom node one visual step beside it, plus a dashed **phantom edge** from the real node to the placeholder, with the "`+`" at its midpoint. |
-| Two nodes or more | Nothing. The phantoms are gone the moment the graph stops qualifying. |
+| Exactly one node | The same phantom node one visual step past it, plus a dashed **phantom edge** from the real node to the placeholder, with the "`+`" at its midpoint. |
+| Two nodes or more | No empty-state phantom. Every leaf gets its own [successor placeholder](#successor-placeholders-s21) instead — never both for the same node. |
 
 The phantoms are **presentation only**, and that is enforced, not promised:
 
-- they are appended to the arrays the canvas hands to React Flow, never to the
-  engine, so `builder.graph.nodes()` / `edges()`, `nodeCount()` / `edgeCount()`,
-  the events and the history never see them;
-- every capability that would write one back is refused (`selectable`,
-  `draggable`, `deletable`, `connectable` and `focusable` are `false`), and the
-  ids `nodera.phantom.node` / `nodera.phantom.edge` are reserved by the adapter;
-- the minimap skips the placeholder (`MiniMap.nodeComponent`), so presentation
-  geometry never looks like a placed node;
+- they are drawn as an **overlay**: plain boxes rendered through
+  `ViewportPortal`, so they live in the viewport's transform layer — the same
+  coordinate system as the nodes — and pan and zoom with the graph;
+- they are not graph elements *and* not React Flow elements: neither the engine's
+  collections nor the `nodes` / `edges` arrays the canvas hands to React Flow ever
+  receive one. `builder.graph.nodes()` / `edges()`, `nodeCount()` / `edgeCount()`,
+  `graph.getNodes()` in the canvas, the events and the history never see them;
+- that second rule is a defect that already happened, not a style preference. A
+  placeholder appended to React Flow's `nodes` array is an element whose port
+  handles React Flow cannot resolve, and React Flow then silently empties the
+  whole edge layer: every real edge disappears from the canvas. An overlay cannot
+  do that, and the regression is pinned by a test that counts the real edges
+  while the placeholders are drawn;
+- nothing there is selectable, draggable, deletable, connectable or focusable,
+  because nothing there is an element React Flow manages: the boxes are
+  `pointer-events: none` and only the "`+`" takes the pointer, so a placeholder
+  never hit-tests a real node or edge underneath it and its click never reaches
+  the pane (the selection is not cleared);
+- the minimap can only draw nodes React Flow knows, so presentation geometry
+  cannot look like a placed node — there is nothing extra to filter;
 - inactivity is expressed with the **dashed border and the muted palette**, never
   by colour alone, and both are theme tokens with literal fallbacks
   (`--ndr-phantom-node-*`, `--ndr-phantom-edge-*`).
@@ -446,6 +458,49 @@ as one reversible unit, one `undo()` here removes the connecting edge and a
 second one removes the node. A single-unit append-and-connect needs its own
 application use case; it does not exist yet, so no part of this flow claims
 atomicity.
+
+### Successor placeholders (S21)
+
+From two nodes on, the same affordance answers "where can I continue the
+hierarchy?". Every node with **no outgoing edge** — a leaf, the step where the
+hierarchy ends — gets one dashed phantom successor one step past it along the
+axis the host declares, joined by a dashed phantom edge carrying the "`+`" at its
+midpoint. It is the image the feature was asked for: a node, a dashed edge down,
+a dashed placeholder below.
+
+| The graph | What the canvas draws |
+| --- | --- |
+| Two nodes, `n1 → n2` | One placeholder, after `n2` (the only leaf). `n1` has a successor, so it gets none. |
+| Two nodes, no edge | **Two** placeholders: both nodes are leaves, and each one gets its own. |
+| One node, or none | The [empty state](#the-phantom-empty-state) above, and only that: a graph with a single node never carries two placeholders for it. |
+
+The set is **derived from the edges on every render**, so nothing has to be
+cleaned up: a placeholder disappears in the same commit that gives its node a
+successor. Everything the empty state guarantees holds here too — presentation only, out of
+`builder.graph.nodes()`/`edges()`, no event, no history, nothing to select, drag
+or delete — and, because the placeholders are an overlay rather than React Flow
+nodes, the minimap cannot draw them and the edge layer keeps every real edge.
+
+Activating one records that leaf in `UiState.pendingAppendAnchorId` — the same
+field, the same dialog and the same host path as the empty state, so the host
+needs no second branch:
+
+```ts
+const anchorId = ui.pendingAppendAnchorId;              // the leaf the placeholder followed
+const added = builder.graph.addNode({ type, after: anchorId });
+if (added.ok) builder.graph.connect({ source: anchorId, target: added.value.id });
+```
+
+The shared caveat is the one below and it is not hidden: **two history units**,
+create then connect. The new node is a leaf itself, so it immediately gets a
+placeholder of its own — that is the affordance the flow is built on, not a
+leftover.
+
+The axis comes from the host, because the canvas cannot read
+`graph.layout.direction`: it passes `GraphCanvas.layoutDirection` (or
+`NoderaEditor.layoutDirection`), which defaults to `"horizontal"`. The step is
+`PHANTOM_NODE_OFFSET` (240 flow units), the adapter's documented default — it
+cannot see `graph.layout.spacing` either.
 
 ### `builder.graphLayout`
 
@@ -488,11 +543,13 @@ every layout action in its own toolbar **above** the canvas:
   `builder.graph.addNode`, passing the anchor it chose (`after`) or none, and
   `mode: "auto"` gives it the slot that follows. The demo passes none, so a new
   node lands at the end of the graph;
-- the phantom node and edge the canvas draws while the graph holds at most one
-  node (turn `features.edgeInsertion` on and empty the graph to see them): their
-  "+" records the anchor in `pendingAppendAnchorId` and the same host handler
-  appends with `builder.graph.addNode({ type, after })` and then connects, which
-  is **two** history units — documented, not hidden;
+- the placeholders the canvas draws for the empty state (at most one node) and,
+  from two nodes on, one per leaf (S21): their "+" records the anchor in
+  `pendingAppendAnchorId` and the same host handler appends with
+  `builder.graph.addNode({ type, after })` and then connects, which is **two**
+  history units — documented, not hidden. The demo passes its own `direction` as
+  `NoderaEditor.layoutDirection`, so a vertical arrangement steps the
+  placeholders downwards;
 - the "+" the canvas paints on every edge, because the demo declares
   `features: { edgeInsertion: true }`: the dialog opens on that edge and the same
   host handler inserts with `builder.graph.insertNode`, so the node lands between
@@ -551,10 +608,14 @@ Stated, not hidden:
 - The downstream policy arranges the touched node and its descendants, not their
   neighbours in the same rank: a sibling of the inserted node moves only if its own
   subtree is arranged.
-- The phantom empty state appends in **two** history units (create, then connect)
-  instead of one. Only the edge "+" — which has an application use case —
-  guarantees all-or-nothing; a single-unit append-and-connect is a pending use
-  case, not implemented here.
-- The phantom placeholder sits a fixed distance (`PHANTOM_NODE_OFFSET`, 240 flow
-  units) beside the single node, because the canvas adapter cannot see
-  `graph.layout.spacing`.
+- Every placeholder "+" — the empty state and the leaf successors — appends in
+  **two** history units (create, then connect) instead of one. Only the edge "+",
+  which has an application use case, guarantees all-or-nothing; a single-unit
+  append-and-connect is a pending use case, not implemented here.
+- Placeholders sit a fixed distance (`PHANTOM_NODE_OFFSET`, 240 flow units) past
+  their node, and the axis is whatever the host passes as `layoutDirection`
+  (`"horizontal"` by default), because the canvas adapter can see neither
+  `graph.layout.spacing` nor `graph.layout.direction`.
+- A successor placeholder marks a leaf, not a possible position: with
+  `insertHandles` (S23) and any branching handle the framework may add later it
+  stays one placeholder per leaf, never one per branch.

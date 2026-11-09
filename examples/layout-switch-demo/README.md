@@ -116,9 +116,11 @@ icon or control.
 An empty graph has no edge to paint a "+" on, so the same flag also paints the
 **placeholders**. With no node the canvas draws a dashed placeholder node carrying
 the "`+`"; with exactly one node it adds the dashed placeholder past it plus a
-phantom edge between the two; from two nodes on, every **leaf** (a node with no
-outgoing edge) gets one dashed successor placeholder of its own, one step past it
-along the arranged axis, joined by a dashed edge with the "`+`" at its midpoint.
+dashed connector between the two; from two nodes on, every **leaf** (a node with
+no outgoing edge and a source-capable port) gets one dashed successor placeholder
+of its own, one step past it along the arranged axis, joined by a dashed connector
+with the "`+`" at its midpoint. A leaf with no output port gets nothing, so the
+canvas never offers an insertion the graph cannot perform.
 Clicking any of those "`+`" opens the same dialog and the host sees
 `pendingAppendAnchorId` in the UI state: it appends with
 `builder.graph.addNode({ type, after: anchor })` and then connects the pair with
@@ -128,8 +130,10 @@ second removes the node; a single-unit append needs an application use case the
 framework does not have yet. The demo passes its own `direction` as
 `NoderaEditor.layoutDirection`, so switching to a vertical arrangement steps the
 placeholders downwards. The placeholders themselves are presentation only: they
-never reach `builder.graph.nodes()`, the history or the minimap, and each one
-disappears as soon as its node gains a successor.
+are drawn as an overlay in flow coordinates, they never reach
+`builder.graph.nodes()` or `builder.graph.edges()`, the history, the minimap or
+the `nodes`/`edges` arrays the canvas hands to React Flow, and each one disappears
+as soon as its node gains a successor.
 
 **`Reset graph`** empties the graph through the public API — every edge, then
 every node, so the result does not depend on `onRemove` — and re-seeds it with

@@ -36,6 +36,7 @@ import {
 } from "@nodera/ui-react";
 
 import { GraphCanvas } from "../canvas/graph-canvas.js";
+import type { PlaceholderAxis } from "../canvas/graph-canvas.js";
 import { NoderaCanvasProvider } from "../canvas/nodera-canvas-provider.js";
 import {
   NoderaBuilderProvider,
@@ -74,6 +75,15 @@ export interface NoderaEditorProps {
    * an edge, so a host button wired to `useEdgeInsertActions` could not run it.
    */
   readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
+  /**
+   * Axis the phantom placeholders step along (S7, S21).
+   *
+   * The canvas adapter cannot read `graph.layout.direction` (it is SDK
+   * configuration, not presentation state), so the host that already knows the
+   * axis it arranges along passes it here and the placeholders step the same way
+   * the graph does. Defaults to `"horizontal"`. It reaches no document state.
+   */
+  readonly layoutDirection?: PlaceholderAxis;
   readonly className?: string;
 }
 
@@ -148,6 +158,7 @@ function regionContent(panelIds: readonly string[]): ReactNode {
 function DefaultCanvasRegion(props: {
   readonly builder: Builder;
   readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
+  readonly layoutDirection?: PlaceholderAxis;
 }): ReactNode {
   const builder = props.builder;
   const ui = useUiState();
@@ -170,6 +181,9 @@ function DefaultCanvasRegion(props: {
           showMinimap={builder.features.minimap}
           showControls={builder.adapter?.capabilities.controls ?? true}
           edgeInsertion={builder.features.edgeInsertion}
+          {...(props.layoutDirection === undefined
+            ? {}
+            : { layoutDirection: props.layoutDirection })}
           {...(props.renderEdgeInsert === undefined
             ? {}
             : { renderEdgeInsert: props.renderEdgeInsert })}
@@ -230,6 +244,9 @@ function EditorSurface(props: NoderaEditorProps): ReactNode {
       hostSlots?.canvas ?? (
         <DefaultCanvasRegion
           builder={builder}
+          {...(props.layoutDirection === undefined
+            ? {}
+            : { layoutDirection: props.layoutDirection })}
           {...(props.renderEdgeInsert === undefined
             ? {}
             : { renderEdgeInsert: props.renderEdgeInsert })}

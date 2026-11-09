@@ -578,7 +578,6 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   // The header reports every option the panel holds, so the state is readable
   // with the panel collapsed.
   const summary = [
-    `DEBUG nodes ${String(builder.graph.nodeCount())} edges ${String(builder.graph.edgeCount())}`,
     `${shortStrategy(strategyId)} ${direction}`,
     `spacing ${spacing}/${rankSpacing}`,
     `drag ${drag}`,
@@ -878,7 +877,7 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
       </p>
 
       <div className="demo-canvas">
-        <NoderaEditor builder={builder} />
+        <NoderaEditor builder={builder} layoutDirection={direction} />
       </div>
 
       <NodeCreationDialog open={dialogOpen} onClose={dialogs.close} onAddNode={addNode} />

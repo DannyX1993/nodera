@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, createEvent, act, waitFor, cleanup } from "@testing-library/react";
-import { ReactFlow, ReactFlowProvider, type EdgeProps, type MiniMapNodeProps } from "@xyflow/react";
+import { ReactFlow, ReactFlowProvider, useEdges, useNodes } from "@xyflow/react";
 import type { FC, ReactNode } from "react";
 import { createElement } from "react";
 import {
@@ -29,15 +29,11 @@ import {
   GraphCanvas,
   canvasBackgroundOptions,
   canvasEdgeTypes,
+  canvasPlaceholders,
   commitConnection,
   commitDraggedNodes,
   commitSelectionFromReactFlow,
   DefaultEdgeInsertButton,
-  MiniMapNodeWithoutPhantom,
-  PhantomEdge,
-  phantomGraphElements,
-  PHANTOM_EDGE_ID,
-  PHANTOM_NODE_ID,
 } from "./graph-canvas.js";
 import type { GraphCanvasProps } from "./graph-canvas.js";
 import { NODE_DEFINITION_MIME_TYPE } from "./definition-drop.js";
@@ -766,21 +762,37 @@ describe("GraphCanvas edge insert affordance", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  D: phantom empty state (S7)                                        */
+/*  D: phantom placeholders (S7 empty state, S21 successors)           */
 /* ------------------------------------------------------------------ */
 
 /**
- * The phantoms are presentation only: a node and (with exactly one real node)
- * an edge the canvas adds to the React Flow arrays it renders. They are
- * asserted at the two boundaries that own them — the pure derivation
- * (`phantomGraphElements`) for the geometry and the flags, and the rendered
- * canvas for what a host sees — because React Flow paints no edge at all in
- * jsdom (see the C2 note above).
+ * The placeholders are presentation only, and they are drawn as an **overlay**
+ * (`ViewportPortal`): never as React Flow nodes, never as React Flow edges.
+ *
+ * They are asserted at the three boundaries that own them: the pure derivation
+ * (`canvasPlaceholders`) for the geometry and the leaf rule, the rendered canvas
+ * for what a person sees, and the store React Flow populated for what the canvas
+ * handed it. That last one is the regression this unit exists for: a placeholder
+ * appended to React Flow's `nodes` array is an element whose handles React Flow
+ * cannot resolve, and it silently empties the whole edge layer. jsdom paints no
+ * edge at all (see the C2 and F4 notes above), so the edge count is read from the
+ * store React Flow filled instead of from the unmounted SVG layer, and the
+ * painted node layer is counted in the DOM.
  */
-describe("GraphCanvas phantom empty state", () => {
+describe("GraphCanvas phantom placeholders", () => {
   afterEach(cleanup);
 
-  function phantomStore(): UiStateStore {
+  /** A definition with inputs only: a node that can never be continued. */
+  const sinkDef = {
+    id: "test.sink-node",
+    name: "Sink Node",
+    version: "1.0.0",
+    category: "test",
+    ports: [{ id: "in-1", name: "In", direction: "input" }],
+    properties: [],
+  } as unknown as NodeDefinition;
+
+  function placeholderStore(): UiStateStore {
     const dialogs = new DialogRegistry();
     dialogs.register(CREATE_NODE_DIALOG);
     return new UiStateStore({
@@ -790,216 +802,396 @@ describe("GraphCanvas phantom empty state", () => {
     });
   }
 
-  function renderPhantomCanvas(
+  function renderPlaceholders(
     engine: EditorEngine,
     store: UiStateStore,
-    edgeInsertion = true,
+    props: Partial<GraphCanvasProps> = {},
   ) {
     return render(
       <NoderaUiProvider store={store} editor={engine}>
         <div style={{ width: 800, height: 600 }}>
           <ReactFlowProvider>
-            <GraphCanvas editor={engine} edgeInsertion={edgeInsertion} />
+            <GraphCanvas editor={engine} edgeInsertion {...props} />
           </ReactFlowProvider>
         </div>
       </NoderaUiProvider>,
     );
   }
 
-  it("derives a phantom node at the origin for an empty graph", () => {
-    const elements = phantomGraphElements([]);
+  /** Reads what the canvas handed React Flow: a sibling of it, same store. */
+  function FlowProbe(props: {
+    readonly report: (ids: {
+      readonly nodes: readonly string[];
+      readonly edges: readonly string[];
+    }) => void;
+  }): null {
+    const nodes = useNodes();
+    const edges = useEdges();
+    props.report({
+      nodes: nodes.map((node) => node.id),
+      edges: edges.map((edge) => edge.id),
+    });
+    return null;
+  }
 
-    expect(elements.nodes).toHaveLength(1);
-    expect(elements.nodes[0]?.id).toBe(PHANTOM_NODE_ID);
-    expect(elements.nodes[0]?.position).toEqual({ x: 0, y: 0 });
-    // No node to connect therefore no phantom edge.
-    expect(elements.edges).toHaveLength(0);
+  /** What React Flow holds while the placeholders are drawn. */
+  function flowContents(
+    engine: EditorEngine,
+    props: Partial<GraphCanvasProps> = {},
+  ): { readonly nodes: readonly string[]; readonly edges: readonly string[] } {
+    const seen = { nodes: [] as readonly string[], edges: [] as readonly string[] };
+    render(
+      <NoderaUiProvider store={placeholderStore()} editor={engine}>
+        <div style={{ width: 800, height: 600 }}>
+          <ReactFlowProvider>
+            <GraphCanvas editor={engine} edgeInsertion {...props} />
+            <FlowProbe
+              report={(ids) => {
+                seen.nodes = ids.nodes;
+                seen.edges = ids.edges;
+              }}
+            />
+          </ReactFlowProvider>
+        </div>
+      </NoderaUiProvider>,
+    );
+    return seen;
+  }
+
+  function placeholdersOf(container: HTMLElement): readonly HTMLElement[] {
+    return [...container.querySelectorAll<HTMLElement>("[data-nodera-phantom-node]")];
+  }
+
+  function successorsOf(container: HTMLElement): readonly HTMLElement[] {
+    return [...container.querySelectorAll<HTMLElement>("[data-nodera-phantom-kind='successor']")];
+  }
+
+  function twoConnectedNodes(engine: EditorEngine = makeEngine()): EditorEngine {
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 240, y: 0 } });
+    createEdge(engine, {
+      source: { nodeId: "n1", portId: "out-1" },
+      target: { nodeId: "n2", portId: "in-1" },
+    });
+    return engine;
+  }
+
+  it("derives one placeholder at the origin for an empty graph", () => {
+    const placeholders = canvasPlaceholders({ enabled: true, nodes: [], edges: [] });
+
+    expect(placeholders).toHaveLength(1);
+    expect(placeholders[0]?.kind).toBe("empty-state");
+    expect(placeholders[0]?.anchorId).toBeUndefined();
+    expect(placeholders[0]?.box).toEqual({ x: 0, y: 0, width: 140, height: 40 });
+    // There is no node to connect from, so there is nothing to join.
+    expect(placeholders[0]?.connector).toBeUndefined();
   });
 
-  it("derives a phantom edge from the single node to the phantom node", () => {
-    const elements = phantomGraphElements([
-      { id: "n1", position: { x: 40, y: 80 } },
-    ]);
+  it("derives the empty-state placeholder one step past the single node", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      nodes: [{ id: "n1", position: { x: 40, y: 80 } }],
+      edges: [],
+    });
 
-    expect(elements.nodes).toHaveLength(1);
-    expect(elements.edges).toHaveLength(1);
-    const edge = elements.edges[0];
-    expect(edge?.id).toBe(PHANTOM_EDGE_ID);
-    expect(edge?.source).toBe("n1");
-    expect(edge?.target).toBe(PHANTOM_NODE_ID);
-    // The placeholder sits one step beside the node it follows.
-    expect(elements.nodes[0]?.position).toEqual({ x: 280, y: 80 });
+    expect(placeholders).toHaveLength(1);
+    expect(placeholders[0]?.anchorId).toBe("n1");
+    // One step (240 flow units) past the node's box, on the declared axis.
+    expect(placeholders[0]?.box).toEqual({ x: 280, y: 80, width: 140, height: 40 });
+    expect(placeholders[0]?.connector).toEqual({
+      x: 180,
+      y: 100,
+      length: 100,
+      axis: "horizontal",
+    });
   });
 
-  it("derives nothing once the graph holds two nodes", () => {
-    const elements = phantomGraphElements([
-      { id: "n1", position: { x: 0, y: 0 } },
-      { id: "n2", position: { x: 240, y: 0 } },
-    ]);
+  it("derives one placeholder per leaf and none for a node with a successor", () => {
+    const connected = canvasPlaceholders({
+      enabled: true,
+      nodes: [
+        { id: "n1", position: { x: 0, y: 0 }, ports: [{ direction: "output" }] },
+        { id: "n2", position: { x: 240, y: 0 }, ports: [{ direction: "output" }] },
+      ],
+      edges: [{ source: "n1", target: "n2" }],
+    });
+    expect(connected.map((placeholder) => placeholder.anchorId)).toEqual(["n2"]);
+    expect(connected[0]?.kind).toBe("successor");
 
-    expect(elements.nodes).toEqual([]);
-    expect(elements.edges).toEqual([]);
+    const apart = canvasPlaceholders({
+      enabled: true,
+      nodes: [
+        { id: "n1", position: { x: 0, y: 0 }, ports: [{ direction: "output" }] },
+        { id: "n2", position: { x: 240, y: 0 }, ports: [{ direction: "output" }] },
+      ],
+      edges: [],
+    });
+    expect(apart.map((placeholder) => placeholder.anchorId)).toEqual(["n1", "n2"]);
   });
 
-  it("keeps the phantoms out of selection, dragging and deletion", () => {
-    const elements = phantomGraphElements([
-      { id: "n1", position: { x: 0, y: 0 } },
-    ]);
-    const node = elements.nodes[0];
-    const edge = elements.edges[0];
+  it("derives nothing for a leaf with no source-capable port", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      nodes: [
+        { id: "n1", position: { x: 0, y: 0 }, ports: [{ direction: "output" }] },
+        { id: "n2", position: { x: 240, y: 0 }, ports: [{ direction: "input" }] },
+      ],
+      edges: [{ source: "n1", target: "n2" }],
+    });
 
-    // React Flow is what emits selection, drag and delete changes: refusing the
-    // four capabilities is what keeps the phantoms out of the document.
-    expect(node?.selectable).toBe(false);
-    expect(node?.draggable).toBe(false);
-    expect(node?.deletable).toBe(false);
-    expect(node?.connectable).toBe(false);
-    expect(edge?.selectable).toBe(false);
-    expect(edge?.deletable).toBe(false);
+    // The affordance must never promise an insertion the graph cannot perform.
+    expect(placeholders).toEqual([]);
   });
 
-  it("draws a phantom node in an empty graph when the affordance is enabled", () => {
-    const engine = makeEngine();
-    const { container } = renderPhantomCanvas(engine, phantomStore());
+  it("derives nothing when the affordance is disabled", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: false,
+      nodes: [{ id: "n1", position: { x: 0, y: 0 } }],
+      edges: [],
+    });
 
-    expect(container.querySelector("[data-nodera-phantom-node]")).not.toBeNull();
+    expect(placeholders).toEqual([]);
   });
 
-  it("draws a phantom node beside the single node of the graph", () => {
+  it("steps along the axis the host declares", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      nodes: [{ id: "n1", position: { x: 40, y: 80 } }],
+      edges: [],
+    });
+
+    expect(placeholders[0]?.box).toEqual({ x: 40, y: 320, width: 140, height: 40 });
+    expect(placeholders[0]?.connector).toEqual({
+      x: 110,
+      y: 120,
+      length: 200,
+      axis: "vertical",
+    });
+  });
+
+  it("draws the empty-state placeholder in an empty graph", () => {
+    const { container } = renderPlaceholders(makeEngine(), placeholderStore());
+
+    const placeholders = placeholdersOf(container);
+    expect(placeholders).toHaveLength(1);
+    expect(placeholders[0]?.getAttribute("data-nodera-phantom-kind")).toBe("empty-state");
+    // An overlay inside the viewport, never an element of the node layer.
+    expect(
+      container.querySelector(".react-flow__viewport-portal [data-nodera-phantom-node]"),
+    ).not.toBeNull();
+    // No connector, so the "+" sits at the box centre — still one affordance.
+    expect(container.querySelectorAll("[data-nodera-phantom-insert]")).toHaveLength(1);
+    expect(container.querySelector("[data-nodera-phantom-insert-for='']")).not.toBeNull();
+  });
+
+  it("draws one placeholder beside the single node of the graph", () => {
     const engine = makeEngine();
     addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
-    const { container } = renderPhantomCanvas(engine, phantomStore());
+    const { container } = renderPlaceholders(engine, placeholderStore());
 
     expect(screen.getAllByText("App Node")).toHaveLength(1);
-    expect(container.querySelector("[data-nodera-phantom-node]")).not.toBeNull();
+    const placeholders = placeholdersOf(container);
+    // One placeholder for the one node: the empty state never doubles it.
+    expect(placeholders).toHaveLength(1);
+    expect(placeholders[0]?.getAttribute("data-nodera-phantom-for")).toBe("n1");
+    expect(container.querySelector("[data-nodera-phantom-edge]")).not.toBeNull();
   });
 
-  it("draws no phantom when the affordance is disabled", () => {
-    const engine = makeEngine();
-    const { container } = renderPhantomCanvas(engine, phantomStore(), false);
+  it("draws no placeholder when the affordance is disabled", () => {
+    const { container } = renderPlaceholders(makeEngine(), placeholderStore(), {
+      edgeInsertion: false,
+    });
 
-    expect(container.querySelector("[data-nodera-phantom-node]")).toBeNull();
+    expect(placeholdersOf(container)).toEqual([]);
   });
 
-  it("draws no phantom once the graph holds two nodes", () => {
+  it("draws one placeholder past the only leaf and none for its parent", () => {
+    const { container } = renderPlaceholders(twoConnectedNodes(), placeholderStore());
+
+    const successors = successorsOf(container);
+    expect(successors).toHaveLength(1);
+    expect(successors[0]?.getAttribute("data-nodera-phantom-for")).toBe("n2");
+    // The parent already has a successor, so it gets none.
+    expect(container.querySelector("[data-nodera-phantom-for='n1']")).toBeNull();
+    // Two nodes: the empty state is gone, not doubled.
+    expect(container.querySelector("[data-nodera-phantom-kind='empty-state']")).toBeNull();
+  });
+
+  it("draws one placeholder per leaf when the two nodes are unconnected", () => {
     const engine = makeEngine();
     addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
     addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 240, y: 0 } });
-    const { container } = renderPhantomCanvas(engine, phantomStore());
+    const { container } = renderPlaceholders(engine, placeholderStore());
 
-    expect(container.querySelector("[data-nodera-phantom-node]")).toBeNull();
+    expect(successorsOf(container)).toHaveLength(2);
   });
 
-  it("writes no phantom into the graph, its history or its events", () => {
+  it("draws no placeholder for a leaf with no source-capable port", () => {
     const engine = makeEngine();
+    engine.domain.nodes.register(sinkDef);
     addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.sink-node", nodeId: "n2", position: { x: 240, y: 0 } });
+    createEdge(engine, {
+      source: { nodeId: "n1", portId: "out-1" },
+      target: { nodeId: "n2", portId: "in-1" },
+    });
+    const { container } = renderPlaceholders(engine, placeholderStore());
+
+    expect(successorsOf(container)).toEqual([]);
+  });
+
+  it("keeps every real edge in React Flow while the placeholders are drawn", () => {
+    const engine = twoConnectedNodes();
+    const { container } = renderPlaceholders(engine, placeholderStore());
+
+    // The regression: placeholders in React Flow's arrays emptied this layer.
+    expect(flowContents(engine).edges).toEqual([String(engine.graph.getEdges()[0]?.id)]);
+    // Both real nodes are painted as React Flow nodes, and only those.
+    expect(container.querySelectorAll(".react-flow__node")).toHaveLength(2);
+    expect(successorsOf(container)).toHaveLength(1);
+    // The placeholder is not inside the node or the edge layer.
+    expect(
+      container.querySelector(
+        ".react-flow__nodes [data-nodera-phantom-node], .react-flow__edges [data-nodera-phantom-node]",
+      ),
+    ).toBeNull();
+  });
+
+  it("puts no placeholder into React Flow's node and edge arrays", () => {
+    const contents = flowContents(twoConnectedNodes());
+
+    expect([...contents.nodes].sort()).toEqual(["n1", "n2"]);
+    expect(contents.edges).toHaveLength(1);
+    expect(contents.edges.some((id) => id.includes("phantom"))).toBe(false);
+  });
+
+  it("writes no placeholder into the graph, its history or its events", () => {
+    const engine = twoConnectedNodes();
     const nodeCreated = vi.fn();
     const edgeCreated = vi.fn();
     engine.events.subscribe("node.created", nodeCreated);
     engine.events.subscribe("edge.created", edgeCreated);
-    const historyBefore = engine.history.size();
+    const before = {
+      nodes: engine.graph.getNodes().map((node) => String(node.id)),
+      edges: engine.graph.getEdges().map((edge) => String(edge.id)),
+      history: engine.history.size(),
+    };
 
-    renderPhantomCanvas(engine, phantomStore());
+    renderPlaceholders(engine, placeholderStore());
 
-    expect(engine.graph.getNodes().map((node) => String(node.id))).toEqual(["n1"]);
-    expect(engine.graph.getEdges()).toHaveLength(0);
-    expect(engine.history.size()).toBe(historyBefore);
+    expect(engine.graph.getNodes().map((node) => String(node.id))).toEqual(before.nodes);
+    expect(engine.graph.getEdges().map((edge) => String(edge.id))).toEqual(before.edges);
+    expect(engine.history.size()).toBe(before.history);
     expect(nodeCreated).not.toHaveBeenCalled();
     expect(edgeCreated).not.toHaveBeenCalled();
   });
 
-  it("keeps the phantom out of the minimap", () => {
-    // The minimap draws every node React Flow knows, and jsdom gives it no node
-    // dimensions, so the filter is asserted where the adapter owns it: the node
-    // component the canvas hands to `<MiniMap nodeComponent>`.
-    const props = {
-      x: 0,
-      y: 0,
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      className: "",
-      shapeRendering: "crispEdges",
-      selected: false,
-    } as unknown as MiniMapNodeProps;
-
-    const phantom = render(
-      createElement(
-        "svg",
-        null,
-        createElement(MiniMapNodeWithoutPhantom, { ...props, id: PHANTOM_NODE_ID }),
-      ),
-    );
-    expect(phantom.container.querySelector("[data-nodera-minimap-node]")).toBeNull();
-    cleanup();
-
-    const real = render(
-      createElement("svg", null, createElement(MiniMapNodeWithoutPhantom, { ...props, id: "n1" })),
-    );
-    expect(real.container.querySelector("[data-nodera-minimap-node='n1']")).not.toBeNull();
-  });
-
-  it("renders the minimap alongside the phantom", () => {
-    const engine = makeEngine();
-    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
-    const { container } = renderPhantomCanvas(engine, phantomStore());
-
-    expect(container.querySelector(".react-flow__minimap")).not.toBeNull();
-    expect(container.querySelector("[data-nodera-phantom-node]")).not.toBeNull();
-  });
-
-  it("records an empty anchor and opens the dialog from the empty-graph phantom", () => {
-    const engine = makeEngine();
-    const store = phantomStore();
+  it("records an empty anchor and opens the dialog from an empty graph", () => {
+    const store = placeholderStore();
     // A session left over from another affordance must not survive the click.
     store.setPendingEdgeInsertId("edge-1");
-    const { container } = renderPhantomCanvas(engine, store);
+    const { container } = renderPlaceholders(makeEngine(), store);
 
-    const button = container.querySelector("[data-nodera-phantom-insert]");
+    const button = container.querySelector("[data-nodera-phantom-insert-for='']");
     expect(button).not.toBeNull();
     fireEvent.click(button as HTMLElement);
 
+    // No node to follow: the host calls `addNode` without an `after`.
     expect(store.getState().pendingAppendAnchorId).toBeUndefined();
     expect(store.getState().pendingEdgeInsertId).toBeUndefined();
     expect(store.getState().activeDialogId).toBe(NODERA_CREATE_NODE_DIALOG_ID);
   });
 
-  it("records the existing node as the anchor from the phantom edge '+'", () => {
-    const store = phantomStore();
-    render(
-      <NoderaUiProvider store={store} editor={makeEngine()}>
-        <ReactFlowProvider>
-          <ReactFlow nodes={[]} edges={[]}>
-            {createElement(PhantomEdge, {
-              id: PHANTOM_EDGE_ID,
-              source: "n1",
-              target: PHANTOM_NODE_ID,
-              sourceX: 0,
-              sourceY: 0,
-              targetX: 240,
-              targetY: 0,
-              selected: false,
-              data: { anchorId: "n1" },
-            } as unknown as EdgeProps)}
-          </ReactFlow>
-        </ReactFlowProvider>
-      </NoderaUiProvider>,
-    );
+  it("records the single node as the anchor and opens the dialog", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    const store = placeholderStore();
+    // A session left over from another affordance must not survive the click.
+    store.setPendingEdgeInsertId("edge-1");
+    const { container } = renderPlaceholders(engine, store);
 
-    const button = document.querySelector("[data-nodera-phantom-insert]");
+    const button = container.querySelector("[data-nodera-phantom-insert-for='n1']");
     expect(button).not.toBeNull();
     fireEvent.click(button as HTMLElement);
 
     expect(store.getState().pendingAppendAnchorId).toBe("n1");
+    expect(store.getState().pendingEdgeInsertId).toBeUndefined();
     expect(store.getState().activeDialogId).toBe(NODERA_CREATE_NODE_DIALOG_ID);
   });
 
-  it("styles the phantoms as inactive with a shape channel, never colour alone", () => {
-    const { container } = renderPhantomCanvas(makeEngine(), phantomStore());
-    const phantom = container.querySelector("[data-nodera-phantom-node]") as HTMLElement;
+  it("records the leaf as the anchor from its successor placeholder", () => {
+    const store = placeholderStore();
+    const { container } = renderPlaceholders(twoConnectedNodes(), store);
 
-    expect(phantom.getAttribute("data-nodera-phantom-node")).toBe("inactive");
-    expect(phantom.style.borderStyle).toBe("dashed");
+    const button = container.querySelector("[data-nodera-phantom-insert-for='n2']");
+    expect(button).not.toBeNull();
+    fireEvent.click(button as HTMLElement);
+
+    expect(store.getState().pendingAppendAnchorId).toBe("n2");
+    expect(store.getState().activeDialogId).toBe(NODERA_CREATE_NODE_DIALOG_ID);
+  });
+
+  it("leaves the selection and the graph alone when a placeholder is pressed", () => {
+    const engine = twoConnectedNodes();
+    selectNode(engine, { nodeId: "n1" });
+    const { container } = renderPlaceholders(engine, placeholderStore());
+
+    fireEvent.click(
+      container.querySelector("[data-nodera-phantom-insert-for='n2']") as HTMLElement,
+    );
+
+    // The click stops at the placeholder: it neither clears the selection nor
+    // writes anything, because it is not an element React Flow hit-tests.
+    expect(engine.getSelectedNodes()).toEqual(["n1"]);
+    expect(engine.graph.getEdges()).toHaveLength(1);
+  });
+
+  it("offers the placeholder as a keyboard-reachable dialog trigger", () => {
+    const { container } = renderPlaceholders(twoConnectedNodes(), placeholderStore());
+
+    const button = container.querySelector("[data-nodera-phantom-insert]") as HTMLButtonElement;
+    expect(button.tagName).toBe("BUTTON");
+    // On the connector, the same place the real edge affordance sits.
+    expect(button.closest("[data-nodera-phantom-node]")).toBeNull();
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.getAttribute("aria-label")).toBe("Insert node");
+    expect(button.getAttribute("aria-haspopup")).toBe("dialog");
+    // A native button with no explicit tab index is in the tab order.
+    expect(button.tabIndex).toBe(0);
+  });
+
+  it("removes the placeholder once the host appends and connects", () => {
+    const engine = twoConnectedNodes();
+    const { container } = renderPlaceholders(engine, placeholderStore());
+    expect(container.querySelector("[data-nodera-phantom-for='n2']")).not.toBeNull();
+
+    act(() => {
+      addNode(engine, { definitionId: "test.app-node", nodeId: "n3", position: { x: 480, y: 0 } });
+      createEdge(engine, {
+        source: { nodeId: "n2", portId: "out-1" },
+        target: { nodeId: "n3", portId: "in-1" },
+      });
+    });
+
+    expect(container.querySelector("[data-nodera-phantom-for='n2']")).toBeNull();
+    expect(container.querySelector("[data-nodera-phantom-for='n3']")).not.toBeNull();
+    expect(successorsOf(container)).toHaveLength(1);
+  });
+
+  it("styles the placeholders as inactive with a shape channel, never colour alone", () => {
+    const { container } = renderPlaceholders(twoConnectedNodes(), placeholderStore());
+    const placeholder = container.querySelector("[data-nodera-phantom-node]") as HTMLElement;
+
+    expect(placeholder.getAttribute("data-nodera-phantom-node")).toBe("inactive");
+    expect(placeholder.style.borderStyle).toBe("dashed");
+  });
+
+  it("renders the minimap alongside the placeholders", () => {
+    const { container } = renderPlaceholders(twoConnectedNodes(), placeholderStore());
+
+    expect(container.querySelector(".react-flow__minimap")).not.toBeNull();
+    expect(successorsOf(container)).toHaveLength(1);
   });
 });
 
