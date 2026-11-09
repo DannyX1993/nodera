@@ -78,8 +78,8 @@ the registry, reducers and geometry live in `layout-engine`.
 `UiStateStore` is the single presentation-state container: `themeId`,
 `layoutId`, `layout` (panel state), `menu` (open context/panel menu),
 `searchQuery`, `interactionMode`, `activePanelId`, `activeDialogId`,
-`pendingEdgeInsertId`, `pendingAppendAnchorId`, `dragPolicy`, `connections` and
-`ports`.
+`pendingEdgeInsertId`, `pendingAppendAnchorId`, `dragPolicy`, `nodeTransition`,
+`connections` and `ports`.
 
 - Immutable snapshots: `getState()` keeps its identity until something really
   changes, and a no-op mutation notifies nobody (that is what keeps panels from
@@ -89,7 +89,7 @@ the registry, reducers and geometry live in `layout-engine`.
 - Mutators: `setTheme`, `setLayout(layoutId, layout)`, `updateLayout(updater)`,
   `openMenu`, `closeMenu`, `setSearchQuery`, `setInteractionMode`,
   `setActivePanel`, `openDialog(dialogId)`, `closeDialog`, `setDragPolicy`,
-  `setConnections`, `setPorts`, `setPendingEdgeInsertId`.
+  `setNodeTransition`, `setConnections`, `setPorts`, `setPendingEdgeInsertId`.
 - Drag policy: `DragPolicy` (`"free" | "locked" | "snap-back"`) says what a
   manual drag does with the positions the layout assigned. `"free"` (the store
   default, and today's behaviour) commits the dropped position, `"locked"` makes
@@ -99,6 +99,14 @@ the registry, reducers and geometry live in `layout-engine`.
   (`builder.graphLayout.dragPolicy()` / `setDragPolicy`), and the canvas
   re-renders from the state, so no module-level variable or React-only context
   carries it.
+- Node transition: `NodeTransition` (`"animated" | "instant"`) says whether a
+  node moves to its new position or appears there. `"instant"` (the store
+  default, and today's behaviour) paints the change at once — which is why a
+  `"snap-back"` release puts the node back with a jump — and `"animated"` makes
+  the node glide there, never during an active drag. The store only holds the
+  value — `@nodera/sdk` validates it and seeds it from
+  `graph.layout.nodeTransition` (`builder.graphLayout.nodeTransition()` /
+  `setNodeTransition`), and the canvas re-renders from the state.
 - Connections and ports policies: `ConnectionsPolicy` (`"editable" | "fixed"`)
   and `PortsPolicy` (`"visible" | "hidden"`) say what a person may do with the
   surface of a graph. `"editable"`/`"visible"` are the store defaults and today's

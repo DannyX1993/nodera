@@ -5,6 +5,7 @@ import {
   type ConnectionsPolicy,
   type DragPolicy,
   type InsertHandlesPolicy,
+  type NodeTransition,
   type PortsPolicy,
 } from "./ui-state.js";
 import type { LayoutState } from "./layout.js";
@@ -65,6 +66,7 @@ describe("UiStateStore", () => {
       pendingAppendAnchorId: undefined,
       pendingBranchInsertId: undefined,
       dragPolicy: "free",
+      nodeTransition: "instant",
       connections: "editable",
       ports: "visible",
       insertHandles: "each-edge",
@@ -218,6 +220,32 @@ describe("UiStateStore", () => {
 
     expect(notifications).toBe(0);
     expect(store.getState()).toBe(before);
+  });
+
+  it("seeds the node transition the host declares", () => {
+    const store = new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      layout: emptyLayout,
+      nodeTransition: "animated",
+    });
+
+    expect(store.getState().nodeTransition).toBe("animated");
+  });
+
+  it("keeps an instant node transition by default, today's behaviour", () => {
+    expect(createStore().getState().nodeTransition).toBe("instant");
+  });
+
+  it("changes the node transition and notifies its subscribers once", () => {
+    const store = createStore();
+    const seen: NodeTransition[] = [];
+    store.subscribe((state) => seen.push(state.nodeTransition));
+
+    store.setNodeTransition("animated");
+
+    expect(store.getState().nodeTransition).toBe("animated");
+    expect(seen).toEqual(["animated"]);
   });
 
   it("returns a stable snapshot while nothing changes", () => {
