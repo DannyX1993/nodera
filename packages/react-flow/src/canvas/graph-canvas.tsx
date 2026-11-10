@@ -69,6 +69,7 @@ import {
 import { useEditorGraph } from "./use-editor-graph.js";
 import { useNodeTypes } from "./custom-node.js";
 import { isNodeDefinitionDrag, nodeDefinitionFromDataTransfer } from "./definition-drop.js";
+import { NoderaEditorProvider } from "./editor-context.js";
 import {
   DEFAULT_EDGE_RENDERER_ID,
   DEFAULT_NODE_RENDERER_ID,
@@ -1694,67 +1695,69 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       : className;
 
   return (
-    <div
-      className={frameClassName}
-      style={{ width: "100%", height: "100%" }}
-      data-color-mode={colorMode}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
-      {nodeTransition === "animated" && (
-        <style data-nodera-node-transition="">{NODE_TRANSITION_STYLE}</style>
-      )}
-      <ReactFlow
-        nodes={nodesWithTypes}
-        edges={edges}
-        onInit={handleInit}
-        nodeTypes={nodeTypes as unknown as NodeTypes}
-        edgeTypes={edgeTypes}
-        deleteKeyCode={["Delete", "Backspace"]}
-        // Deletion keeps the canvas' hands off the edges that hang on the
-        // removed nodes: their fate is the use case's decision, not React
-        // Flow's. Under "detach" `removeNode` takes them with the node in one
-        // history unit; under "splice" `removeNodeSplicing` needs them intact
-        // to join each predecessor to each successor — without this, React
-        // Flow strips them first and a spliced removal finds nothing to join.
-        // Standalone selected-edge deletions stay in the list and keep going
-        // through `handleEdgesChange`.
-        onBeforeDelete={({ nodes: removedNodes, edges: removedEdges }) =>
-          Promise.resolve({
-            nodes: removedNodes,
-            edges: removedEdges.filter(
-              (edge) =>
-                !removedNodes.some((node) => node.id === edge.source || node.id === edge.target),
-            ),
-          })
-        }
-        connectionMode={ConnectionMode.Loose}
-        isValidConnection={isValidConnection}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={handleEdgesChange}
-        onNodeDragStop={handleNodeDragStop}
-        onConnect={handleConnect}
-        onNodeClick={handleNodeClick}
-        onEdgeClick={handleEdgeClick}
-        onPaneClick={handlePaneClick}
-        onSelectionChange={handleSelectionChange}
-        panOnDrag={interaction.panOnDrag}
-        selectionOnDrag={interaction.selectionOnDrag}
-        colorMode={colorMode}
-        fitView
-        nodesDraggable={dragPolicy !== "locked"}
-        nodesConnectable={connectionsPolicy === "editable"}
+    <NoderaEditorProvider editor={editor}>
+      <div
+        className={frameClassName}
+        style={{ width: "100%", height: "100%" }}
+        data-color-mode={colorMode}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
       >
-        <Background {...canvasBackgroundOptions()} />
-        <CanvasPlaceholderOverlay
-          placeholders={placeholders}
-          {...(renderPlaceholder === undefined ? {} : { render: renderPlaceholder })}
-        />
-        {showMinimap && (
-          <MiniMap nodeColor={minimapNodeColor} pannable zoomable />
+        {nodeTransition === "animated" && (
+          <style data-nodera-node-transition="">{NODE_TRANSITION_STYLE}</style>
         )}
-        {showControls && <Controls />}
-      </ReactFlow>
-    </div>
+        <ReactFlow
+          nodes={nodesWithTypes}
+          edges={edges}
+          onInit={handleInit}
+          nodeTypes={nodeTypes as unknown as NodeTypes}
+          edgeTypes={edgeTypes}
+          deleteKeyCode={["Delete", "Backspace"]}
+          // Deletion keeps the canvas' hands off the edges that hang on the
+          // removed nodes: their fate is the use case's decision, not React
+          // Flow's. Under "detach" `removeNode` takes them with the node in one
+          // history unit; under "splice" `removeNodeSplicing` needs them intact
+          // to join each predecessor to each successor — without this, React
+          // Flow strips them first and a spliced removal finds nothing to join.
+          // Standalone selected-edge deletions stay in the list and keep going
+          // through `handleEdgesChange`.
+          onBeforeDelete={({ nodes: removedNodes, edges: removedEdges }) =>
+            Promise.resolve({
+              nodes: removedNodes,
+              edges: removedEdges.filter(
+                (edge) =>
+                  !removedNodes.some((node) => node.id === edge.source || node.id === edge.target),
+              ),
+            })
+          }
+          connectionMode={ConnectionMode.Loose}
+          isValidConnection={isValidConnection}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
+          onNodeDragStop={handleNodeDragStop}
+          onConnect={handleConnect}
+          onNodeClick={handleNodeClick}
+          onEdgeClick={handleEdgeClick}
+          onPaneClick={handlePaneClick}
+          onSelectionChange={handleSelectionChange}
+          panOnDrag={interaction.panOnDrag}
+          selectionOnDrag={interaction.selectionOnDrag}
+          colorMode={colorMode}
+          fitView
+          nodesDraggable={dragPolicy !== "locked"}
+          nodesConnectable={connectionsPolicy === "editable"}
+        >
+          <Background {...canvasBackgroundOptions()} />
+          <CanvasPlaceholderOverlay
+            placeholders={placeholders}
+            {...(renderPlaceholder === undefined ? {} : { render: renderPlaceholder })}
+          />
+          {showMinimap && (
+            <MiniMap nodeColor={minimapNodeColor} pannable zoomable />
+          )}
+          {showControls && <Controls />}
+        </ReactFlow>
+      </div>
+    </NoderaEditorProvider>
   );
 };

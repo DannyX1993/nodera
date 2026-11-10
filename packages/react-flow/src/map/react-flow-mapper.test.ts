@@ -508,6 +508,48 @@ describe("toReactFlowEdges", () => {
     // RF edge label is ReactNode; we store it as text
     expect(result[0]!.label).toBe("My Connection");
   });
+
+  /* Waypoint carrying (T5, S3) */
+
+  it("carries domain waypoints onto the mapped edge data", () => {
+    const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
+    const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
+    const edge = makeEdge("e1", "n1", "p", "n2", "p");
+    edge.setWaypoints([
+      { x: 40, y: 60 },
+      { x: 80, y: 30 },
+    ]);
+    const graph = buildGraph([node1, node2], [edge]);
+
+    const result = toReactFlowEdges(graph, () => undefined);
+
+    expect(result[0]!.data).toEqual(
+      expect.objectContaining({
+        waypoints: [
+          { x: 40, y: 60 },
+          { x: 80, y: 30 },
+        ],
+      }),
+    );
+  });
+
+  it("does not set data.waypoints when the edge has no waypoints", () => {
+    const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
+    const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
+    const edge = makeEdge("e1", "n1", "p", "n2", "p");
+    const graph = buildGraph([node1, node2], [edge]);
+
+    const result = toReactFlowEdges(graph, () => undefined);
+
+    // The edge has no waypoints, so data should not carry a waypoints key.
+    // (data may be absent entirely, or contain only styleHints.)
+    const data = result[0]!.data;
+    if (data === undefined) {
+      expect(data).toBeUndefined();
+    } else {
+      expect((data as { waypoints?: unknown }).waypoints).toBeUndefined();
+    }
+  });
 });
 
 describe("toReactFlowEdges renderer-only style hints", () => {

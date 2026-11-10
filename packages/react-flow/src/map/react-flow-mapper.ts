@@ -241,6 +241,14 @@ export const toReactFlowEdges = (
       }
     }
 
+    // Waypoints: per-edge-instance intermediate points in flow coordinates
+    // (S3, S2, S7). Renderers route through them; the document serialises
+    // them. Passed through `data.waypoints` so the custom renderer can
+    // build a path that goes through every point.
+    if (edge.waypoints) {
+      rfEdge.data = { ...rfEdge.data, waypoints: edge.waypoints };
+    }
+
     return rfEdge;
   });
 };

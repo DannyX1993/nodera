@@ -3,6 +3,7 @@ import { render } from "@testing-library/react";
 import { Position } from "@xyflow/react";
 
 import { DefaultEdgeRenderer, defaultEdgeOptionsFromVisual } from "./default-edge-renderer.js";
+import { edgeStyleHints } from "./edge-options.js";
 import type { EdgeVisual } from "@nodera/edge-registry";
 
 /* ------------------------------------------------------------------ */
@@ -93,6 +94,39 @@ describe("defaultEdgeOptionsFromVisual", () => {
     const opts = defaultEdgeOptionsFromVisual({
       metadata: { style: { strokeWidth: 2 } },
     });
+    expect(opts?.strokeWidth).toBe(2);
+  });
+
+  /* Declared `width` key of the visual vocabulary. */
+
+  it("declared width → strokeWidth", () => {
+    const opts = defaultEdgeOptionsFromVisual({ width: 3 });
+    expect(opts?.strokeWidth).toBe(3);
+  });
+
+  it("declared width wins over the metadata.style.strokeWidth hint", () => {
+    const opts = defaultEdgeOptionsFromVisual({
+      width: 3,
+      metadata: { style: { strokeWidth: 1 } },
+    });
+    expect(opts?.strokeWidth).toBe(3);
+  });
+
+  it("edgeStyleHints merges declared width over the hint", () => {
+    const hints = edgeStyleHints({
+      width: 4,
+      metadata: { style: { strokeWidth: 1, dashArray: "4 2" } },
+    });
+    expect(hints).toEqual({ strokeWidth: 4, dashArray: "4 2" });
+  });
+
+  it("a non-finite declared width is ignored, the hint still applies", () => {
+    const opts = defaultEdgeOptionsFromVisual({
+      // Non-finite values cannot reach the type through the SDK, but the
+      // renderer reads definitions as data, so it must never coerce.
+      width: Number.NaN,
+      metadata: { style: { strokeWidth: 2 } },
+    } as unknown as EdgeVisual);
     expect(opts?.strokeWidth).toBe(2);
   });
 
@@ -312,5 +346,247 @@ describe("DefaultEdgeRenderer (React Flow EdgeProps)", () => {
     const path = container.querySelector(".react-flow__edge-path");
     expect(path?.getAttribute("marker-start")).toBe("url(#a)");
     expect(path?.getAttribute("marker-end")).toBe("url(#b)");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Waypoint path building (T5, S2, S3, S7)                            */
+/* ------------------------------------------------------------------ */
+
+import { buildEdgePathThroughWaypoints } from "./default-edge-renderer.js";
+
+describe("buildEdgePathThroughWaypoints", () => {
+  it("returns a simple bezier when waypoints is empty", () => {
+    const [path] = buildEdgePathThroughWaypoints(
+      0, 0, 100, 100,
+      Position.Bottom,
+      Position.Top,
+      [],
+    );
+    // Should contain the M and C commands (cubic bezier).
+    expect(path).toContain("M");
+    expect(path).toContain("C");
+    // Should not contain extra segments.
+    const cCount = (path.match(/C/g) || []).length;
+    expect(cCount).toBe(1); // One cubic segment: source → target
+  });
+
+  it("includes a segment for each waypoint", () => {
+    const waypoints = [
+      { x: 40, y: 60 },
+      { x: 80, y: 30 },
+    ];
+    const [path] = buildEdgePathThroughWaypoints(
+      0, 0, 100, 100,
+      Position.Bottom,
+      Position.Top,
+      waypoints,
+    );
+
+    // Path starts at source.
+    expect(path).toMatch(/^M 0 0/);
+    // Each segment is a cubic bezier (C command).
+    // source→w1, w1→w2, w2→target = 3 segments.
+    const cCount = (path.match(/C/g) || []).length;
+    expect(cCount).toBe(3);
+    // Path contains waypoint coordinates.
+    expect(path).toContain("40");
+    expect(path).toContain("60");
+    expect(path).toContain("80");
+    expect(path).toContain("30");
+    // Path ends at target.
+    // Path ends near the target coordinates (100, 100).
+  });
+
+  it("single waypoint produces one extra segment", () => {
+    const waypoints = [{ x: 50, y: 50 }];
+    const [path] = buildEdgePathThroughWaypoints(
+      0, 0, 100, 100,
+      Position.Bottom,
+      Position.Top,
+      waypoints,
+    );
+
+    const cCount = (path.match(/C/g) || []).length;
+    expect(cCount).toBe(2); // source→wp, wp→target
+  });
+
+  it("label coordinates come from the last waypoint", () => {
+    const waypoints = [{ x: 60, y: 70 }];
+    const [, labelX, labelY] = buildEdgePathThroughWaypoints(
+      0, 0, 100, 100,
+      Position.Bottom,
+      Position.Top,
+      waypoints,
+    );
+
+    expect(labelX).toBe(60);
+    expect(labelY).toBe(70);
+  });
+
+  it("label coordinates fall back to bezier middle when no waypoints", () => {
+    const [, labelX, labelY] = buildEdgePathThroughWaypoints(
+      0, 0, 100, 100,
+      Position.Bottom,
+      Position.Top,
+      [],
+    );
+
+    // Should be approximately the middle.
+    expect(labelX).toBeGreaterThan(0);
+    expect(labelY).toBeGreaterThan(0);
+  });
+});
+
+describe("DefaultEdgeRenderer with waypoints (T5, S2, S3, S7)", () => {
+  it("renders a path through waypoints when data.waypoints is present", () => {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={{
+          waypoints: [
+            { x: 40, y: 60 },
+            { x: 80, y: 30 },
+          ],
+        }}
+        source="n1"
+        target="n2"
+      />,
+    );
+
+    const path = container.querySelector("path");
+    expect(path).not.toBeNull();
+
+    const d = path!.getAttribute("d");
+    // Path contains waypoints coordinates.
+    expect(d).toContain("40");
+    expect(d).toContain("60");
+    expect(d).toContain("80");
+    expect(d).toContain("30");
+    // Should have 3 cubic segments (source→w1, w1→w2, w2→target).
+    const cCount = (d?.match(/C/g) || []).length;
+    expect(cCount).toBe(3);
+  });
+
+  it("renders a simple bezier when data.waypoints is absent", () => {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={{}}
+        source="n1"
+        target="n2"
+      />,
+    );
+
+    const path = container.querySelector("path");
+    expect(path).not.toBeNull();
+
+    const d = path!.getAttribute("d");
+    // Should be a simple bezier with one C command.
+    const cCount = (d?.match(/C/g) || []).length;
+    expect(cCount).toBe(1);
+  });
+
+  it("renders waypoint handles when selected", () => {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={{
+          waypoints: [{ x: 50, y: 50 }],
+        }}
+        source="n1"
+        target="n2"
+        selected
+      />,
+    );
+
+    // Waypoint handles are in the EdgeLabelRenderer layer.
+    const handles = container.querySelectorAll("[data-nodera-waypoint-index]");
+    expect(handles.length).toBe(1);
+  });
+
+  it("does not render waypoint handles when not selected", () => {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={{
+          waypoints: [{ x: 50, y: 50 }],
+        }}
+        source="n1"
+        target="n2"
+      />,
+    );
+
+    const handles = container.querySelectorAll("[data-nodera-waypoint-index]");
+    expect(handles.length).toBe(0);
+  });
+
+  it("does not render waypoint handles when no waypoints", () => {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={{}}
+        source="n1"
+        target="n2"
+        selected
+      />,
+    );
+
+    const handles = container.querySelectorAll("[data-nodera-waypoint-index]");
+    expect(handles.length).toBe(0);
+  });
+
+  it("renders handles at waypoint coordinates", () => {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={100}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        data={{
+          waypoints: [{ x: 42, y: 58 }],
+        }}
+        source="n1"
+        target="n2"
+        selected
+      />,
+    );
+
+    const handle = container.querySelector("[data-nodera-waypoint-index]") as HTMLElement;
+    expect(handle.style.left).toBe("42px");
+    expect(handle.style.top).toBe("58px");
   });
 });
