@@ -1,4 +1,5 @@
 import type { EdgeId, NodeId } from "@nodera/contracts";
+import type { NodePosition } from "./node.js";
 import type { PortDirection } from "./port.js";
 
 /** One end of a connection: a specific port of a specific node. */
@@ -43,12 +44,19 @@ export class Connection {
  * An edge instance in a graph.
  *
  * The stored relation is semantic: endpoints plus an optional edge definition
- * id, label and metadata. How the connection is drawn (line style, geometry,
+ * id, label and metadata. How the connection is *styled* (line style, colors,
  * animations) belongs to edge definitions and renderers, never here.
+ *
+ * Waypoints are the exception that is per-instance: the intermediate points a
+ * person dragged the edge through, in the same absolute flow coordinates as
+ * node positions (presentation metadata a document may carry, like a node's
+ * own position). Renderers route through them; styling still lives on the
+ * definition.
  */
 export class Edge {
   private currentLabel: string | undefined;
   private currentMetadata: Readonly<Record<string, unknown>> | undefined;
+  private currentWaypoints: readonly NodePosition[] | undefined;
 
   constructor(
     readonly id: EdgeId,
@@ -79,5 +87,39 @@ export class Edge {
   /** Replaces the edge metadata record (undefined clears it). */
   setMetadata(metadata?: Readonly<Record<string, unknown>>): void {
     this.currentMetadata = metadata;
+  }
+
+  /** Waypoints the edge is routed through, when any. */
+  get waypoints(): readonly NodePosition[] | undefined {
+    return this.currentWaypoints;
+  }
+
+  /**
+   * Replaces the waypoints the edge is routed through (undefined clears them).
+   *
+   * Every point must be a finite-number pair; the array is copied, so later
+   * mutations of the caller's array never reach the stored state. A refused
+   * call leaves the previous waypoints in place.
+   */
+  setWaypoints(waypoints?: readonly NodePosition[]): void {
+    if (waypoints === undefined) {
+      this.currentWaypoints = undefined;
+      return;
+    }
+    for (const point of waypoints) {
+      if (
+        point === null ||
+        typeof point !== "object" ||
+        typeof (point as NodePosition).x !== "number" ||
+        typeof (point as NodePosition).y !== "number" ||
+        !Number.isFinite((point as NodePosition).x) ||
+        !Number.isFinite((point as NodePosition).y)
+      ) {
+        throw new RangeError(
+          `Edge "${this.id}" waypoints must be finite { x, y } positions`,
+        );
+      }
+    }
+    this.currentWaypoints = waypoints.map((point) => ({ x: point.x, y: point.y }));
   }
 }
