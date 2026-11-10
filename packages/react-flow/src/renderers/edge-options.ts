@@ -26,7 +26,8 @@ export interface EdgeOptions {
  *   - `animation` (flow/dash) → `animated`
  *   - `arrowStart`  → `markerStart` (marker-end arrow id)
  *   - `arrowEnd`    → `markerEnd`   (marker-end arrow id)
- *   - `metadata.style.strokeWidth` → `strokeWidth`
+ *   - `width` (declared)           → `strokeWidth`
+ *   - `metadata.style.strokeWidth` → `strokeWidth` (the declared `width` wins)
  *   - `metadata.style.dashArray`   → `strokeDasharray` (`string` kept, `number[]` joined)
  *
  * The style hints are the renderer-only half of an authored edge style: the
@@ -42,6 +43,7 @@ export function defaultEdgeOptionsFromVisual(visual?: {
   animation?: EdgeAnimation;
   arrowStart?: boolean;
   arrowEnd?: boolean;
+  width?: number;
   metadata?: Readonly<Record<string, unknown>>;
 }): EdgeOptions | undefined {
   if (!visual) {
@@ -78,6 +80,13 @@ export function defaultEdgeOptionsFromVisual(visual?: {
 
   // Renderer-only style hints → the same style fields.
   applyStyleHints(result, visual.metadata);
+
+  // The declared `width` is the vocabulary's own thickness key: it wins over
+  // the legacy `strokeWidth` hint, which it replaces. A non-finite value is
+  // dropped, never coerced — a definition is read as data.
+  if (typeof visual.width === "number" && Number.isFinite(visual.width)) {
+    result.strokeWidth = visual.width;
+  }
 
   // Return undefined-shallow object only when at least one field is set.
   const keys = Object.keys(result);
@@ -152,11 +161,21 @@ export function edgeStyleHintsFromStyle(style: unknown): EdgeStyleHints | undefi
   return Object.keys(hints).length > 0 ? hints : undefined;
 }
 
-/** The renderer-only style hints an edge definition declares, if any. */
+/** The renderer-only style hints an edge definition declares, if any.
+ *
+ * The declared `width` of the visual vocabulary joins the `metadata.style`
+ * hints and wins over a `strokeWidth` hint, which it replaces.
+ */
 export function edgeStyleHints(visual?: {
+  width?: number;
   metadata?: Readonly<Record<string, unknown>>;
 }): EdgeStyleHints | undefined {
-  return edgeStyleHintsFromStyle(visual?.metadata?.["style"]);
+  const hints = edgeStyleHintsFromStyle(visual?.metadata?.["style"]);
+  const declaredWidth = visual?.width;
+  if (typeof declaredWidth !== "number" || !Number.isFinite(declaredWidth)) {
+    return hints;
+  }
+  return { ...hints, strokeWidth: declaredWidth };
 }
 
 /**

@@ -25,7 +25,7 @@
  * that, from the one domain object that is an edge instance.
  */
 
-import type { Edge, Node } from "@nodera/graph-model";
+import type { Edge, Node, NodePosition } from "@nodera/graph-model";
 
 /** One node instance, in the §9 vocabulary. */
 export interface NodeInstanceView {
@@ -61,6 +61,13 @@ export interface EdgeInstanceView {
   readonly targetPort?: string;
   readonly label?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * Waypoints the edge is routed through, when any.
+   *
+   * An absent value means the edge is routed straight from source to target.
+   * Waypoints live in the same flow coordinate space as node positions.
+   */
+  readonly waypoints?: readonly NodePosition[];
 }
 
 /** Maps one node instance to its §9 view. */
@@ -87,5 +94,8 @@ export function toEdgeInstanceView(edge: Edge): EdgeInstanceView {
     targetPort: edge.connection.target.portId,
     ...(edge.label === undefined ? {} : { label: edge.label }),
     ...(edge.metadata === undefined ? {} : { metadata: edge.metadata }),
+    ...(edge.waypoints === undefined
+      ? {}
+      : { waypoints: edge.waypoints.map((p) => ({ x: p.x, y: p.y })) }),
   };
 }

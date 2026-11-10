@@ -32,6 +32,7 @@ import {
   removeNodeSplicing,
   selectMultiple,
   undo,
+  updateEdgeWaypoints,
   updateNodeProperties,
   validateGraph,
   type EditorEngine,
@@ -295,6 +296,21 @@ export interface BuilderGraphApi {
   connect(request: ConnectRequest): Result<EdgeInstanceView, SdkIssues>;
   disconnect(edgeId: string): Result<EdgeInstanceView, SdkIssues>;
   /**
+   * Replaces the edge's waypoints. One history unit (undo restores the
+   * previous shape). Emits `edge.updated` and `graph.changed` through the
+   * application layer.
+   *
+   * An unknown edge is `sdk.invalid-input` at path `edgeId`, an invalid
+   * point (non-finite coordinate or non-`{x, y}` entry) is
+   * `sdk.invalid-input` at the offending array index, and nothing is
+   * mutated on failure. An empty array clears waypoints. Every refusal
+   * is a `Result` error, never a thrown exception.
+   */
+  setEdgeWaypoints(
+    edgeId: string,
+    waypoints?: readonly NodePosition[],
+  ): Result<EdgeInstanceView, SdkIssues>;
+  /**
    * Lays the whole graph out with the strategy the host selected.
    *
    * Explicit only: no add, edge change or read ever calls it. One history unit
@@ -428,6 +444,54 @@ function propertyMapIssues(properties: unknown): SdkIssues | undefined {
   return isPlainObject(properties)
     ? undefined
     : [shapeIssue("Properties must be an object of property values", properties, ["properties"])];
+}
+
+/**
+ * Issues of a waypoint array: every entry must be a finite-`{x, y}` object;
+ * the array itself may be absent (undefined clears waypoints).
+ */
+function waypointsIssues(
+  waypoints?: readonly NodePosition[],
+): SdkIssues | undefined {
+  if (waypoints === undefined) {
+    return undefined;
+  }
+  if (waypoints === null) {
+    return [
+      shapeIssue(
+        "Waypoints must be an array of positions or omitted",
+        waypoints,
+        ["waypoints"],
+      ),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  for (const [index, point] of waypoints.entries()) {
+    // The whole point is invalid if it is not a plain object.
+    if (!isPlainObject(point)) {
+      issues.push(
+        shapeIssue(
+          `Waypoint ${index} must be an object with numeric x and y`,
+          point,
+          ["waypoints", String(index)],
+        ),
+      );
+      continue;
+    }
+    for (const axis of ["x", "y"] as const) {
+      const value = (point as NodePosition)[axis];
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        issues.push(
+          shapeIssue(
+            `Waypoint ${index} ${axis} must be a finite number`,
+            value,
+            ["waypoints", String(index), axis],
+          ),
+        );
+      }
+    }
+  }
+  return issues.length > 0 ? issues : undefined;
 }
 
 /** Rejects a node position that is not an `{ x, y }` pair of numbers. */
@@ -1119,6 +1183,26 @@ export function createGraphApi(
       return removed.ok
         ? ok(toEdgeInstanceView(removed.value))
         : err([useCaseIssue(removed.error)]);
+    },
+
+    setEdgeWaypoints(
+      edgeId: string,
+      waypoints?: readonly NodePosition[],
+    ): Result<EdgeInstanceView, SdkIssues> {
+      const closed = closedIssues(isDisposed, "graph.setEdgeWaypoints");
+      if (closed !== undefined) {
+        return err(closed);
+      }
+      const issues =
+        identifierIssues("Edge", edgeId, ["edgeId"]) ??
+        waypointsIssues(waypoints);
+      if (issues !== undefined) {
+        return err(issues);
+      }
+      const updated = updateEdgeWaypoints(editor, { edgeId, waypoints });
+      return updated.ok
+        ? ok(toEdgeInstanceView(updated.value))
+        : err([useCaseIssue(updated.error)]);
     },
 
     nodes(): readonly NodeInstanceView[] {

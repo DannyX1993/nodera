@@ -179,6 +179,13 @@ function DefaultCanvasRegion(props: {
   const theme = useTheme();
   const renderers = useBuilderRenderers();
 
+  // Waypoint editing is enabled only when every layer agrees: the SDK flag,
+  // editable connections, and the free layout strategy.
+  const waypointEditing =
+    ui.edgeWaypointEditing &&
+    ui.connections === "editable" &&
+    ui.activeGraphStrategyId === "nodera.graph-layout.free";
+
   return (
     <NoderaCanvasProvider editor={builder.editor}>
       <CanvasContainer overlays={<ContextMenu />}>
@@ -197,6 +204,7 @@ function DefaultCanvasRegion(props: {
           showMinimap={builder.features.minimap}
           showControls={builder.adapter?.capabilities.controls ?? true}
           edgeInsertion={ui.edgeInsertion}
+          edgeWaypointEditing={waypointEditing}
           {...(props.layoutDirection === undefined
             ? {}
             : { layoutDirection: props.layoutDirection })}

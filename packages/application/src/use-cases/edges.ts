@@ -13,7 +13,7 @@ import {
   ok,
   type Result,
 } from "@nodera/contracts";
-import { Connection, Edge } from "@nodera/graph-model";
+import { Connection, Edge, type NodePosition } from "@nodera/graph-model";
 import type { EditorEngine } from "../editor-engine.js";
 import { emitChanged, toUseCaseError, type UseCaseError } from "./errors.js";
 
@@ -145,6 +145,84 @@ export function updateEdge(
   });
   editor.events.emit({ name: "edge.updated", payload: { edgeId: edge.id } });
   emitChanged(editor, "update-edge");
+  return ok(edge);
+}
+
+export interface UpdateEdgeWaypointsInput {
+  readonly edgeId: string;
+  /**
+   * Waypoints to apply (undefined clears them). An empty array is normalised
+   * to undefined so that `setWaypoints([])` is treated as "no waypoints".
+   */
+  readonly waypoints?: readonly NodePosition[] | undefined;
+}
+
+/**
+ * Replaces the edge's waypoints. One history unit (undo restores the
+ * previous shape). Emits `edge.updated` and `graph.changed`.
+ *
+ * Fails with `edge-not-found` when the id does not exist, or with
+ * `invalid-input` when the array contains a non-`{x, y}` entry or any
+ * non-finite coordinate.  No state is mutated and no event is emitted on
+ * failure.
+ *
+ * An empty array is normalised to `undefined` (clear) so that the edge
+ * ends up without waypoints after undo/redo as well.
+ */
+export function updateEdgeWaypoints(
+  editor: EditorEngine,
+  input: UpdateEdgeWaypointsInput,
+): Result<Edge, UseCaseError> {
+  const edge = editor.graph.getEdge(createEdgeId(input.edgeId));
+  if (edge === undefined) {
+    return err({
+      kind: "edge-not-found",
+      message: `Graph has no edge with id "${input.edgeId}"`,
+      elementId: input.edgeId,
+    });
+  }
+
+  // Normalise empty array to undefined before validation so the use case
+  // never stores waypoints === [] in history.
+  const waypoints: readonly NodePosition[] | undefined =
+    input.waypoints && input.waypoints.length > 0
+      ? input.waypoints
+      : undefined;
+
+  // Validate before pushing history so that a RangeError never escapes
+  // and no state mutation happens on invalid input.
+  for (const point of waypoints ?? []) {
+    if (
+      point === null ||
+      typeof point !== "object" ||
+      typeof (point as NodePosition).x !== "number" ||
+      typeof (point as NodePosition).y !== "number" ||
+      !Number.isFinite((point as NodePosition).x) ||
+      !Number.isFinite((point as NodePosition).y)
+    ) {
+      return err({
+        kind: "invalid-input",
+        message: `Edge "${input.edgeId}" waypoints must be finite { x, y } positions`,
+        elementId: input.edgeId,
+      });
+    }
+  }
+
+  const previousWaypoints = edge.waypoints;
+  editor.history.push(editor.editorState, {
+    label: "update-edge-waypoints",
+    apply: () => {
+      edge.setWaypoints(waypoints);
+    },
+    reverse: () => {
+      edge.setWaypoints(previousWaypoints);
+    },
+  });
+  editor.events.emit({
+    name: "edge.updated",
+    payload: { edgeId: edge.id },
+  });
+  emitChanged(editor, "update-edge-waypoints");
   return ok(edge);
 }
 

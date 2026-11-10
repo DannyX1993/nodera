@@ -137,7 +137,18 @@
         "label": { "type": "string" },
         "metadata": { "type": "object" },
         "source": { "$ref": "#/$defs/endpoint" },
-        "target": { "$ref": "#/$defs/endpoint" }
+        "target": { "$ref": "#/$defs/endpoint" },
+        "waypoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            }
+          }
+        }
       }
     }
   },

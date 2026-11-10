@@ -20,7 +20,7 @@
  * | Surface | Connections           | `builder.graphLayout.setConnectionsPolicy(policy)`             |
  * | Surface | Ports                 | `builder.graphLayout.setPortsPolicy(policy)`                   |
  * | Surface | Edge "+"              | `builder.features.setEdgeInsertion(enabled)` — runtime toggle  |
- * | Edge style | Geometry, arrows, line style, color, animation | `registries.edges.unregister(type)` + `builder.registerEdge` — an explicit replace of the demo edge definition, which all edges of that type re-render from |
+ * | Edge style | Geometry, width, arrows, line style, color, animation | `registries.edges.unregister(type)` + `builder.registerEdge` — an explicit replace of the demo edge definition, which all edges of that type re-render from |
  * | Actions | Arrange               | `builder.graph.arrange({ … })` — one explicit history unit     |
  * | Actions | Arrange from a node   | `builder.graph.arrange({ from, … })` — the scoped call         |
  * | Actions | Add node              | `CreateNodeButton` → `builder.graph.addNode({ after })`        |
@@ -31,6 +31,8 @@
  * | canvas  | "+" on the phantom    | the same affordance on the phantom empty state and on every    |
  * |         |                       | leaf's successor placeholder: the host appends with            |
  * |         |                       | `addNode({ after })` + `connect` (two units)                   |
+ * | canvas  | Drag an edge path     | the adapter adds or moves a waypoint; the bend persists in the |
+ * |         |                       | document (one undo restores the previous shape).               |
  *
  * Nothing is persisted by the per-call overrides: they win for the one `Arrange`
  * call that carries them, and the next call without them reads `graph.layout`
@@ -170,6 +172,7 @@ interface DemoEdgeStyle {
   readonly arrowEnd: boolean;
   readonly color: string;
   readonly animation: EdgeStyleInput["animation"];
+  readonly width: number;
 }
 
 /** Edge geometries the host offers, in the order it shows them. */
@@ -280,6 +283,11 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   // flips it through `builder.features.setEdgeInsertion`, one toggle call.
   const [edgeInsertion, setEdgeInsertion] = useState<boolean>(() =>
     builder.features.edgeInsertion,
+  );
+  // Waypoint editing is a gated feature flag: the SDK refuses enabling outside
+  // free+editable; the canvas additionally gates on the live conditions.
+  const [edgeWaypointEditing, setEdgeWaypointEditing] = useState<boolean>(() =>
+    builder.features.edgeWaypointEditing,
   );
   const [arrangeOnChange, setArrangeOnChange] = useState<ArrangeOnChange>(() =>
     builder.graphLayout.arrangeOnChange(),
@@ -463,6 +471,19 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     setStatus(`Edge "+" ${changed.value ? "on" : "off"}.`);
   };
 
+  /** Flips the per-edge waypoint editing affordance at runtime. */
+  const toggleEdgeWaypointEditing = (enabled: boolean): void => {
+    const changed = builder.features.setEdgeWaypointEditing(enabled);
+    if (!changed.ok) {
+      setStatus(
+        `Waypoint editing ${enabled ? "on" : "off"} was not applied — ${issueSummary(changed.error)}`,
+      );
+      return;
+    }
+    setEdgeWaypointEditing(changed.value);
+    setStatus(`Waypoint editing ${changed.value ? "on" : "off"}.`);
+  };
+
   /** Changes what a structural change arranges by itself. */
   const selectArrangeOnChange = (reported: string): void => {
     const policy = offered(ARRANGE_ON_CHANGE_POLICIES, reported);
@@ -523,8 +544,8 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     setStatus(
       `Edge style applied: ${next.geometry}, ${next.lineStyle}, ` +
         `arrows ${next.arrowStart ? "start" : "–"}/${next.arrowEnd ? "end" : "–"}, ` +
-        `${next.color}, animation ${next.animation}. Every edge of ` +
-        `"${DEMO_EDGE_TYPE}" re-rendered with it.`,
+        `${next.color}, animation ${next.animation}, width ${String(next.width)}. ` +
+        `Every edge of "${DEMO_EDGE_TYPE}" re-rendered with it.`,
     );
   };
 
@@ -708,7 +729,8 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     `arrange on ${arrangeOnChange}`,
     `remove ${removal}`,
     `edge "+" ${edgeInsertion ? "on" : "off"}`,
-    `edge style ${edgeStyle.geometry}/${edgeStyle.lineStyle}`,
+    `waypoint editing ${edgeWaypointEditing ? "on" : "off"}`,
+    `edge style ${edgeStyle.geometry}/${edgeStyle.lineStyle} w${String(edgeStyle.width)}`,
   ].join(" · ");
 
   return (
@@ -952,6 +974,19 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
                 />
               </label>
 
+              <label className="demo-control">
+                Waypoint editing
+                <input
+                  type="checkbox"
+                  className="demo-checkbox"
+                  data-demo-control="edge-waypoint-editing"
+                  checked={edgeWaypointEditing}
+                  onChange={(event) => {
+                    toggleEdgeWaypointEditing(event.target.checked);
+                  }}
+                />
+              </label>
+
               <p className="demo-note">
                 {"The per-edge "}
                 <code>{'"+"'}</code>
@@ -961,6 +996,16 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
                 {"still comes from "}
                 <code>{"features: { edgeInsertion: true }"}</code>
                 {" in builder.ts."}
+              </p>
+
+              <p className="demo-note">
+                {"Waypoint editing is gated on free layout and editable connections; "}
+                {"the SDK setter refuses outside those conditions with "}
+                <code>{"sdk.feature-unavailable"}</code>
+                {", and the canvas additionally gates gesture handling on the live values. "}
+                {"This demo boots on the layered strategy with fixed connections, so the "}
+                {"checkbox refuses until you switch to the free strategy and set "}
+                {"connections to editable."}
               </p>
             </div>
           </fieldset>
@@ -1008,6 +1053,24 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
                     </option>
                   ))}
                 </select>
+              </label>
+
+              <label className="demo-control">
+                Width
+                <input
+                  className="demo-number"
+                  type="number"
+                  min={0.5}
+                  step={0.5}
+                  data-demo-control="edge-width"
+                  value={edgeStyle.width}
+                  onChange={(event) => {
+                    const width = Number.parseFloat(event.target.value);
+                    if (Number.isFinite(width) && width > 0) {
+                      applyEdgeStyle({ ...edgeStyle, width });
+                    }
+                  }}
+                />
               </label>
 
               <label className="demo-control">
@@ -1078,6 +1141,10 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
                 <code>{"builder.registerEdge"}</code>
                 {", and the host remounts the canvas (viewport resets), because a "}
                 {"definition replace emits no editor event for the canvas to re-derive from."}
+              </p>
+
+              <p className="demo-note">
+                {"Drag an edge from an intermediate point to bend it: the gesture adds or moves a waypoint and stores the result in the document (one undo restores the previous shape)."}
               </p>
             </div>
           </fieldset>

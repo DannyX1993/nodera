@@ -53,6 +53,7 @@ import type {
 } from "@nodera/ui-core";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
 import { useEdgeInsertActions, useNoderaUi } from "@nodera/ui-react";
+import { NoderaWaypointEditingProvider } from "./editor-context.js";
 import {
   moveNode,
   createEdge,
@@ -69,6 +70,7 @@ import {
 import { useEditorGraph } from "./use-editor-graph.js";
 import { useNodeTypes } from "./custom-node.js";
 import { isNodeDefinitionDrag, nodeDefinitionFromDataTransfer } from "./definition-drop.js";
+import { NoderaEditorProvider } from "./editor-context.js";
 import {
   DEFAULT_EDGE_RENDERER_ID,
   DEFAULT_NODE_RENDERER_ID,
@@ -196,13 +198,13 @@ export interface EdgeInsertRenderOptions {
  *
  * When `insert` is supplied every type is wrapped so it also renders that
  * affordance at its midpoint — including React Flow's own built-in geometry
- * types (`"default"`, `"straight"`, `"step"`, `"smoothstep"`), which the edge
- * mapper produces for definitions that declare a `visual.geometry`. Those are
- * absent from the registry, so without this registration React Flow would fall
- * back to its unwrapped built-in component and the affordance would disappear
- * exactly on the edges that declare a geometry. Without `insert` the map keeps
- * the registered components untouched, so a canvas without the affordance
- * renders exactly as before.
+ * types (`"default"`, `"straight"`, `"step"`, `"smoothstep"`). The edge mapper
+ * no longer produces them (every declared geometry is drawn by the Nodera
+ * renderer), but a host may still name one explicitly, and those are absent
+ * from the registry: without this registration React Flow would fall back to
+ * its unwrapped built-in component and the affordance would disappear on those
+ * edges. Without `insert` the map keeps the registered components untouched, so
+ * a canvas without the affordance renders exactly as before.
  *
  * Casts stay confined to the adapter boundary: React Flow's `EdgeTypes` is a
  * `ComponentType<any>` map while Nodera renderers have stricter props.
@@ -1231,6 +1233,15 @@ export interface GraphCanvasProps {
    */
   readonly edgeInsertion?: boolean;
   /**
+   * Whether the canvas accepts waypoint reshaping on edges.
+   *
+   * The canvas composes this from the SDK feature flag, connections policy
+   * and active strategy; gestures and handles are gated when false (the
+   * default). An edge that already carries waypoints still routes through
+   * them — only editing is disabled.
+   */
+  readonly edgeWaypointEditing?: boolean;
+  /**
    * Axis the phantom placeholders step along (S21).
    *
    * The host declares it, because the canvas adapter can read neither
@@ -1329,6 +1340,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   connectionsPolicy = "editable",
   portsPolicy = "visible",
   edgeInsertion = false,
+  edgeWaypointEditing = false,
   nodeTransition = "instant",
   layoutDirection = "horizontal",
   renderEdgeInsert,
@@ -1694,67 +1706,71 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       : className;
 
   return (
-    <div
-      className={frameClassName}
-      style={{ width: "100%", height: "100%" }}
-      data-color-mode={colorMode}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
-      {nodeTransition === "animated" && (
-        <style data-nodera-node-transition="">{NODE_TRANSITION_STYLE}</style>
-      )}
-      <ReactFlow
-        nodes={nodesWithTypes}
-        edges={edges}
-        onInit={handleInit}
-        nodeTypes={nodeTypes as unknown as NodeTypes}
-        edgeTypes={edgeTypes}
-        deleteKeyCode={["Delete", "Backspace"]}
-        // Deletion keeps the canvas' hands off the edges that hang on the
-        // removed nodes: their fate is the use case's decision, not React
-        // Flow's. Under "detach" `removeNode` takes them with the node in one
-        // history unit; under "splice" `removeNodeSplicing` needs them intact
-        // to join each predecessor to each successor — without this, React
-        // Flow strips them first and a spliced removal finds nothing to join.
-        // Standalone selected-edge deletions stay in the list and keep going
-        // through `handleEdgesChange`.
-        onBeforeDelete={({ nodes: removedNodes, edges: removedEdges }) =>
-          Promise.resolve({
-            nodes: removedNodes,
-            edges: removedEdges.filter(
-              (edge) =>
-                !removedNodes.some((node) => node.id === edge.source || node.id === edge.target),
-            ),
-          })
-        }
-        connectionMode={ConnectionMode.Loose}
-        isValidConnection={isValidConnection}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={handleEdgesChange}
-        onNodeDragStop={handleNodeDragStop}
-        onConnect={handleConnect}
-        onNodeClick={handleNodeClick}
-        onEdgeClick={handleEdgeClick}
-        onPaneClick={handlePaneClick}
-        onSelectionChange={handleSelectionChange}
-        panOnDrag={interaction.panOnDrag}
-        selectionOnDrag={interaction.selectionOnDrag}
-        colorMode={colorMode}
-        fitView
-        nodesDraggable={dragPolicy !== "locked"}
-        nodesConnectable={connectionsPolicy === "editable"}
+    <NoderaWaypointEditingProvider enabled={edgeWaypointEditing}>
+      <NoderaEditorProvider editor={editor}>
+        <div
+          className={frameClassName}
+        style={{ width: "100%", height: "100%" }}
+        data-color-mode={colorMode}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
       >
-        <Background {...canvasBackgroundOptions()} />
-        <CanvasPlaceholderOverlay
-          placeholders={placeholders}
-          {...(renderPlaceholder === undefined ? {} : { render: renderPlaceholder })}
-        />
-        {showMinimap && (
-          <MiniMap nodeColor={minimapNodeColor} pannable zoomable />
+        {nodeTransition === "animated" && (
+          <style data-nodera-node-transition="">{NODE_TRANSITION_STYLE}</style>
         )}
-        {showControls && <Controls />}
-      </ReactFlow>
-    </div>
+        <ReactFlow
+          nodes={nodesWithTypes}
+          edges={edges}
+          onInit={handleInit}
+          nodeTypes={nodeTypes as unknown as NodeTypes}
+          edgeTypes={edgeTypes}
+          deleteKeyCode={["Delete", "Backspace"]}
+          // Deletion keeps the canvas' hands off the edges that hang on the
+          // removed nodes: their fate is the use case's decision, not React
+          // Flow's. Under "detach" `removeNode` takes them with the node in one
+          // history unit; under "splice" `removeNodeSplicing` needs them intact
+          // to join each predecessor to each successor — without this, React
+          // Flow strips them first and a spliced removal finds nothing to join.
+          // Standalone selected-edge deletions stay in the list and keep going
+          // through `handleEdgesChange`.
+          onBeforeDelete={({ nodes: removedNodes, edges: removedEdges }) =>
+            Promise.resolve({
+              nodes: removedNodes,
+              edges: removedEdges.filter(
+                (edge) =>
+                  !removedNodes.some((node) => node.id === edge.source || node.id === edge.target),
+              ),
+            })
+          }
+          connectionMode={ConnectionMode.Loose}
+          isValidConnection={isValidConnection}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
+          onNodeDragStop={handleNodeDragStop}
+          onConnect={handleConnect}
+          onNodeClick={handleNodeClick}
+          onEdgeClick={handleEdgeClick}
+          onPaneClick={handlePaneClick}
+          onSelectionChange={handleSelectionChange}
+          panOnDrag={interaction.panOnDrag}
+          selectionOnDrag={interaction.selectionOnDrag}
+          colorMode={colorMode}
+          fitView
+          nodesDraggable={dragPolicy !== "locked"}
+          nodesConnectable={connectionsPolicy === "editable"}
+        >
+          <Background {...canvasBackgroundOptions()} />
+          <CanvasPlaceholderOverlay
+            placeholders={placeholders}
+            {...(renderPlaceholder === undefined ? {} : { render: renderPlaceholder })}
+          />
+          {showMinimap && (
+            <MiniMap nodeColor={minimapNodeColor} pannable zoomable />
+          )}
+          {showControls && <Controls />}
+        </ReactFlow>
+      </div>
+    </NoderaEditorProvider>
+  </NoderaWaypointEditingProvider>
   );
 };

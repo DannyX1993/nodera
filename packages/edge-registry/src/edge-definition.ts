@@ -25,6 +25,11 @@ export interface EdgeVisual {
   readonly color?: string;
   readonly animation?: EdgeAnimation;
   /**
+   * Stroke thickness the renderer draws the edge with, as a unitless SVG
+   * `stroke-width` number. Renderer hint, never document state.
+   */
+  readonly width?: number;
+  /**
    * State indicator ids the renderer may resolve (e.g. success, error
    * badges). The domain never interprets them.
    */

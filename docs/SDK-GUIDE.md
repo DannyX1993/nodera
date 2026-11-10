@@ -140,7 +140,7 @@ export function createAppBuilder(): Builder {
         edges: [DATA_FLOW],
         layouts: [PIPELINE_LAYOUT],
       },
-      features: { minimap: true, history: true, validation: true },
+      features: { minimap: true, history: true, validation: true, edgeInsertion: false, edgeWaypointEditing: false },
       document: { format: "ggd", version: "1.0.0" },
       ui: { layout: "acme.layout.pipeline" },
       plugins: [plugin],
@@ -233,6 +233,7 @@ escape hatch.
 | `id` (node instance) | identity of one node in a graph | `builder.graph.addNode` returns the instance | `NodeInstanceView.id`; generated from the definition when omitted |
 | `version` (instance) | definition version the instance was created against | the document when it pins one | `NodeInstanceView.version`, absent when the domain does not know it |
 | `position` | where the host placed the node | `AddNodeRequest.position` / `graph.moveNode` | `NodeInstanceView.position`, absent until the node is placed |
+| `waypoints` | points the edge is routed through | `graph.setEdgeWaypoints` | `EdgeInstanceView.waypoints`, absent when the edge is straight |
 | `after` | the node an unpositioned add follows | `AddNodeRequest.after` (a node instance id) | not read back: it decides the slot `NodeInstanceView.position` carries |
 | `edgeId` (insertion) | the edge a node is inserted on | `InsertNodeRequest.edgeId` | not read back: it is replaced by the two halves, `InsertNodeResult.edges` |
 | `label` | human-readable name of a definition | becomes `NodeDefinition.name` / `EdgeDefinition.name` | `NodeDefinitionView.label` / `EdgeDefinitionView.label` |
@@ -246,7 +247,7 @@ escape hatch.
 | `renderer` | opaque presentation contribution of a node or edge | `NodeDefinitionInput.renderer` / `EdgeDefinitionInput.renderer` | `NodeDefinitionView.renderer` / `EdgeDefinitionView.renderer` (the derived id) |
 | renderer id | the key a binding resolves the renderer by | derived: the definition `type` for nodes and edges, `<ownerType>.<propertyId>` for a property declared inside a node, `<propertyId>` for a standalone property | the same string, on the view |
 | `source` / `sourcePort` / `target` / `targetPort` (edge instance) | the two endpoints of a connection, flat | `ConnectRequest` | `EdgeInstanceView`, flat — the serialized document keeps nested `{ nodeId, portId, direction? }` |
-| `style` (edge) | declared visual keys plus renderer-only hints | `lineStyle`/`geometry`/`arrowStart`/`arrowEnd`/`color`/`animation`/`stateIndicatorIds` become the edge `visual`; every other key is stored under `visual.metadata.style` | `EdgeDefinitionView.visual` |
+| `style` (edge) | declared visual keys plus renderer-only hints | `lineStyle`/`geometry`/`arrowStart`/`arrowEnd`/`color`/`animation`/`width`/`stateIndicatorIds` become the edge `visual`; every other key is stored under `visual.metadata.style` | `EdgeDefinitionView.visual` |
 | `builder.id` | globally qualified id of the composition | defaults to `nodera.builder` | `builder.id` |
 | `adapter.id` | globally qualified id of the presentation engine | e.g. `nodera.react-flow` | `builder.adapter?.id` |
 
@@ -354,6 +355,35 @@ arrangement is reported by `graph.lastAutoArrangement()` (`"skipped"`,
 `"arranged"`, `"refused"`). A bare `addNode` arranges nothing, and `"never"` — the
 default — keeps the previous rule that only an explicit `Arrange` moves nodes.
 
+### Reshaping an edge
+
+`setEdgeWaypoints` lets a host set the bend points of an edge instance. A
+waypoint is a `{ x, y }` position in the same flow coordinate space as node
+positions; an edge without waypoints is routed straight from source to target.
+
+```ts
+const result = builder.graph.setEdgeWaypoints("edge-id",
+  [{ x: 100, y: 50 }, { x: 200, y: 100 }]);
+if (!result.ok) {
+  // sdk.invalid-input: unknown edge, or a non-finite coordinate
+}
+
+// An empty array clears the waypoints: the edge goes straight again.
+builder.graph.setEdgeWaypoints("edge-id", []);
+
+// `undefined` (or omitting the second argument) leaves them untouched.
+builder.graph.setEdgeWaypoints("edge-id");
+```
+
+An unknown edge is `sdk.invalid-input` at path `edgeId`; a non-finite coordinate
+or a malformed point is `sdk.invalid-input` at the offending array index. On
+failure nothing is mutated. On success the change is one history unit (undo/
+redo), emits `edge.updated` and `graph.changed`, and the result carries the
+updated `EdgeInstanceView`, which includes the new `waypoints` value.
+
+**`updateEdgeWaypoints`** is the application use case the SDK delegates to
+(`@nodera/application`); the SDK surface is `builder.graph.setEdgeWaypoints`.
+
 ### Removing a node under a layout-owned graph
 
 `graph.layout.onRemove` declares what `builder.graph.removeNode()` does with the
@@ -441,7 +471,7 @@ for (const node of builder.graph.nodes()) {
 }
 
 for (const edge of builder.graph.edges()) {
-  // flat: source/sourcePort/target/targetPort, plus type?, label?, metadata?
+  // flat: source/sourcePort/target/targetPort, plus type?, label?, metadata?, waypoints?
   table.link(edge.source, edge.sourcePort, edge.target, edge.targetPort);
 }
 
@@ -458,6 +488,10 @@ Two things that surprise a host coming from the serialized format:
   because a round trip has to keep the direction each port was declared with, and
   the document is a separate published contract. A view keeps the port identity
   and hands you two strings.
+- **`EdgeInstanceView.waypoints` is per-instance.** Waypoints live in flow
+  coordinates like node positions; they are absent on a straight edge and
+  present when the path has bends (dragged via canvas interaction or set
+  programmatically).
 - **Absent means absent.** `position` and `version` are omitted when the domain
   does not have them; nothing is defaulted to `{ x: 0, y: 0 }`.
 
@@ -568,7 +602,7 @@ below are the complete lists:
 | `layout.register`, `layout.setDefault` | `layout.active`, `layout.all` |
 | `dialogs.register` | `dialogs.all`, `builder.store` reads |
 | `graphLayout.register`, `graphLayout.setDefault`, `setDragPolicy`, `setNodeTransition`, `setConnectionsPolicy`, `setPortsPolicy`, `setArrangeOnChange`, `setRemovalPolicy` | `graphLayout.active`, `graphLayout.all`, `dragPolicy`, `nodeTransition`, `connectionsPolicy`, `portsPolicy`, `arrangeOnChange`, `removalPolicy`, `lastAutoArrangement` |
-| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo`, `lastAutoArrangement` |
+| `graph.addNode`, `removeNode`, `moveNode`, `updateProperties`, `insertNode`, `connect`, `disconnect`, `setEdgeWaypoints`, `arrange`, `select`, `clearSelection` | `graph.validate`, `nodeCount`, `edgeCount`, `selectedNodes`, `selectedEdges`, `canUndo`, `canRedo`, `lastAutoArrangement` |
 | `graph.undo`, `graph.redo` — nothing is undone, both return `false` | `document.create`, `export`, `serialize`, `deserialize`, `validate` |
 | `document.import` | `builder.store` reads, `builder.renderers`, `builder.features`, `builder.diagnostics` |
 
@@ -689,11 +723,17 @@ These are honest boundaries of Phase 6, not roadmap guesses.
   `BuilderPluginApi` exposes the contribution slots, not the builder, and
   `install` runs before `createBuilder` returns. Read composition facts later
   (from the object `createBuilder` returned) or contribute them as data.
-- **The default edge renderer honours some style hints only.** `strokeWidth` and
-  `dashArray` from the definition's `style` are applied over the theme token
-  fallbacks; `color` and `lineStyle` are carried on the mapped edge but the
-  default renderer keeps the stroke token-driven, so a host that needs those
-  writes a custom edge renderer. Nothing is dropped: the values stay on the edge.
+- **The default edge renderer honours some style hints only.** `strokeWidth`
+  and `dashArray` from the definition's `style` are applied over the theme
+  token fallbacks; the declared `width` key of the visual vocabulary is the
+  same stroke width and wins over the legacy `strokeWidth` hint.
+  `color` and `lineStyle` are carried on the mapped edge but the default
+  renderer keeps the stroke token-driven, so a host that needs those writes a
+  custom edge renderer. Nothing is dropped: the values stay on the edge. The
+  declared `geometry` (`straight`, `bezier`, `step`, `smooth`) *is* drawn by
+  this renderer: an edge of a definition resolves to it instead of to React
+  Flow's built-in geometry types, which is what gives every declared geometry
+  the waypoint affordances.
 - **No `exports` map and no bundle yet.** `@nodera/sdk` and `@nodera/react-flow`
   are consumed from source (`main`/`types` → `./src/index.ts`, `tsc --noEmit`),
   and publishing is a Phase 8 concern. A host bundler resolves the TypeScript
@@ -704,7 +744,21 @@ These are honest boundaries of Phase 6, not roadmap guesses.
   translation, so prefer the facades.
 - **No grouping, no runtime, no execution.** `features: { grouping: true }` is
   rejected with `sdk.feature-unsupported` because the capability does not exist;
-  only `minimap`, `history` and `validation` are implemented.
+  only `minimap`, `history`, `validation`, `edgeInsertion` and
+  `edgeWaypointEditing` are implemented.
+- **`edgeInsertion`** seeds the per-edge "+" affordance from configuration
+  (`features.edgeInsertion`), and `builder.features.setEdgeInsertion(enabled)`
+  flips it at runtime. The canvas re-renders without a rebuild; the value
+  written by the host is the boot value for the session.
+- **`edgeWaypointEditing`** gates the per-edge waypoint editing affordance.
+  `builder.features.setEdgeWaypointEditing(enabled)` refuses to enable unless
+  the active strategy is the free strategy (`nodera.graph-layout.free`) **and**
+  connections are editable — the setter returns `sdk.feature-unavailable` with
+  a diagnostic naming the missing condition. Even when the SDK flag is `true`,
+  the canvas additionally gates gesture handling and waypoint handle rendering
+  on the live value of `connections` and the active strategy id, so the
+  gesture layer never fires when any condition changes at runtime. Disabling
+  (`false`) is always allowed.
 
 ## Where to go next
 

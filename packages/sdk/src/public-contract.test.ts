@@ -491,6 +491,7 @@ describe("the malformed-shape sweep", () => {
       ["graph.connect({type:5})", () => current.graph.connect({ source: "n1", target: "n1", type: 5 } as never)],
       ["graph.moveNode({x:1})", () => current.graph.moveNode("n1", { x: 1 } as never)],
       ["graph.updateProperties(null)", () => current.graph.updateProperties("n1", null as never)],
+      ["graph.setEdgeWaypoints(null)", () => current.graph.setEdgeWaypoints("e1", null as never)],
       ["graph.select({nodes:[null]})", () => current.graph.select({ nodes: [null] } as never)],
       ["use({install:\"no\"})", () => current.use({ id: "acme.plugin", version: "1.0.0", install: "no" } as never)],
       ["createEditor(\"x\")", () => current.createEditor("x" as never)],

@@ -14,6 +14,7 @@ import {
   Graph,
   type GraphSettings,
   Node,
+  type NodePosition,
   type PortInstance,
 } from "@nodera/graph-model";
 import { GGD_FORMAT, type DocumentEdgeEndpoint, type DocumentMetadata, type DocumentEdgeInstance, type DocumentNodeInstance,
@@ -158,6 +159,7 @@ function edgeToDocumentEdge(edge: Edge): DocumentEdgeInstance {
     type?: string;
     label?: string;
     metadata?: Record<string, unknown>;
+    waypoints?: NodePosition[];
   } = {
     id: edge.id,
     source: endpointToDocumentEndpoint(edge.connection.source),
@@ -171,6 +173,10 @@ function edgeToDocumentEdge(edge: Edge): DocumentEdgeInstance {
   }
   if (edge.metadata !== undefined) {
     payload["metadata"] = { ...edge.metadata };
+  }
+  const waypoints = edge.waypoints;
+  if (waypoints !== undefined && waypoints.length > 0) {
+    payload["waypoints"] = waypoints.map((wp) => ({ x: wp.x, y: wp.y }));
   }
   return payload;
 }
@@ -390,6 +396,9 @@ function importEdge(
     edge.label,
     metadata,
   );
+  if (edge.waypoints !== undefined) {
+    importEdgeWaypoints(instance, edge.waypoints, issues);
+  }
   const added = graph.addEdge(instance);
   if (!added.ok) {
     issues.push(
@@ -400,6 +409,49 @@ function importEdge(
       ),
     );
   }
+}
+
+/**
+ * Validates waypoints from a document edge and applies them to the domain edge.
+ * Non-conformant waypoints produce a diagnostic and are silently dropped so
+ * the edge itself still imports.
+ */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNodePosition(value: unknown): value is NodePosition {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    isFiniteNumber((value as NodePosition).x) &&
+    isFiniteNumber((value as NodePosition).y)
+  );
+}
+
+function importEdgeWaypoints(
+  instance: Edge,
+  waypoints: unknown,
+  issues: ValidationIssue[],
+): void {
+  if (!Array.isArray(waypoints)) {
+    issues.push(
+      issue("document.invalid-edge-waypoints", `Edge "${instance.id}" waypoints must be an array of finite { x, y } positions`, instance.id),
+    );
+    return;
+  }
+  const valid: NodePosition[] = [];
+  for (const point of waypoints) {
+    if (!isNodePosition(point)) {
+      issues.push(
+        issue("document.invalid-edge-waypoints", `Edge "${instance.id}" waypoints must be finite { x, y } positions`, instance.id),
+      );
+      return;
+    }
+    valid.push({ x: point.x, y: point.y });
+  }
+  instance.setWaypoints(valid);
 }
 
 function createEdgeIdOrReport(
