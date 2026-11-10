@@ -729,7 +729,11 @@ These are honest boundaries of Phase 6, not roadmap guesses.
   same stroke width and wins over the legacy `strokeWidth` hint.
   `color` and `lineStyle` are carried on the mapped edge but the default
   renderer keeps the stroke token-driven, so a host that needs those writes a
-  custom edge renderer. Nothing is dropped: the values stay on the edge.
+  custom edge renderer. Nothing is dropped: the values stay on the edge. The
+  declared `geometry` (`straight`, `bezier`, `step`, `smooth`) *is* drawn by
+  this renderer: an edge of a definition resolves to it instead of to React
+  Flow's built-in geometry types, which is what gives every declared geometry
+  the waypoint affordances.
 - **No `exports` map and no bundle yet.** `@nodera/sdk` and `@nodera/react-flow`
   are consumed from source (`main`/`types` → `./src/index.ts`, `tsc --noEmit`),
   and publishing is a Phase 8 concern. A host bundler resolves the TypeScript

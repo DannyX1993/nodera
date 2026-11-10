@@ -11,6 +11,7 @@ import type { Edge, Graph, Node } from "@nodera/graph-model";
 import type { NodeDefinition, NodeVisual } from "@nodera/node-registry";
 import type { EdgeDefinition, EdgeVisual } from "@nodera/edge-registry";
 import type { PortDeclaration, PortDirection, PortInstance, PortVisual } from "@nodera/graph-model";
+import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
 import { edgeStyleHints } from "../renderers/edge-options.js";
 
 /**
@@ -31,26 +32,6 @@ const handleTypeForDirection = (direction: PortDirection): "source" | "target" =
   }
   // output or bidirectional → source
   return "source";
-};
-
-/**
- * Geometry mapping: Nodera EdgeGeometry → React Flow edge type.
- *
- * - straight  → "straight"
- * - bezier    → undefined (routes to "nodera-default-edge", which draws the
- *   same bezier and additionally carries the style hints and the waypoint
- *   gestures; the built-in BezierEdge can do neither)
- * - step      → "step"
- * - smooth    → "smoothstep"
- */
-const geometryToEdgeType = (
-  geometry: string | undefined,
-): string | undefined => {
-  if (geometry === "straight") return "straight";
-  if (geometry === "bezier") return undefined;
-  if (geometry === "step") return "step";
-  if (geometry === "smooth") return "smoothstep";
-  return undefined;
 };
 
 /**
@@ -165,6 +146,17 @@ const toReactFlowNode = (
 /**
  * Convert a Nodera graph's edges into React Flow edges.
  *
+ * Geometry mapping: a declared `EdgeGeometry` is drawn, not delegated. Every
+ * declared geometry (straight, bezier, step, smooth) resolves to
+ * {@link DEFAULT_EDGE_RENDERER_ID} and the declared value travels to the
+ * renderer as `data.geometry`, so the renderer draws the shape itself. React
+ * Flow's built-in geometry types (`"straight"`, `"step"`, `"smoothstep"` and
+ * its bezier default) cannot route through intermediate waypoints and carry no
+ * waypoint gestures, so an edge drawn by one of them could never gain its first
+ * waypoint (S9). The built-in geometry components stay registered in
+ * `canvasEdgeTypes` (graph-canvas.tsx): a host may still name one of those
+ * types explicitly on an edge object, and that is not this mapping's business.
+ *
  * @param graph - the Nodera domain Graph instance (for node lookup)
  * @param resolveEdgeDefinition - resolver function for EdgeDefinition by id
  * @returns ReactFlowEdge[] ready for the RF store
@@ -179,25 +171,10 @@ export const toReactFlowEdges = (
       : undefined;
     const visual: EdgeVisual | undefined = definition?.visual;
 
-    // Determine RF edge type from definition.renderer or geometry.
-    // Precedence: definition.renderer > geometry-mapped type > default.
-    let type =
-      definition?.renderer ??
-      geometryToEdgeType(visual?.geometry) ??
-      "nodera-default-edge";
-
-    // An edge carrying waypoints needs a renderer that routes through them:
-    // the built-in geometry types cannot draw intermediate points. When the
-    // resolved type is one of those built-ins, hand the edge to the Nodera
-    // default renderer instead. A host custom renderer keeps precedence —
-    // waypoint drawing is then its job.
-    if (
-      type !== "nodera-default-edge" &&
-      definition?.renderer === undefined &&
-      (edge.waypoints?.length ?? 0) > 0
-    ) {
-      type = "nodera-default-edge";
-    }
+    // Determine RF edge type from definition.renderer.
+    // Precedence: definition.renderer > the Nodera default renderer, which
+    // draws every declared geometry itself.
+    const type = definition?.renderer ?? DEFAULT_EDGE_RENDERER_ID;
 
     // Build edge object.
     const rfEdge: ReactFlowEdge = {
@@ -254,6 +231,14 @@ export const toReactFlowEdges = (
       if (hints !== undefined) {
         rfEdge.data = { ...rfEdge.data, styleHints: hints };
       }
+    }
+
+    // Declared geometry → `data.geometry`, so the default renderer draws the
+    // shape the definition asks for (S9). "bezier" is what the renderer draws
+    // when no geometry is declared, so it is carried as the same absence: the
+    // key is written only for the geometries that change the default shape.
+    if (visual?.geometry !== undefined && visual.geometry !== "bezier") {
+      rfEdge.data = { ...rfEdge.data, geometry: visual.geometry };
     }
 
     // Waypoints: per-edge-instance intermediate points in flow coordinates

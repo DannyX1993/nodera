@@ -373,19 +373,98 @@ describe("toReactFlowEdges", () => {
     expect(result[0]!.type).toBe("my-edge");
   });
 
-  it("maps geometry straight → straight edge type", () => {
-    const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
+  /* Declared geometry (T9, S9).
+   *
+   * Every declared geometry resolves to the Nodera default renderer: React
+   * Flow's built-in geometry types offer no waypoint gesture, so an edge drawn
+   * by one of them could never gain its first waypoint. The renderer draws the
+   * shape itself from `data.geometry`. */
+
+  function geometryEdge(geometry: "straight" | "bezier" | "step" | "smooth") {
+    const node1 = buildNode("n1", "d", [
+      buildPortInstance("p", "output"),
+    ]);
     const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
     const edge = makeEdge("e1", "n1", "p", "n2", "p", "edge-def");
-    const graph = buildGraph([node1, node2], [edge]);
+    return buildGraph([node1, node2], [edge]);
+  }
+
+  it("resolves a declared straight geometry to the Nodera default renderer", () => {
+    const graph = geometryEdge("straight");
+
+    const result = toReactFlowEdges(graph, () =>
+      mockEdgeDefinition({ visual: { geometry: "straight" } }),
+    );
+
+    expect(result[0]!.type).toBe("nodera-default-edge");
+    expect(result[0]!.data).toEqual(expect.objectContaining({ geometry: "straight" }));
+  });
+
+  it("resolves a declared step geometry to the Nodera default renderer", () => {
+    const graph = geometryEdge("step");
+
+    const result = toReactFlowEdges(graph, () =>
+      mockEdgeDefinition({ visual: { geometry: "step" } }),
+    );
+
+    expect(result[0]!.type).toBe("nodera-default-edge");
+    expect(result[0]!.data).toEqual(expect.objectContaining({ geometry: "step" }));
+  });
+
+  it("resolves a declared smooth geometry to the Nodera default renderer", () => {
+    const graph = geometryEdge("smooth");
+
+    const result = toReactFlowEdges(graph, () =>
+      mockEdgeDefinition({ visual: { geometry: "smooth" } }),
+    );
+
+    expect(result[0]!.type).toBe("nodera-default-edge");
+    expect(result[0]!.data).toEqual(expect.objectContaining({ geometry: "smooth" }));
+  });
+
+  it("carries no geometry data for a declared bezier geometry", () => {
+    const graph = geometryEdge("bezier");
+
+    const result = toReactFlowEdges(graph, () =>
+      mockEdgeDefinition({ visual: { geometry: "bezier" } }),
+    );
+
+    // The renderer's own default is bezier, so the mapped edge carries the
+    // absence rather than a redundant value.
+    expect(result[0]!.type).toBe("nodera-default-edge");
+    const data = result[0]!.data;
+    if (data !== undefined) {
+      expect((data as { geometry?: unknown }).geometry).toBeUndefined();
+    }
+  });
+
+  it("carries no geometry data for a definition that declares none", () => {
+    const graph = geometryEdge("bezier");
+
+    const result = toReactFlowEdges(graph, () =>
+      mockEdgeDefinition({ visual: { lineStyle: "solid" } }),
+    );
+
+    expect(result[0]!.type).toBe("nodera-default-edge");
+    const data = result[0]!.data;
+    if (data !== undefined) {
+      expect((data as { geometry?: unknown }).geometry).toBeUndefined();
+    }
+  });
+
+  it("keeps a host renderer and still carries the declared geometry", () => {
+    const graph = geometryEdge("straight");
 
     const result = toReactFlowEdges(graph, () =>
       mockEdgeDefinition({
+        renderer: "vendor.custom-edge",
         visual: { geometry: "straight" },
       }),
     );
 
-    expect(result[0]!.type).toBe("straight");
+    // A host renderer keeps precedence; the geometry stays available to it.
+    expect(result[0]!.type).toBe("vendor.custom-edge");
+    expect(result[0]!.data).toEqual(expect.objectContaining({ geometry: "straight" }));
   });
 
   it("routes an edge carrying waypoints to the Nodera default renderer", () => {
@@ -440,36 +519,6 @@ describe("toReactFlowEdges", () => {
     // The Nodera default renderer draws the same bezier AND carries the
     // waypoint gestures and the style hints; the built-in BezierEdge cannot.
     expect(result[0]!.type).toBe("nodera-default-edge");
-  });
-
-  it("maps geometry step → step edge type", () => {
-    const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
-    const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
-    const edge = makeEdge("e1", "n1", "p", "n2", "p", "edge-def");
-    const graph = buildGraph([node1, node2], [edge]);
-
-    const result = toReactFlowEdges(graph, () =>
-      mockEdgeDefinition({
-        visual: { geometry: "step" },
-      }),
-    );
-
-    expect(result[0]!.type).toBe("step");
-  });
-
-  it("maps geometry smooth → smoothstep edge type", () => {
-    const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
-    const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
-    const edge = makeEdge("e1", "n1", "p", "n2", "p", "edge-def");
-    const graph = buildGraph([node1, node2], [edge]);
-
-    const result = toReactFlowEdges(graph, () =>
-      mockEdgeDefinition({
-        visual: { geometry: "smooth" },
-      }),
-    );
-
-    expect(result[0]!.type).toBe("smoothstep");
   });
 
   it("sets animated from visual.animation", () => {

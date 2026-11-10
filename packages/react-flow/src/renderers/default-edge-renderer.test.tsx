@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
-import { Position } from "@xyflow/react";
+import {
+  getBezierPath,
+  getSmoothStepPath,
+  getStraightPath,
+  Position,
+} from "@xyflow/react";
 import type { CSSProperties } from "react";
 
 import { DefaultEdgeRenderer, defaultEdgeOptionsFromVisual } from "./default-edge-renderer.js";
@@ -473,6 +478,23 @@ describe("buildEdgePathThroughWaypoints", () => {
     expect(labelY).toBe(70);
   });
 
+  it("keeps the waypoint-routed bezier path byte-identical", () => {
+    // Pinned against the pre-T9 implementation: the declared geometry is
+    // carried to the renderer now, and bezier must not change shape because of
+    // it.
+    const [path] = buildEdgePathThroughWaypoints(
+      0, 0, 100, 100,
+      Position.Bottom,
+      Position.Top,
+      [{ x: 40, y: 60 }, { x: 80, y: 30 }],
+    );
+
+    expect(path).toBe(
+      "M 0 0 C 0 33.114 17.924000000000003 60 40 60 C 62.07599999999999 60 " +
+        "57.92400000000001 30 80 30 C 91.038 30 100 138.63299999999998 100 100",
+    );
+  });
+
   it("label coordinates fall back to bezier middle when no waypoints", () => {
     const [, labelX, labelY] = buildEdgePathThroughWaypoints(
       0, 0, 100, 100,
@@ -484,6 +506,110 @@ describe("buildEdgePathThroughWaypoints", () => {
     // Should be approximately the middle.
     expect(labelX).toBeGreaterThan(0);
     expect(labelY).toBeGreaterThan(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Declared geometry (T9, S9)                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Every declared geometry keeps drawing its own shape through this renderer.
+ *
+ * The mapper no longer hands an edge to React Flow's built-in geometry types —
+ * they carry no waypoint gesture, so an edge drawn by one of them could never
+ * gain its first waypoint — and drawing the shape becomes this renderer's job,
+ * read from `data.geometry`.
+ *
+ * The expectation is what the corresponding React Flow helper produces for the
+ * same coordinates, so these tests pin "still honours the declared geometry"
+ * instead of a hand-written path. React Flow exports no `getStepPath`: its own
+ * `StepEdge` is `getSmoothStepPath` with `borderRadius: 0`.
+ */
+describe("DefaultEdgeRenderer declared geometry", () => {
+  const coords = { sourceX: 0, sourceY: 0, targetX: 100, targetY: 100 } as const;
+  const handles = { sourcePosition: Position.Bottom, targetPosition: Position.Top } as const;
+
+  function renderGeometryPath(data: Record<string, unknown>): string {
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        source="n1"
+        target="n2"
+        sourceX={coords.sourceX}
+        sourceY={coords.sourceY}
+        targetX={coords.targetX}
+        targetY={coords.targetY}
+        sourcePosition={handles.sourcePosition}
+        targetPosition={handles.targetPosition}
+        data={data}
+      />,
+    );
+    const path = container.querySelector("path.react-flow__edge-path");
+    expect(path).not.toBeNull();
+    return path!.getAttribute("d")!;
+  }
+
+  it("draws the straight helper path for geometry straight", () => {
+    expect(renderGeometryPath({ geometry: "straight" })).toBe(
+      getStraightPath({ ...coords })[0],
+    );
+  });
+
+  it("draws the bezier helper path for geometry bezier", () => {
+    expect(renderGeometryPath({ geometry: "bezier" })).toBe(
+      getBezierPath({ ...coords, ...handles })[0],
+    );
+  });
+
+  it("draws the step helper path for geometry step", () => {
+    expect(renderGeometryPath({ geometry: "step" })).toBe(
+      getSmoothStepPath({ ...coords, ...handles, borderRadius: 0 })[0],
+    );
+  });
+
+  it("draws the smooth step helper path for geometry smooth", () => {
+    expect(renderGeometryPath({ geometry: "smooth" })).toBe(
+      getSmoothStepPath({ ...coords, ...handles })[0],
+    );
+  });
+
+  it("keeps the bezier default when the edge declares no geometry", () => {
+    expect(renderGeometryPath({})).toBe(getBezierPath({ ...coords, ...handles })[0]);
+  });
+
+  it("ignores an unknown geometry instead of trusting edge data", () => {
+    expect(renderGeometryPath({ geometry: "wobble" })).toBe(
+      getBezierPath({ ...coords, ...handles })[0],
+    );
+  });
+
+  const geometries = ["straight", "bezier", "step", "smooth"] as const;
+
+  for (const geometry of geometries) {
+    it(`routes geometry ${geometry} through a waypoint`, () => {
+      const waypoint = { x: 42, y: 58 };
+      const plain = renderGeometryPath({ geometry });
+      const bent = renderGeometryPath({ geometry, waypoints: [waypoint] });
+
+      // The path reaches the waypoint and is no longer the plain shape.
+      expect(bent).toContain(`${waypoint.x}`);
+      expect(bent).toContain(`${waypoint.y}`);
+      expect(bent).not.toBe(plain);
+    });
+  }
+
+  it("keeps the waypoint-routed bezier path unchanged", () => {
+    // The cubic chain through waypoints is the shape this renderer drew before
+    // the declared geometry reached it; the pinned string in the
+    // buildEdgePathThroughWaypoints suite is the byte-identical contract. Here
+    // the same inputs reach it through the rendered component.
+    const waypoint = { x: 42, y: 58 };
+
+    expect(renderGeometryPath({ geometry: "bezier", waypoints: [waypoint] })).toBe(
+      "M 0 0 C 0 32.0102 18.820200000000003 58 42 58 " +
+        "C 74.0102 58 100 123.1798 100 100",
+    );
   });
 });
 

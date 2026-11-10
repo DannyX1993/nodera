@@ -2,11 +2,15 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  getSmoothStepPath,
+  getStraightPath,
   Position,
   type EdgeProps,
 } from "@xyflow/react";
 import type { FC, CSSProperties, PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useRef, useState } from "react";
+
+import type { EdgeGeometry } from "@nodera/edge-registry";
 
 import { edgeStyleHintsFromData } from "./edge-options.js";
 import { useNoderaEditor, useNoderaWaypointEditing } from "../canvas/editor-context.js";
@@ -54,14 +58,118 @@ function edgeStyle(data: unknown): CSSProperties {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Declared geometry (S9)                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The geometry this edge draws, read from `data.geometry`.
+ *
+ * `toReactFlowEdges` writes the definition's declared geometry there, so the
+ * shape follows the definition instead of always being a bezier. Edge data is
+ * document data: only the four declared values are accepted, and an unfamiliar
+ * one (a stale or hostile key) falls back to the bezier default rather than
+ * being coerced.
+ */
+function geometryFromData(data: unknown): EdgeGeometry {
+  if (typeof data !== "object" || data === null) {
+    return "bezier";
+  }
+  const geometry = (data as { geometry?: unknown }).geometry;
+  if (
+    geometry === "straight" ||
+    geometry === "bezier" ||
+    geometry === "step" ||
+    geometry === "smooth"
+  ) {
+    return geometry;
+  }
+  return "bezier";
+}
+
+/** The argument object every React Flow path helper in this file takes. */
+interface PathParams {
+  readonly sourceX: number;
+  readonly sourceY: number;
+  readonly targetX: number;
+  readonly targetY: number;
+  readonly sourcePosition: Position;
+  readonly targetPosition: Position;
+}
+
+/**
+ * Draw one pair of points with the helper that implements the declared
+ * geometry.
+ *
+ * React Flow exports no `getStepPath`: its own `StepEdge` is
+ * `getSmoothStepPath` with `borderRadius: 0`, so the step shape is requested
+ * from that same helper. `getStraightPath` takes no handle positions, which is
+ * why each helper gets its own argument object.
+ *
+ * @returns `[path, labelX, labelY, offsetX, offsetY]`, like every helper here.
+ */
+function geometryPath(
+  geometry: EdgeGeometry,
+  params: PathParams,
+): [string, number, number, number, number] {
+  switch (geometry) {
+    case "straight":
+      return getStraightPath({
+        sourceX: params.sourceX,
+        sourceY: params.sourceY,
+        targetX: params.targetX,
+        targetY: params.targetY,
+      });
+    case "step":
+      return getSmoothStepPath({ ...params, borderRadius: 0 });
+    case "smooth":
+      return getSmoothStepPath(params);
+    case "bezier":
+    default:
+      return getBezierPath(params);
+  }
+}
+
+/** The absolute `M x,y` every path helper opens its path with. */
+const LEADING_MOVE =
+  /^M\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?[,\s]+[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*/;
+
+/**
+ * Drop the `M x,y` a helper opens with, so the rest of its commands can be
+ * appended to a path that already starts at that same point. The helpers emit
+ * absolute commands, so dropping the move leaves the segment's own geometry.
+ */
+function withoutLeadingMove(path: string): string {
+  return path.replace(LEADING_MOVE, "");
+}
+
+/**
+ * The direction a segment leaves (or reaches) an intermediate point, derived
+ * from the delta between the two points: the larger component wins, which is
+ * the axis the segment visibly runs along.
+ */
+function directionFromDelta(dx: number, dy: number): Position {
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? Position.Right : Position.Left;
+  }
+  return dy >= 0 ? Position.Bottom : Position.Top;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Path builder: with or without waypoints                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * Compute an SVG path that routes through the given waypoints.
+ * Compute the SVG path of one edge, honouring its declared geometry.
  *
- * Uses connected cubic bezier segments: source → w1 → w2 → … → target, with
- * the same `getBezierPath` control-point ratio (0.5519) applied per-segment.
+ * Without waypoints each geometry is a single helper call: straight, bezier
+ * (the default), step or smooth. With waypoints the path is a chain
+ * source → w1 → … → wn → target, drawn per segment:
+ *
+ * - straight: one line per pair of points.
+ * - step / smooth: one orthogonal (stepped) segment per pair, each routed with
+ *   the direction its own delta gives it.
+ * - bezier: the same connected cubic chain this renderer has always drawn, so
+ *   a waypoint-bent bezier keeps its exact shape.
  *
  * @param sourceX     — source handle X in flow coords
  * @param sourceY     — source handle Y in flow coords
@@ -70,6 +178,7 @@ function edgeStyle(data: unknown): CSSProperties {
  * @param sourcePosition — source handle side
  * @param targetPosition — target handle side
  * @param waypoints   — ordered intermediate points in flow coords
+ * @param geometry    — declared geometry; bezier when the definition declares none
  * @returns `[path, labelX, labelY]` in the same shape as `getBezierPath`
  */
 export function buildEdgePathThroughWaypoints(
@@ -80,10 +189,56 @@ export function buildEdgePathThroughWaypoints(
   sourcePosition: Position,
   targetPosition: Position,
   waypoints: { x: number; y: number }[],
+  geometry: EdgeGeometry = "bezier",
 ): [string, number, number, number, number] {
+  const params: PathParams = {
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  };
+
   if (waypoints.length === 0) {
-    // Fallback: plain bezier (should not happen since the caller checks length).
-    return getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+    return geometryPath(geometry, params);
+  }
+
+  const lastWaypoint = waypoints[waypoints.length - 1]!;
+  // Label position: the last waypoint.
+  const labelX = lastWaypoint.x;
+  const labelY = lastWaypoint.y;
+
+  if (geometry !== "bezier") {
+    // One helper call per consecutive pair, concatenated: the first segment
+    // keeps its leading `M`, every later one is appended without it.
+    const points = [
+      { x: sourceX, y: sourceY },
+      ...waypoints,
+      { x: targetX, y: targetY },
+    ];
+    let chained = "";
+    for (let i = 0; i < points.length - 1; i++) {
+      const from = points[i]!;
+      const to = points[i + 1]!;
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      // The handle sides decide the ends; every intermediate point takes the
+      // direction of the segment it belongs to.
+      const fromPosition = i === 0 ? sourcePosition : directionFromDelta(dx, dy);
+      const toPosition =
+        i === points.length - 2 ? targetPosition : directionFromDelta(dx, dy);
+      const [segment] = geometryPath(geometry, {
+        sourceX: from.x,
+        sourceY: from.y,
+        targetX: to.x,
+        targetY: to.y,
+        sourcePosition: fromPosition,
+        targetPosition: toPosition,
+      });
+      chained = i === 0 ? segment : `${chained} ${withoutLeadingMove(segment)}`;
+    }
+    return [chained, labelX, labelY, 0, 0];
   }
 
   const cubic = 0.5519; // Bezier control-point ratio (getBezierPath constant).
@@ -123,12 +278,6 @@ export function buildEdgePathThroughWaypoints(
     return { cx1, cy1, cx2, cy2 };
   };
 
-  // Helper: get direction for an intermediate point (treat both as Right).
-  const midDir = (dir: Position): Position => {
-    if (dir === Position.Left || dir === Position.Right) return Position.Right;
-    return Position.Bottom;
-  };
-
   // Determine the primary direction for the first and last segments.
   const firstFromDir = sourcePosition;
   const lastToDir = targetPosition;
@@ -155,17 +304,6 @@ export function buildEdgePathThroughWaypoints(
     const wp = waypoints[waypoints.length - 1]!;
     const { cx1, cy1, cx2, cy2 } = controlVectorFor(wp.x, wp.y, targetX, targetY, Position.Right, lastToDir);
     path += `C ${cx1} ${cy1} ${cx2} ${cy2} ${targetX} ${targetY}`;
-  }
-
-  // Label position: last waypoint, or the middle of the bezier path.
-  let labelX: number, labelY: number;
-  if (waypoints.length > 0) {
-    const lastWp = waypoints[waypoints.length - 1]!;
-    labelX = lastWp.x;
-    labelY = lastWp.y;
-  } else {
-    // Fallback — should not reach here since this function only called with waypoints.
-    [, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
   }
 
   return [path, labelX, labelY, 0, 0];
@@ -203,12 +341,14 @@ const WAYPOINT_HANDLE_ACTIVE_STYLE: CSSProperties = {
 
 /**
  * The default custom edge for Nodera. React Flow calls it with
- * {@link EdgeProps}; it computes the bezier path itself and renders a
- * {@link BaseEdge} plus an optional label layer.
+ * {@link EdgeProps}; it draws the edge's declared geometry itself (straight,
+ * bezier, step or smooth, from `data.geometry`) and renders a {@link BaseEdge}
+ * plus an optional label layer.
  *
  * When the mapped edge carries `data.waypoints` the path is routed through
- * them (S2, S7).  When selected the renderer also paints draggable waypoint
- * handles as plain divs inside a wrapper overlay.
+ * them (S2, S7), keeping the declared geometry per segment.  When selected the
+ * renderer also paints draggable waypoint handles as plain divs inside a
+ * wrapper overlay.
  *
  * Dragging a handle commits once on drag end through
  * {@link updateEdgeWaypoints}.  Double-clicking a handle removes it.
@@ -433,7 +573,7 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
     [commitWaypoints, waypointEditingEnabled],
   );
 
-  // --- Path: committed waypoints plus the live gesture position ----
+  // --- Path: the declared geometry, through the waypoints when there are any ---
   const baseWaypoints = edgeWaypoints ?? [];
   const liveWaypoints =
     gesture === null
@@ -444,32 +584,19 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
           : baseWaypoints
         : baseWaypoints.map((wp, i) => (i === gesture.index ? gesture.current : wp));
 
-  let path: string;
-  let labelX: number;
-  let labelY: number;
-
-  if (liveWaypoints.length > 0) {
-    // Route through the waypoints (committed + the one being created/moved).
-    [path, labelX, labelY] = buildEdgePathThroughWaypoints(
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
-      sourcePosition,
-      targetPosition,
-      liveWaypoints,
-    );
-  } else {
-    // No waypoints: use the classic bezier (byte-identical to pre-change).
-    [path, labelX, labelY] = getBezierPath({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
-      sourcePosition,
-      targetPosition,
-    });
-  }
+  // One call for both cases: the builder delegates a waypoint-free edge to the
+  // helper of its declared geometry, which is the bezier it always drew when
+  // the definition declares none.
+  const [path, labelX, labelY] = buildEdgePathThroughWaypoints(
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    liveWaypoints,
+    geometryFromData(data),
+  );
 
   const labelFromData = (data as { label?: unknown } | undefined)?.label;
   const text =

@@ -198,13 +198,13 @@ export interface EdgeInsertRenderOptions {
  *
  * When `insert` is supplied every type is wrapped so it also renders that
  * affordance at its midpoint — including React Flow's own built-in geometry
- * types (`"default"`, `"straight"`, `"step"`, `"smoothstep"`), which the edge
- * mapper produces for definitions that declare a `visual.geometry`. Those are
- * absent from the registry, so without this registration React Flow would fall
- * back to its unwrapped built-in component and the affordance would disappear
- * exactly on the edges that declare a geometry. Without `insert` the map keeps
- * the registered components untouched, so a canvas without the affordance
- * renders exactly as before.
+ * types (`"default"`, `"straight"`, `"step"`, `"smoothstep"`). The edge mapper
+ * no longer produces them (every declared geometry is drawn by the Nodera
+ * renderer), but a host may still name one explicitly, and those are absent
+ * from the registry: without this registration React Flow would fall back to
+ * its unwrapped built-in component and the affordance would disappear on those
+ * edges. Without `insert` the map keeps the registered components untouched, so
+ * a canvas without the affordance renders exactly as before.
  *
  * Casts stay confined to the adapter boundary: React Flow's `EdgeTypes` is a
  * `ComponentType<any>` map while Nodera renderers have stricter props.
