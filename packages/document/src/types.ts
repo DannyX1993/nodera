@@ -56,6 +56,8 @@ export interface DocumentEdgeInstance {
   readonly target: DocumentEdgeEndpoint;
   readonly label?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /** Intermediate route points in flow coordinates; omitted when absent. */
+  readonly waypoints?: readonly NodePosition[];
 }
 
 /**

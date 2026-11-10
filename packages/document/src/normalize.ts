@@ -217,6 +217,30 @@ function validateEdge(edge: Record<string, unknown>, issues: ValidationIssue[]):
       );
     }
   }
+  const waypoints = edge["waypoints"];
+  if (waypoints !== undefined) {
+    if (!Array.isArray(waypoints)) {
+      issues.push(
+        issue("document.invalid-edge-waypoints", `Edge "${id}" waypoints must be an array of finite { x, y } positions`, ["graph", "edges"], id),
+      );
+    } else {
+      for (let i = 0; i < waypoints.length; i++) {
+        const wp = waypoints[i];
+        if (
+          !isPlainRecord(wp) ||
+          typeof wp["x"] !== "number" ||
+          typeof wp["y"] !== "number" ||
+          !Number.isFinite(wp["x"]) ||
+          !Number.isFinite(wp["y"])
+        ) {
+          issues.push(
+            issue("document.invalid-edge-waypoints", `Edge "${id}" waypoints must be finite { x, y } positions`, ["graph", "edges"], id),
+          );
+          break;
+        }
+      }
+    }
+  }
 }
 
 /**

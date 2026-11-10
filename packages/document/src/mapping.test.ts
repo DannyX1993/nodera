@@ -6,6 +6,7 @@ import { Node } from "@nodera/graph-model";
 import { documentToGraph } from "./mapping.js";
 import { graphToDocument } from "./mapping.js";
 import { normalizeGraphDocument } from "./normalize.js";
+import type { GraphDocument } from "./types.js";
 
 /** Builds a phase-1 style sample graph with nodes, ports, edges and settings. */
 function sampleGraph(): Graph {
@@ -275,5 +276,94 @@ describe("import diagnostics without throwing", () => {
     });
     if (!result.ok) throw new Error("expected a graph");
     expect(result.value.metadata.extra).toEqual({ vendor: { custom: 1 } });
+  });
+
+  it("omits waypoints when the domain edge has no waypoints", () => {
+    const graph = sampleGraph();
+    const document = graphToDocument(graph);
+    const edgeDoc = document.graph.edges?.[0];
+    expect(edgeDoc).toBeDefined();
+    if (!edgeDoc) throw new Error("expected edge");
+    expect("waypoints" in edgeDoc).toBe(false);
+  });
+});
+
+describe("waypoints round-trip", () => {
+  it("preserves waypoints through graph→document→graph", () => {
+    const graph = sampleGraph();
+    const edge = graph.getEdge("edge-001" as EdgeId);
+    if (!edge) throw new Error("fixture edge missing");
+    edge.setWaypoints([
+      { x: 150, y: 50 },
+      { x: 200, y: 150 },
+    ]);
+    const document = graphToDocument(graph);
+    expect(document.graph.edges?.[0]?.waypoints).toEqual([
+      { x: 150, y: 50 },
+      { x: 200, y: 150 },
+    ]);
+    const normalized = normalizeGraphDocument(document);
+    if (!normalized.ok) throw new Error("fixture must normalize");
+    const rebuilt = documentToGraph(normalized.value);
+    if (!rebuilt.ok) throw new Error("expected a graph");
+    const rebuiltEdge = rebuilt.value.getEdge("edge-001" as EdgeId);
+    expect(rebuiltEdge?.waypoints).toEqual([
+      { x: 150, y: 50 },
+      { x: 200, y: 150 },
+    ]);
+  });
+
+  it("reports malformed waypoints as a diagnostic instead of throwing", () => {
+    const result = documentToGraph({
+      format: "ggd",
+      version: "1.0.0",
+      metadata: { id: "graph-001" },
+      extensions: [],
+      graph: {
+        nodes: [
+          { id: "a", type: "t", ports: [{ id: "out", direction: "output" }] },
+          { id: "b", type: "t2", ports: [{ id: "in", direction: "input" }] },
+        ],
+        edges: [
+          {
+            id: "e1",
+            source: { nodeId: "a", portId: "out" },
+            target: { nodeId: "b", portId: "in" },
+            waypoints: [{ x: 10, y: 20 }, { x: NaN, y: 5 }],
+          },
+        ],
+      },
+    });
+    // Malformed waypoints produce a diagnostic (same pattern as sibling field errors)
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected mapping errors");
+    expect(result.error.some((issue) => issue.code === "document.invalid-edge-waypoints")).toBe(true);
+  });
+
+  it("reports non-array waypoints as a diagnostic instead of throwing", () => {
+    const rawDoc = {
+      format: "ggd",
+      version: "1.0.0",
+      metadata: { id: "graph-001" },
+      extensions: [] as GraphDocument["extensions"],
+      graph: {
+        nodes: [
+          { id: "a", type: "t", ports: [{ id: "out", direction: "output" }] },
+          { id: "b", type: "t2", ports: [{ id: "in", direction: "input" }] },
+        ],
+        edges: [
+          {
+            id: "e1",
+            source: { nodeId: "a", portId: "out" },
+            target: { nodeId: "b", portId: "in" },
+            waypoints: "not-an-array", // non-array bypasses the typed waypoints field
+          },
+        ],
+      },
+    } as unknown as GraphDocument;
+    const result = documentToGraph(rawDoc);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected mapping errors");
+    expect(result.error.some((issue) => issue.code === "document.invalid-edge-waypoints")).toBe(true);
   });
 });
