@@ -25,6 +25,10 @@ import {
   Handle,
   Position,
   ViewportPortal,
+  BezierEdge,
+  StraightEdge,
+  StepEdge,
+  SmoothStepEdge,
   type NodeChange,
   type EdgeChange,
   type EdgeProps,
@@ -40,6 +44,7 @@ import {
 } from "@xyflow/react";
 
 import type { EditorEngine } from "@nodera/application";
+import type { RemovalPolicy } from "@nodera/sdk";
 import type {
   ConnectionsPolicy,
   DragPolicy,
@@ -53,6 +58,7 @@ import {
   createEdge,
   clearSelection,
   removeNode,
+  removeNodeSplicing,
   removeEdge,
   selectNode,
   selectEdge,
@@ -135,6 +141,32 @@ export function canvasBackgroundOptions(): CanvasBackgroundOptions {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Node removal policy                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Deletes one node through the application use case the removal policy names.
+ *
+ * The canvas' own Delete key lands here (via `handleNodesChange`), so this is
+ * where the policy the host configured either holds or not: `"splice"` routes
+ * through `removeNodeSplicing`, joining each predecessor of the removed node
+ * to each successor inside the same history unit, and `"detach"` — and an
+ * absent policy reader — keeps the plain deletion with the edges it carried.
+ * The SDK's `builder.graph.removeNode` applies the same rule, so both paths
+ * now agree on what `graph.layout.onRemove` means.
+ */
+export function removeNodeForRemovalPolicy(
+  editor: EditorEngine,
+  nodeId: string,
+  policy: RemovalPolicy,
+): void {
+  if (policy === "splice") {
+    removeNodeSplicing(editor, { nodeId });
+    return;
+  }  removeNode(editor, { nodeId });
+}
+
+/* ------------------------------------------------------------------ */
 /*  Edge types                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -163,9 +195,14 @@ export interface EdgeInsertRenderOptions {
  * falls back to its built-in default edge instead of blanking the graph.
  *
  * When `insert` is supplied every type is wrapped so it also renders that
- * affordance at its midpoint; without it the map keeps the registered
- * components untouched, so a canvas without the affordance renders exactly as
- * before.
+ * affordance at its midpoint — including React Flow's own built-in geometry
+ * types (`"default"`, `"straight"`, `"step"`, `"smoothstep"`), which the edge
+ * mapper produces for definitions that declare a `visual.geometry`. Those are
+ * absent from the registry, so without this registration React Flow would fall
+ * back to its unwrapped built-in component and the affordance would disappear
+ * exactly on the edges that declare a geometry. Without `insert` the map keeps
+ * the registered components untouched, so a canvas without the affordance
+ * renders exactly as before.
  *
  * Casts stay confined to the adapter boundary: React Flow's `EdgeTypes` is a
  * `ComponentType<any>` map while Nodera renderers have stricter props.
@@ -193,6 +230,24 @@ export function canvasEdgeTypes(
     DefaultEdgeRenderer,
     insert,
   ) as unknown as EdgeTypes[string];
+
+  // Geometry-mapped definitions resolve to React Flow's built-in geometry
+  // components, which carry no renderer registry entry. Wrapping them keeps
+  // their geometry and gives them the same affordance every other edge has.
+  if (insert !== undefined) {
+    const builtIns: Readonly<Record<string, ComponentType<EdgeProps>>> = {
+      default: BezierEdge,
+      straight: StraightEdge,
+      step: StepEdge,
+      smoothstep: SmoothStepEdge,
+    };
+    for (const [id, component] of Object.entries(builtIns)) {
+      types[id] = withEdgeInsert(
+        component,
+        insert,
+      ) as unknown as EdgeTypes[string];
+    }
+  }
   return types;
 }
 
@@ -402,6 +457,11 @@ const PLACEHOLDER_NODE_SIZE = { width: 140, height: 40 } as const;
  * Inactive is expressed by the **dashed border** and the muted palette, never by
  * colour alone (AGENTS.md §15), and every value is a token with a literal
  * fallback so a themed host restyles it without re-rendering.
+ *
+ * Deliberately no `minWidth` / `minHeight`: the box is painted at exactly the
+ * dimensions the derivation handed it — the anchor node's measured size, or the
+ * `PLACEHOLDER_NODE_SIZE` fallback when nothing was measured — so the ghost
+ * lines up with the rank the real nodes form instead of growing past them.
  */
 const PHANTOM_NODE_STYLE: CSSProperties = {
   borderWidth: "var(--ndr-phantom-node-border-width, 1px)",
@@ -412,8 +472,6 @@ const PHANTOM_NODE_STYLE: CSSProperties = {
   padding: "var(--ndr-node-padding, 8px)",
   color: "var(--ndr-phantom-node-text-color, #8a97a5)",
   fontSize: "var(--ndr-node-font-size, 13px)",
-  minWidth: "var(--ndr-node-min-width, 140px)",
-  minHeight: "var(--ndr-node-min-height, 40px)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -773,6 +831,13 @@ export interface DefaultPlaceholderBoxProps {
  * but its own presentation: the coordinates come from the placeholder, and the
  * `"+"` inside it (`{@link PhantomInsertButton}`) records the append anchor and
  * opens the node-creation dialog.
+ *
+ * The box paints at **exactly** the derived dimensions — `border-box`, no min
+ * sizes of its own — so a successor placeholder matches the anchor node's
+ * measured size and the connector starts where the painted node ends. A host
+ * that wants a different size replaces this component through
+ * `renderPlaceholder`; the derivation still hands every replacement the anchor's
+ * measured box.
  */
 export const DefaultPlaceholderBox: FC<DefaultPlaceholderBoxProps> = ({ placeholder }) => (
   <div
@@ -784,8 +849,11 @@ export const DefaultPlaceholderBox: FC<DefaultPlaceholderBoxProps> = ({ placehol
       ...PHANTOM_NODE_STYLE,
       position: "absolute",
       zIndex: PLACEHOLDER_Z_INDEX,
+      boxSizing: "border-box",
       width: placeholder.box.width,
       height: placeholder.box.height,
+      minWidth: placeholder.box.width,
+      minHeight: placeholder.box.height,
       transform: `translate(${String(placeholder.box.x)}px, ${String(
         placeholder.box.y,
       )}px)`,
@@ -962,7 +1030,7 @@ function inertPort(props: NoderaPortRendererProps, hidden: boolean): ReactNode {
       data-nodera-port-id={props.portId}
       data-nodera-port-direction={props.direction ?? "bidirectional"}
       className="nodera-port-handle"
-      style={hidden ? HIDDEN_PORT_HANDLE_STYLE : INERT_PORT_HANDLE_STYLE}
+      style={hidden ? hiddenPortHandleStyle(isInput) : INERT_PORT_HANDLE_STYLE}
     />
   );
 }
@@ -991,12 +1059,29 @@ const INERT_PORT_HANDLE_STYLE: CSSProperties = {
   borderRadius: "var(--ndr-handle-radius, 50%)",
 };
 
-/** Same handle, painted away: present for edge anchoring, absent for a person. */
-const HIDDEN_PORT_HANDLE_STYLE: CSSProperties = {
-  ...INERT_PORT_HANDLE_STYLE,
-  opacity: 0,
-  pointerEvents: "none",
-};
+/**
+ * Style of the kept-but-invisible handle.
+ *
+ * Zero-sized and pinned to the node border on the side it anchors, overriding
+ * React Flow's own offset classes: the edge endpoint is the handle's centre, so
+ * a hidden handle that keeps its size (or React Flow's outward offset) leaves
+ * the edge floating half a handle away from the node — invisible with a visible
+ * port dot, glaring without one. With the centre exactly on the border the edge
+ * reaches the node whether the ports are painted or not.
+ */
+function hiddenPortHandleStyle(isInput: boolean): CSSProperties {
+  return {
+    width: 0,
+    height: 0,
+    borderWidth: 0,
+    borderStyle: "none",
+    opacity: 0,
+    pointerEvents: "none",
+    top: "50%",
+    transform: "translateY(-50%)",
+    ...(isInput ? { left: 0, right: "auto" } : { right: 0, left: "auto" }),
+  };
+}
 
 /** A port handle a person cannot start or end a connection from. */
 function InertPort(props: NoderaPortRendererProps): ReactNode {
@@ -1071,6 +1156,23 @@ export interface GraphCanvasProps {
    * behaviour of a canvas whose host owns placement.
    */
   readonly dragPolicy?: DragPolicy;
+  /**
+   * Reads the removal policy the host configured, right when a deletion is
+   * about to run.
+   *
+   * A canvas deletion (React Flow's Delete/Backspace on a selected node) goes
+   * through the application use case directly, so without this it ignores what
+   * `graph.layout.onRemove` — and therefore `builder.graph.removeNode` — does.
+   * With a reader supplied, `"splice"` routes the deletion through
+   * `removeNodeSplicing` so a removed middle node joins each predecessor to
+   * each successor, exactly like the SDK path; `"detach"` (and an absent
+   * reader, the previous behaviour) deletes the node with the edges it carried.
+   *
+   * It is a reader, not a value, on purpose: the policy lives in the builder's
+   * configuration, the canvas never re-renders when it flips, and reading it at
+   * deletion time is what keeps a changed policy from arriving stale.
+   */
+  readonly removalPolicy?: () => RemovalPolicy;
   /**
    * Whether a person may draw a new connection on this canvas.
    *
@@ -1223,6 +1325,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   portRenderers,
   interactionMode = "select",
   dragPolicy = "free",
+  removalPolicy,
   connectionsPolicy = "editable",
   portsPolicy = "visible",
   edgeInsertion = false,
@@ -1456,15 +1559,16 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
 
       const removedIds = removedIdsFromReactFlowChanges(changes);
       if (removedIds.length > 0) {
+        const policy = removalPolicy?.() ?? "detach";
         for (const nodeId of removedIds) {
-          removeNode(editor, { nodeId });
+          removeNodeForRemovalPolicy(editor, nodeId, policy);
         }
       } else if (dimsChanged) {
         refresh();
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor, refresh],
+    [editor, removalPolicy, refresh],
   );
 
   // Drag stop: commit final positions of every dragged node, or discard them.
@@ -1607,6 +1711,23 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         nodeTypes={nodeTypes as unknown as NodeTypes}
         edgeTypes={edgeTypes}
         deleteKeyCode={["Delete", "Backspace"]}
+        // Deletion keeps the canvas' hands off the edges that hang on the
+        // removed nodes: their fate is the use case's decision, not React
+        // Flow's. Under "detach" `removeNode` takes them with the node in one
+        // history unit; under "splice" `removeNodeSplicing` needs them intact
+        // to join each predecessor to each successor — without this, React
+        // Flow strips them first and a spliced removal finds nothing to join.
+        // Standalone selected-edge deletions stay in the list and keep going
+        // through `handleEdgesChange`.
+        onBeforeDelete={({ nodes: removedNodes, edges: removedEdges }) =>
+          Promise.resolve({
+            nodes: removedNodes,
+            edges: removedEdges.filter(
+              (edge) =>
+                !removedNodes.some((node) => node.id === edge.source || node.id === edge.target),
+            ),
+          })
+        }
         connectionMode={ConnectionMode.Loose}
         isValidConnection={isValidConnection}
         onNodesChange={handleNodesChange}

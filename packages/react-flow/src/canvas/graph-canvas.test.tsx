@@ -35,6 +35,8 @@ import {
   commitDraggedNodes,
   commitSelectionFromReactFlow,
   DefaultEdgeInsertButton,
+  DefaultPlaceholderBox,
+  removeNodeForRemovalPolicy,
 } from "./graph-canvas.js";
 import type { GraphCanvasProps, PhantomPlaceholder } from "./graph-canvas.js";
 import { NODE_DEFINITION_MIME_TYPE } from "./definition-drop.js";
@@ -928,6 +930,30 @@ describe("GraphCanvas edge insert affordance", () => {
     expect(withInsert[DEFAULT_EDGE_RENDERER_ID]).not.toBe(raw[DEFAULT_EDGE_RENDERER_ID]);
   });
 
+  it("wraps the geometry-mapped built-in edge types when the affordance is on", () => {
+    // A definition that declares a geometry resolves to a React Flow built-in
+    // type ("default", "straight", "step", "smoothstep"); if those stay out of
+    // the map, React Flow renders its own unwrapped edge and the affordance
+    // disappears exactly on the edges that declare a geometry.
+    const withInsert = canvasEdgeTypes(undefined, {
+      render: () => createElement(DefaultEdgeInsertButton, { edgeId: "edge-1" }),
+    });
+
+    for (const builtIn of ["default", "straight", "step", "smoothstep"]) {
+      expect(typeof withInsert[builtIn]).toBe("function");
+      expect(withInsert[builtIn]).not.toBe(DefaultEdgeRenderer);
+    }
+  });
+
+  it("leaves the built-in edge types to React Flow when the affordance is off", () => {
+    const types = canvasEdgeTypes(undefined);
+
+    expect(types["default"]).toBeUndefined();
+    expect(types["straight"]).toBeUndefined();
+    expect(types["step"]).toBeUndefined();
+    expect(types["smoothstep"]).toBeUndefined();
+  });
+
   it("records the pending insertion and opens the dialog when activated", () => {
     const store = insertStore();
     renderEdgeType({
@@ -1059,6 +1085,35 @@ describe("GraphCanvas phantom placeholders", () => {
   function placeholdersOf(container: HTMLElement): readonly HTMLElement[] {
     return [...container.querySelectorAll<HTMLElement>("[data-nodera-phantom-node]")];
   }
+
+  it("paints the successor box exactly at the anchor node's measured size", () => {
+    // A successor box is derived from the anchor node's measured dimensions, so
+    // the painted box must not grow beyond it with min sizes of its own — or
+    // the ghost stops lining up with the rank the real nodes form.
+    const placeholder: PhantomPlaceholder = {
+      anchorId: "n1",
+      kind: "successor",
+      box: { x: 240, y: 0, width: 120, height: 27 },
+      connector: { x: 120, y: 13, length: 120, axis: "horizontal" },
+    };
+
+    const store = new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      dialogRegistry: new DialogRegistry(),
+    });
+    const content = createElement(DefaultPlaceholderBox, { placeholder });
+    const { container } = render(
+      createElement(NoderaUiProvider, { store, children: content }),
+    );
+    const box = container.querySelector<HTMLElement>("[data-nodera-phantom-node]");
+
+    expect(box?.style.width).toBe("120px");
+    expect(box?.style.height).toBe("27px");
+    expect(box?.style.minWidth).toBe("120px");
+    expect(box?.style.minHeight).toBe("27px");
+    expect(box?.style.boxSizing).toBe("border-box");
+  });
 
   function successorsOf(container: HTMLElement): readonly HTMLElement[] {
     return [...container.querySelectorAll<HTMLElement>("[data-nodera-phantom-kind='successor']")];
@@ -1712,6 +1767,40 @@ describe("GraphCanvas phantom placeholders", () => {
 /*  E: connections and ports policy (layout-owned graphs)              */
 /* ------------------------------------------------------------------ */
 
+describe("GraphCanvas canvas removal policy", () => {
+  it("routes a canvas deletion through splicing when the policy says splice", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "p", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "m", position: { x: 240, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "s", position: { x: 480, y: 0 } });
+    createEdge(engine, { source: { nodeId: "p", portId: "out-1" }, target: { nodeId: "m", portId: "in-1" } });
+    createEdge(engine, { source: { nodeId: "m", portId: "out-1" }, target: { nodeId: "s", portId: "in-1" } });
+
+    removeNodeForRemovalPolicy(engine, "m", "splice");
+
+    const nodes = engine.graph.getNodes().map((node) => String(node.id));
+    expect(nodes).toEqual(["p", "s"]);
+    const edges = engine.graph.getEdges().map((edge) =>
+      `${String(edge.connection.source.nodeId)}->${String(edge.connection.target.nodeId)}`,
+    );
+    expect(edges).toEqual(["p->s"]);
+  });
+
+  it("keeps deleting with detached edges when the policy says detach", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "p", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "m", position: { x: 240, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "s", position: { x: 480, y: 0 } });
+    createEdge(engine, { source: { nodeId: "p", portId: "out-1" }, target: { nodeId: "m", portId: "in-1" } });
+    createEdge(engine, { source: { nodeId: "m", portId: "out-1" }, target: { nodeId: "s", portId: "in-1" } });
+
+    removeNodeForRemovalPolicy(engine, "m", "detach");
+
+    expect(engine.graph.getNodes().map((node) => String(node.id))).toEqual(["p", "s"]);
+    expect(engine.graph.getEdges()).toHaveLength(0);
+  });
+});
+
 describe("GraphCanvas connections and ports policy", () => {
   afterEach(cleanup);
 
@@ -1787,6 +1876,15 @@ describe("GraphCanvas connections and ports policy", () => {
       expect(handle.style.pointerEvents).toBe("none");
       expect(handle.getAttribute("aria-hidden")).toBe("true");
       expect(handle.classList.contains("connectable")).toBe(false);
+      // Zero-sized and pinned to the node border on the side it anchors: the
+      // edge endpoint is the handle's centre, so a sized handle leaves the
+      // edge floating half a handle away from the node once no visible dot
+      // covers the gap.
+      expect(handle.style.width).toBe("0px");
+      expect(handle.style.height).toBe("0px");
+      const isInput = handle.getAttribute("data-nodera-port-direction") === "input";
+      expect(isInput ? handle.style.left : handle.style.right).toBe("0px");
+      expect(isInput ? handle.style.right : handle.style.left).toBe("auto");
     }
     expect(screen.getAllByText("App Node")).toHaveLength(2);
   });

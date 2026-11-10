@@ -189,6 +189,7 @@ function DefaultCanvasRegion(props: {
           portRenderers={renderers.portRenderers}
           interactionMode={ui.interactionMode}
           dragPolicy={ui.dragPolicy}
+          removalPolicy={() => builder.graphLayout.removalPolicy()}
           nodeTransition={ui.nodeTransition}
           connectionsPolicy={ui.connections}
           portsPolicy={ui.ports}

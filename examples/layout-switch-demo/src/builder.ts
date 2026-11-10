@@ -17,7 +17,12 @@
  */
 
 import { assertValid, createBuilder, type Builder } from "@nodera/sdk";
-import type { GraphLayoutConfiguration, SdkIssue, SdkIssues } from "@nodera/sdk";
+import type {
+  EdgeStyleInput,
+  GraphLayoutConfiguration,
+  SdkIssue,
+  SdkIssues,
+} from "@nodera/sdk";
 import { createReactFlowAdapter } from "@nodera/react-flow";
 
 import {
@@ -29,6 +34,38 @@ import {
 
 /** Id of the builder this host composes. */
 export const DEMO_BUILDER_ID = "demo.layout-switch";
+
+/**
+ * The one edge definition this demo uses.
+ *
+ * Every seeded and newly drawn connection carries `type: DEMO_EDGE_TYPE`, so
+ * the definition's visual is what the canvas draws. The "Edge style" group in
+ * the options panel rewrites that visual at runtime through the public API —
+ * `registries.edges.unregister` + `builder.registerEdge` — and every edge of
+ * this type re-renders with the new style.
+ */
+export const DEMO_EDGE_TYPE = "demo.edge.default";
+
+/** Label the edge definition registers with. */
+export const DEMO_EDGE_LABEL = "Demo edge";
+
+/**
+ * Visual the edge definition boots with, and the values the "Edge style"
+ * controls start from.
+ *
+ * The declared keys are the domain's `EdgeVisual` vocabulary; nothing else is
+ * needed here, because every dimension — geometry, arrows, line style, color,
+ * animation — is a renderer hint that lives on the definition, never document
+ * state.
+ */
+export const DEMO_EDGE_STYLE = {
+  geometry: "bezier",
+  lineStyle: "solid",
+  arrowStart: false,
+  arrowEnd: true,
+  color: "#64748b",
+  animation: "none",
+} as const satisfies EdgeStyleInput;
 
 /**
  * Placement the host declares at boot.
@@ -101,7 +138,7 @@ function seedGraph(builder: Builder): SdkIssues {
     }
   }
   for (const [source, target] of SEED_EDGES) {
-    const connected = builder.graph.connect({ source, target });
+    const connected = builder.graph.connect({ source, target, type: DEMO_EDGE_TYPE });
     if (!connected.ok) {
       issues.push(...connected.error);
     }
@@ -115,7 +152,12 @@ export function createDemoBuilder(): Builder {
     createBuilder({
       id: DEMO_BUILDER_ID,
       adapter: createReactFlowAdapter(),
-      registry: { nodes: DEMO_NODES },
+      registry: {
+        nodes: DEMO_NODES,
+        edges: [
+          { type: DEMO_EDGE_TYPE, label: DEMO_EDGE_LABEL, style: { ...DEMO_EDGE_STYLE } },
+        ],
+      },
       // The host asks for the edge affordance; the framework adds no control it
       // was not asked for, and the same flag is what `builder.features` reports.
       features: { edgeInsertion: true },

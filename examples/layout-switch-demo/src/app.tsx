@@ -20,6 +20,7 @@
  * | Surface | Connections           | `builder.graphLayout.setConnectionsPolicy(policy)`             |
  * | Surface | Ports                 | `builder.graphLayout.setPortsPolicy(policy)`                   |
  * | Surface | Edge "+"              | `builder.features.setEdgeInsertion(enabled)` — runtime toggle  |
+ * | Edge style | Geometry, arrows, line style, color, animation | `registries.edges.unregister(type)` + `builder.registerEdge` — an explicit replace of the demo edge definition, which all edges of that type re-render from |
  * | Actions | Arrange               | `builder.graph.arrange({ … })` — one explicit history unit     |
  * | Actions | Arrange from a node   | `builder.graph.arrange({ from, … })` — the scoped call         |
  * | Actions | Add node              | `CreateNodeButton` → `builder.graph.addNode({ after })`        |
@@ -45,7 +46,7 @@
 
 import { useState, type ReactNode } from "react";
 
-import type { Builder, SdkIssues } from "@nodera/sdk";
+import type { Builder, EdgeStyleInput, SdkIssues } from "@nodera/sdk";
 import { NoderaEditor } from "@nodera/react-flow";
 import {
   CreateNodeButton,
@@ -55,7 +56,7 @@ import {
   useUiState,
 } from "@nodera/ui-react";
 
-import { DEMO_LAYOUT, resetDemoGraph } from "./builder.js";
+import { DEMO_EDGE_LABEL, DEMO_EDGE_STYLE, DEMO_EDGE_TYPE, DEMO_LAYOUT, resetDemoGraph } from "./builder.js";
 
 /** Props accepted by {@link LayoutSwitchDemo}. */
 export interface LayoutSwitchDemoProps {
@@ -161,6 +162,39 @@ const REMOVAL_POLICY_LABEL: Readonly<Record<RemovalPolicy, string>> = {
   splice: "a removed node joins each predecessor to each successor, in the same history unit",
 };
 
+/** Values the "Edge style" controls hold: the visual of one edge definition. */
+interface DemoEdgeStyle {
+  readonly geometry: EdgeStyleInput["geometry"];
+  readonly lineStyle: EdgeStyleInput["lineStyle"];
+  readonly arrowStart: boolean;
+  readonly arrowEnd: boolean;
+  readonly color: string;
+  readonly animation: EdgeStyleInput["animation"];
+}
+
+/** Edge geometries the host offers, in the order it shows them. */
+const EDGE_GEOMETRIES = [
+  "straight",
+  "bezier",
+  "step",
+  "smooth",
+] as const satisfies readonly EdgeStyleInput["geometry"][];
+
+/** Edge line styles the host offers. */
+const EDGE_LINE_STYLES = [
+  "solid",
+  "dashed",
+  "dotted",
+] as const satisfies readonly EdgeStyleInput["lineStyle"][];
+
+/** Edge animations the host offers. */
+const EDGE_ANIMATIONS = [
+  "none",
+  "flow",
+  "dash",
+  "pulse",
+] as const satisfies readonly EdgeStyleInput["animation"][];
+
 /** The values the host's controls hold for one arrangement. */
 interface Arrangement {
   readonly direction: Direction;
@@ -251,6 +285,13 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     builder.graphLayout.arrangeOnChange(),
   );
   const [removal, setRemoval] = useState<RemovalPolicy>(() => builder.graphLayout.removalPolicy());
+  // The visual of the demo's one edge definition, seeded from the style the
+  // builder registered. The canvas only re-derives on editor events, and a
+  // definition replace emits none, so a style change also bumps a revision
+  // counter that remounts the canvas — the host's own workaround for a
+  // framework gap, reported rather than hidden.
+  const [edgeStyle, setEdgeStyle] = useState<DemoEdgeStyle>(() => ({ ...DEMO_EDGE_STYLE }));
+  const [edgeStyleRevision, setEdgeStyleRevision] = useState(0);
 
   /** The per-call overrides the control values describe, parsed on purpose. */
   const overrides = (values: Arrangement): ArrangeOverrides => ({
@@ -453,6 +494,41 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   };
 
   /**
+   * Rewrites the visual of the demo's one edge definition.
+   *
+   * The style of an edge type is renderer configuration on its definition, so
+   * the change is an explicit replace through the public API: unregister, then
+   * register again with the same id and the new visual. A refused replace is
+   * reported and leaves the previous style in place; a successful one remounts
+   * the canvas, because a definition replace emits no editor event and the
+   * canvas would otherwise keep the old style until the next graph change.
+   */
+  const applyEdgeStyle = (next: DemoEdgeStyle): void => {
+    const removed = builder.registries.edges.unregister(DEMO_EDGE_TYPE);
+    if (!removed.ok) {
+      setStatus(`Edge style was not applied — ${issueSummary(removed.error)}`);
+      return;
+    }
+    const registered = builder.registerEdge({
+      type: DEMO_EDGE_TYPE,
+      label: DEMO_EDGE_LABEL,
+      style: { ...next },
+    });
+    if (!registered.ok) {
+      setStatus(`Edge style was not applied — ${issueSummary(registered.error)}`);
+      return;
+    }
+    setEdgeStyle(next);
+    setEdgeStyleRevision((revision) => revision + 1);
+    setStatus(
+      `Edge style applied: ${next.geometry}, ${next.lineStyle}, ` +
+        `arrows ${next.arrowStart ? "start" : "–"}/${next.arrowEnd ? "end" : "–"}, ` +
+        `${next.color}, animation ${next.animation}. Every edge of ` +
+        `"${DEMO_EDGE_TYPE}" re-rendered with it.`,
+    );
+  };
+
+  /**
    * Arranges the selected node and its descendants only.
    *
    * The scoped call is the SDK's own: the strategy still ranks the whole graph,
@@ -598,6 +674,7 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     const connected = builder.graph.connect({
       source: anchorId,
       target: added.value.id,
+      type: DEMO_EDGE_TYPE,
     });
     if (!connected.ok) {
       setStatus(
@@ -631,6 +708,7 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     `arrange on ${arrangeOnChange}`,
     `remove ${removal}`,
     `edge "+" ${edgeInsertion ? "on" : "off"}`,
+    `edge style ${edgeStyle.geometry}/${edgeStyle.lineStyle}`,
   ].join(" · ");
 
   return (
@@ -888,6 +966,123 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
           </fieldset>
 
           <fieldset className="demo-group">
+            <legend>Edge style</legend>
+            <div className="demo-group-body">
+              <label className="demo-control">
+                Geometry
+                <select
+                  className="demo-select"
+                  data-demo-control="edge-geometry"
+                  value={edgeStyle.geometry}
+                  onChange={(event) => {
+                    const geometry = offered(EDGE_GEOMETRIES, event.target.value);
+                    if (geometry !== undefined) {
+                      applyEdgeStyle({ ...edgeStyle, geometry });
+                    }
+                  }}
+                >
+                  {EDGE_GEOMETRIES.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                Line style
+                <select
+                  className="demo-select"
+                  data-demo-control="edge-line-style"
+                  value={edgeStyle.lineStyle}
+                  onChange={(event) => {
+                    const lineStyle = offered(EDGE_LINE_STYLES, event.target.value);
+                    if (lineStyle !== undefined) {
+                      applyEdgeStyle({ ...edgeStyle, lineStyle });
+                    }
+                  }}
+                >
+                  {EDGE_LINE_STYLES.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                Animation
+                <select
+                  className="demo-select"
+                  data-demo-control="edge-animation"
+                  value={edgeStyle.animation}
+                  onChange={(event) => {
+                    const animation = offered(EDGE_ANIMATIONS, event.target.value);
+                    if (animation !== undefined) {
+                      applyEdgeStyle({ ...edgeStyle, animation });
+                    }
+                  }}
+                >
+                  {EDGE_ANIMATIONS.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                Arrow start
+                <input
+                  type="checkbox"
+                  className="demo-checkbox"
+                  data-demo-control="edge-arrow-start"
+                  checked={edgeStyle.arrowStart}
+                  onChange={(event) => {
+                    applyEdgeStyle({ ...edgeStyle, arrowStart: event.target.checked });
+                  }}
+                />
+              </label>
+
+              <label className="demo-control">
+                Arrow end
+                <input
+                  type="checkbox"
+                  className="demo-checkbox"
+                  data-demo-control="edge-arrow-end"
+                  checked={edgeStyle.arrowEnd}
+                  onChange={(event) => {
+                    applyEdgeStyle({ ...edgeStyle, arrowEnd: event.target.checked });
+                  }}
+                />
+              </label>
+
+              <label className="demo-control">
+                Color
+                <input
+                  type="color"
+                  className="demo-color"
+                  data-demo-control="edge-color"
+                  value={edgeStyle.color}
+                  onChange={(event) => {
+                    applyEdgeStyle({ ...edgeStyle, color: event.target.value });
+                  }}
+                />
+              </label>
+
+              <p className="demo-note">
+                {"The style is the visual of the one edge definition this demo uses. "}
+                {"Applying it replaces the definition through "}
+                <code>{"registries.edges.unregister"}</code>
+                {" + "}
+                <code>{"builder.registerEdge"}</code>
+                {", and the host remounts the canvas (viewport resets), because a "}
+                {"definition replace emits no editor event for the canvas to re-derive from."}
+              </p>
+            </div>
+          </fieldset>
+
+          <fieldset className="demo-group">
             <legend>Actions</legend>
             <div className="demo-group-body">
               <button
@@ -952,7 +1147,11 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
       </p>
 
       <div className="demo-canvas">
-        <NoderaEditor builder={builder} layoutDirection={direction} />
+        <NoderaEditor
+          builder={builder}
+          layoutDirection={direction}
+          key={`edge-style-${String(edgeStyleRevision)}`}
+        />
       </div>
 
       <NodeCreationDialog open={dialogOpen} onClose={dialogs.close} onAddNode={addNode} />

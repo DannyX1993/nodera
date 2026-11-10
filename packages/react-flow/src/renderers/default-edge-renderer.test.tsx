@@ -286,4 +286,31 @@ describe("DefaultEdgeRenderer (React Flow EdgeProps)", () => {
       "var(--ndr-edge-stroke-width-selected, 2.5)",
     );
   });
+
+  it("forwards markerStart and markerEnd to the rendered path", () => {
+    // React Flow hands the edge component the resolved `url(#…)` marker
+    // references it derived from the edge object; the renderer must pass them
+    // through to `BaseEdge` or the arrows never paint (the mapper sets them,
+    // the path renders, and no arrow appears at either end).
+    const { container } = render(
+      <DefaultEdgeRenderer
+        id="e1"
+        sourceX={0}
+        sourceY={0}
+        targetX={100}
+        targetY={0}
+        sourcePosition={Position.Right}
+        targetPosition={Position.Left}
+        data={{}}
+        source="n1"
+        target="n2"
+        markerStart="url(#a)"
+        markerEnd="url(#b)"
+      />,
+    );
+
+    const path = container.querySelector(".react-flow__edge-path");
+    expect(path?.getAttribute("marker-start")).toBe("url(#a)");
+    expect(path?.getAttribute("marker-end")).toBe("url(#b)");
+  });
 });

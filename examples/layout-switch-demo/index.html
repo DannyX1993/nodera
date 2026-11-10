@@ -104,6 +104,11 @@
         border: 1px solid #24344d;
         border-radius: 6px;
         background: #101a29;
+        /* A taller group (the edge-style one has six controls) must never
+           squeeze the canvas: the panel scrolls instead, so the canvas keeps
+           its flex space and the phantom placeholders stay inside it. */
+        max-height: 42vh;
+        overflow-y: auto;
       }
 
       /* A collapsed panel must not keep any display override alive. */
@@ -195,6 +200,13 @@
         cursor: pointer;
       }
 
+      .demo-color {
+        width: 48px;
+        height: 24px;
+        padding: 1px 2px;
+        cursor: pointer;
+      }
+
       .demo-button {
         cursor: pointer;
       }
@@ -221,6 +233,7 @@
       .demo-select:focus-visible,
       .demo-number:focus-visible,
       .demo-checkbox:focus-visible,
+      .demo-color:focus-visible,
       .demo-button:focus-visible,
       .demo-disclosure:focus-visible {
         outline: 2px solid #f59e0b;

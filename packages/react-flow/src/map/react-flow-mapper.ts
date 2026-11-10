@@ -1,9 +1,10 @@
-import type {
-  Edge as ReactFlowEdge,
-  Node as ReactFlowNode,
-  NodeChange,
-  EdgeChange,
-  XYPosition,
+import {
+  MarkerType,
+  type Edge as ReactFlowEdge,
+  type Node as ReactFlowNode,
+  type NodeChange,
+  type EdgeChange,
+  type XYPosition,
 } from "@xyflow/react";
 
 import type { Edge, Graph, Node } from "@nodera/graph-model";
@@ -213,12 +214,22 @@ export const toReactFlowEdges = (
         rfEdge.style = { ...rfEdge.style, stroke: visual.color };
       }
 
-      // Arrows → markers.
+      // Arrows → marker definitions. A marker OBJECT is required: React Flow
+      // v12 renders the `<defs><marker>` a reference points at only when the
+      // edge carries a marker object, so a bare string would leave the
+      // attribute set and the arrow unpainted. The marker takes the edge's
+      // color so a coloured line does not end in a default-grey arrow.
       if (visual.arrowEnd) {
-        rfEdge.markerEnd = "arrow";
+        rfEdge.markerEnd = {
+          type: MarkerType.ArrowClosed,
+          ...(visual.color === undefined ? {} : { color: visual.color }),
+        };
       }
       if (visual.arrowStart) {
-        rfEdge.markerStart = "arrow";
+        rfEdge.markerStart = {
+          type: MarkerType.ArrowClosed,
+          ...(visual.color === undefined ? {} : { color: visual.color }),
+        };
       }
 
       // Renderer-only style hints → the edge data the renderer receives.
