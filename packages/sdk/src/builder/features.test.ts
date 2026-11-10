@@ -9,12 +9,13 @@ describe("resolveFeatures", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(SUPPORTED_FEATURES).toEqual(["minimap", "history", "validation", "edgeInsertion"]);
+    expect(SUPPORTED_FEATURES).toEqual(["minimap", "history", "validation", "edgeInsertion", "edgeWaypointEditing"]);
     expect(result.value).toEqual({
       minimap: true,
       history: true,
       validation: true,
       edgeInsertion: false,
+      edgeWaypointEditing: false,
     });
   });
 
@@ -58,6 +59,7 @@ describe("resolveFeatures", () => {
       history: true,
       validation: false,
       edgeInsertion: false,
+      edgeWaypointEditing: false,
     });
   });
 
@@ -84,6 +86,7 @@ describe("resolveFeatures", () => {
       history: true,
       validation: true,
       edgeInsertion: false,
+      edgeWaypointEditing: false,
     });
     expect(Object.keys(result.value).sort()).toEqual([...SUPPORTED_FEATURES].sort());
   });
@@ -216,5 +219,149 @@ describe("builder.features.setEdgeInsertion", () => {
     expect(refused.error[0]?.code).toBe("sdk.disposed");
     expect(builder.features.edgeInsertion).toBe(true);
     expect(builder.store.getState().edgeInsertion).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  builder.features.edgeWaypointEditing (S8)                          */
+/* ------------------------------------------------------------------ */
+
+describe("builder.features.edgeWaypointEditing", () => {
+  it("is observable on the builder and off by default", () => {
+    const builder = createGraphBuilder(false);
+
+    expect(builder.features.edgeWaypointEditing).toBe(false);
+  });
+
+  it("reflects the store value reactively", () => {
+    const builder = createGraphBuilder(false);
+
+    expect(builder.features.edgeWaypointEditing).toBe(false);
+    builder.store.setEdgeWaypointEditing(true);
+    expect(builder.features.edgeWaypointEditing).toBe(true);
+    builder.store.setEdgeWaypointEditing(false);
+    expect(builder.features.edgeWaypointEditing).toBe(false);
+  });
+});
+
+describe("builder.features.setEdgeWaypointEditing", () => {
+  /** Builder whose layout registry has layered as default. */
+  function layeredBuilder(edgeWaypointEditing: boolean): Builder {
+    const result = createBuilder({
+      features: { edgeWaypointEditing },
+      graph: {
+        layout: { strategy: "nodera.graph-layout.layered" },
+        graphId: "graph-waypoint-test",
+      },
+      registry: { nodes: [nodeInput("test.source"), nodeInput("test.sink")] },
+    });
+    if (!result.ok) {
+      throw new Error(
+        `unexpected builder failure: ${result.error.map((issue) => issue.code).join(", ")}`,
+      );
+    }
+    return result.value;
+  }
+
+  /** Builder whose layout registry has free as default. */
+  function freeBuilder(edgeWaypointEditing: boolean): Builder {
+    const result = createBuilder({
+      features: { edgeWaypointEditing },
+      graph: {
+        layout: { strategy: "nodera.graph-layout.free" },
+        graphId: "graph-waypoint-test",
+      },
+      registry: { nodes: [nodeInput("test.source"), nodeInput("test.sink")] },
+    });
+    if (!result.ok) {
+      throw new Error(
+        `unexpected builder failure: ${result.error.map((issue) => issue.code).join(", ")}`,
+      );
+    }
+    return result.value;
+  }
+
+  it("succeeds in free layout with editable connections", () => {
+    const builder = freeBuilder(false);
+
+    const enabled = builder.features.setEdgeWaypointEditing(true);
+
+    expect(enabled).toEqual({ ok: true, value: true });
+    expect(builder.features.edgeWaypointEditing).toBe(true);
+    expect(builder.store.getState().edgeWaypointEditing).toBe(true);
+  });
+
+  it("refuses when the active strategy is layered", () => {
+    const builder = layeredBuilder(false);
+
+    const refused = builder.features.setEdgeWaypointEditing(true);
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error).toHaveLength(2);
+    expect(refused.error[0]).toMatchObject({
+      code: "sdk.feature-unavailable",
+    });
+    expect(refused.error[1]).toMatchObject({
+      code: "sdk.invalid-input",
+    });
+    expect(builder.features.edgeWaypointEditing).toBe(false);
+    expect(builder.store.getState().edgeWaypointEditing).toBe(false);
+  });
+
+  it("refuses when connections are fixed", () => {
+    const builder = freeBuilder(false);
+    builder.graphLayout.setConnectionsPolicy("fixed");
+
+    const refused = builder.features.setEdgeWaypointEditing(true);
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error).toHaveLength(2);
+    expect(refused.error[0]).toMatchObject({
+      code: "sdk.feature-unavailable",
+    });
+    expect(builder.features.edgeWaypointEditing).toBe(false);
+    expect(builder.store.getState().edgeWaypointEditing).toBe(false);
+  });
+
+  it("always succeeds when disabling (even in layered)", () => {
+    const builder = layeredBuilder(true);
+
+    const disabled = builder.features.setEdgeWaypointEditing(false);
+
+    expect(disabled).toEqual({ ok: true, value: false });
+    expect(builder.features.edgeWaypointEditing).toBe(false);
+    expect(builder.store.getState().edgeWaypointEditing).toBe(false);
+  });
+
+  it("refuses on a disposed builder and keeps the state it had", () => {
+    const builder = freeBuilder(false);
+    builder.dispose();
+
+    const refused = builder.features.setEdgeWaypointEditing(true);
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error[0]?.code).toBe("sdk.disposed");
+    expect(builder.features.edgeWaypointEditing).toBe(false);
+    expect(builder.store.getState().edgeWaypointEditing).toBe(false);
+  });
+
+  it("refuses a non-boolean with sdk.invalid-input and leaves the state untouched", () => {
+    const builder = freeBuilder(false);
+
+    const refused = builder.features.setEdgeWaypointEditing("yes" as unknown as boolean);
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error).toMatchObject([
+      expect.objectContaining({
+        code: "sdk.invalid-input",
+        path: ["features", "edgeWaypointEditing"],
+      }),
+    ]);
+    expect(builder.features.edgeWaypointEditing).toBe(false);
+    expect(builder.store.getState().edgeWaypointEditing).toBe(false);
   });
 });

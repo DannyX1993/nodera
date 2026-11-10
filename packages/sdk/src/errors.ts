@@ -16,6 +16,7 @@ export const SDK_ISSUE_CODES = [
   "sdk.duplicate-id",
   "sdk.unknown-definition",
   "sdk.feature-unsupported",
+  "sdk.feature-unavailable",
   "sdk.unknown-theme",
   "sdk.unknown-layout",
   "sdk.unsupported-format",

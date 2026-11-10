@@ -68,6 +68,8 @@ describe("UiStateStore", () => {
       connections: "editable",
       ports: "visible",
       edgeInsertion: false,
+      edgeWaypointEditing: false,
+      activeGraphStrategyId: "",
     });
   });
 
@@ -513,6 +515,101 @@ describe("UiStateStore edge insertion", () => {
     store.subscribe(() => notifications++);
 
     store.setEdgeInsertion(false);
+
+    expect(notifications).toBe(0);
+    expect(store.getState()).toBe(before);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Edge waypoint editing                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The per-edge waypoint editing affordance is presentation state: the builder
+ * seeds it from `features.edgeWaypointEditing` and a host flips it at runtime
+ * through `builder.features.setEdgeWaypointEditing`, which lands here.
+ */
+describe("UiStateStore edge waypoint editing", () => {
+  it("defaults the edge waypoint editing affordance to off", () => {
+    expect(createStore().getState().edgeWaypointEditing).toBe(false);
+  });
+
+  it("seeds the edge waypoint editing affordance from the builder features", () => {
+    const store = new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      layout: emptyLayout,
+      edgeWaypointEditing: true,
+    });
+
+    expect(store.getState().edgeWaypointEditing).toBe(true);
+  });
+
+  it("toggles the edge waypoint editing affordance and notifies once", () => {
+    const store = createStore();
+    const seen: boolean[] = [];
+    store.subscribe((state) => seen.push(state.edgeWaypointEditing));
+
+    store.setEdgeWaypointEditing(true);
+
+    expect(store.getState().edgeWaypointEditing).toBe(true);
+    expect(seen).toEqual([true]);
+  });
+
+  it("notifies nobody when the edge waypoint editing affordance already matches", () => {
+    const store = createStore();
+    const before = store.getState();
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.setEdgeWaypointEditing(false);
+
+    expect(notifications).toBe(0);
+    expect(store.getState()).toBe(before);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Active graph strategy id                                           */
+/* ------------------------------------------------------------------ */
+
+describe("UiStateStore active graph strategy id", () => {
+  it("defaults the active graph strategy id to empty", () => {
+    const store = createStore();
+    expect(store.getState().activeGraphStrategyId).toBe("");
+  });
+
+  it("seeds the active graph strategy id the builder declares", () => {
+    const store = new UiStateStore({
+      themeId: "nodera.light",
+      layoutId: "nodera.editor",
+      layout: emptyLayout,
+      activeGraphStrategyId: "nodera.graph-layout.layered",
+    });
+
+    expect(store.getState().activeGraphStrategyId).toBe("nodera.graph-layout.layered");
+  });
+
+  it("changes the active graph strategy id and notifies once", () => {
+    const store = createStore();
+    const seen: string[] = [];
+    store.subscribe((state) => seen.push(state.activeGraphStrategyId));
+
+    store.setActiveGraphStrategyId("nodera.graph-layout.free");
+
+    expect(store.getState().activeGraphStrategyId).toBe("nodera.graph-layout.free");
+    expect(seen).toEqual(["nodera.graph-layout.free"]);
+  });
+
+  it("notifies nobody when the active graph strategy id already matches", () => {
+    const store = createStore();
+    store.setActiveGraphStrategyId("nodera.graph-layout.free");
+    const before = store.getState();
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+
+    store.setActiveGraphStrategyId("nodera.graph-layout.free");
 
     expect(notifications).toBe(0);
     expect(store.getState()).toBe(before);

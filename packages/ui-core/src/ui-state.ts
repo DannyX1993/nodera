@@ -184,6 +184,26 @@ export interface UiState {
    * the affordance writes nothing: the graph data is untouched.
    */
   readonly edgeInsertion: boolean;
+  /**
+   * Whether the canvas paints waypoint handles and accepts waypoint
+   * reshaping on edges.
+   *
+   * The builder seeds it from `features.edgeWaypointEditing` and changes it
+   * at runtime through `builder.features.setEdgeWaypointEditing`; the canvas
+   * adapter reads it reactively, so flipping it re-renders without a rebuild.
+   * The SDK setter guards activation on free layout and editable connections.
+   * Hiding the handles writes nothing: the graph data is untouched.
+   */
+  readonly edgeWaypointEditing: boolean;
+  /**
+   * Id of the active layout strategy.
+   *
+   * The builder seeds it from the strategy registry's default and changes it
+   * at runtime through `builder.graphLayout.setDefault`; the canvas adapter
+   * reads it reactively, so a strategy change re-renders without a rebuild.
+   * Hiding the handles writes nothing: the graph data is untouched.
+   */
+  readonly activeGraphStrategyId: string;
 }
 
 /** Initial values accepted by {@link UiStateStore}. */
@@ -225,6 +245,18 @@ export interface UiStateStoreOptions {
    * a canvas whose host did not ask for the affordance.
    */
   readonly edgeInsertion?: boolean;
+  /**
+   * Whether the canvas accepts waypoint reshaping on edges. Defaults to
+   * `false`; the builder seeds it from `features.edgeWaypointEditing` and
+   * guards activation on free layout and editable connections.
+   */
+  readonly edgeWaypointEditing?: boolean;
+  /**
+   * Id of the active layout strategy. The builder seeds it from the strategy
+   * registry's default id and changes it at runtime through
+   * `builder.graphLayout.setDefault`.
+   */
+  readonly activeGraphStrategyId?: string;
 }
 
 /** Listener notified after every state change. */
@@ -260,6 +292,8 @@ export class UiStateStore {
       connections: options.connections ?? "editable",
       ports: options.ports ?? "visible",
       edgeInsertion: options.edgeInsertion ?? false,
+      edgeWaypointEditing: options.edgeWaypointEditing ?? false,
+      activeGraphStrategyId: options.activeGraphStrategyId ?? "",
     };
   }
 
@@ -511,6 +545,38 @@ export class UiStateStore {
       return;
     }
     this.commit({ ...this.state, edgeInsertion });
+  }
+
+  /**
+   * Toggles the per-edge waypoint editing affordance.
+   *
+   * Presentation state only: the builder seeds it from
+   * `features.edgeWaypointEditing` and flips it at runtime through
+   * `builder.features.setEdgeWaypointEditing`; an invalid value never
+   * reaches the store, and the SDK setter enforces that enabling it only
+   * succeeds when the active strategy is free and connections are editable.
+   * Setting the value it already holds notifies nobody, which keeps
+   * snapshots stable for subscribers that re-derive on notification.
+   */
+  setEdgeWaypointEditing(edgeWaypointEditing: boolean): void {
+    if (edgeWaypointEditing === this.state.edgeWaypointEditing) {
+      return;
+    }
+    this.commit({ ...this.state, edgeWaypointEditing });
+  }
+
+  /**
+   * Records the active layout strategy id.
+   *
+   * The builder seeds it from the strategy registry and updates it through
+   * `builder.graphLayout.setDefault`, so an unknown id never reaches the
+   * store; setting the id already recorded notifies nobody.
+   */
+  setActiveGraphStrategyId(activeGraphStrategyId: string): void {
+    if (activeGraphStrategyId === this.state.activeGraphStrategyId) {
+      return;
+    }
+    this.commit({ ...this.state, activeGraphStrategyId });
   }
 
   private commit(next: UiState): void {

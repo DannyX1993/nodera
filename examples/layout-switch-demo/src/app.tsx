@@ -284,6 +284,11 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   const [edgeInsertion, setEdgeInsertion] = useState<boolean>(() =>
     builder.features.edgeInsertion,
   );
+  // Waypoint editing is a gated feature flag: the SDK refuses enabling outside
+  // free+editable; the canvas additionally gates on the live conditions.
+  const [edgeWaypointEditing, setEdgeWaypointEditing] = useState<boolean>(() =>
+    builder.features.edgeWaypointEditing,
+  );
   const [arrangeOnChange, setArrangeOnChange] = useState<ArrangeOnChange>(() =>
     builder.graphLayout.arrangeOnChange(),
   );
@@ -464,6 +469,19 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     }
     setEdgeInsertion(changed.value);
     setStatus(`Edge "+" ${changed.value ? "on" : "off"}.`);
+  };
+
+  /** Flips the per-edge waypoint editing affordance at runtime. */
+  const toggleEdgeWaypointEditing = (enabled: boolean): void => {
+    const changed = builder.features.setEdgeWaypointEditing(enabled);
+    if (!changed.ok) {
+      setStatus(
+        `Waypoint editing ${enabled ? "on" : "off"} was not applied — ${issueSummary(changed.error)}`,
+      );
+      return;
+    }
+    setEdgeWaypointEditing(changed.value);
+    setStatus(`Waypoint editing ${changed.value ? "on" : "off"}.`);
   };
 
   /** Changes what a structural change arranges by itself. */
@@ -711,6 +729,7 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     `arrange on ${arrangeOnChange}`,
     `remove ${removal}`,
     `edge "+" ${edgeInsertion ? "on" : "off"}`,
+    `waypoint editing ${edgeWaypointEditing ? "on" : "off"}`,
     `edge style ${edgeStyle.geometry}/${edgeStyle.lineStyle} w${String(edgeStyle.width)}`,
   ].join(" · ");
 
@@ -955,6 +974,19 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
                 />
               </label>
 
+              <label className="demo-control">
+                Waypoint editing
+                <input
+                  type="checkbox"
+                  className="demo-checkbox"
+                  data-demo-control="edge-waypoint-editing"
+                  checked={edgeWaypointEditing}
+                  onChange={(event) => {
+                    toggleEdgeWaypointEditing(event.target.checked);
+                  }}
+                />
+              </label>
+
               <p className="demo-note">
                 {"The per-edge "}
                 <code>{'"+"'}</code>
@@ -964,6 +996,16 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
                 {"still comes from "}
                 <code>{"features: { edgeInsertion: true }"}</code>
                 {" in builder.ts."}
+              </p>
+
+              <p className="demo-note">
+                {"Waypoint editing is gated on free layout and editable connections; "}
+                {"the SDK setter refuses outside those conditions with "}
+                <code>{"sdk.feature-unavailable"}</code>
+                {", and the canvas additionally gates gesture handling on the live values. "}
+                {"This demo boots on the layered strategy with fixed connections, so the "}
+                {"checkbox refuses until you switch to the free strategy and set "}
+                {"connections to editable."}
               </p>
             </div>
           </fieldset>

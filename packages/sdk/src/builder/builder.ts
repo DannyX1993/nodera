@@ -111,6 +111,7 @@ import {
   createFeaturesApi,
   resolveFeatures,
   type BuilderFeaturesApi,
+  type EdgeWaypointConditions,
   type ResolvedFeatures,
 } from "./features.js";
 
@@ -1357,7 +1358,21 @@ class SdkBuilder implements Builder {
   constructor(options: BuilderAssemblerOptions) {
     this.id = options.id;
     this.adapter = options.adapter;
-    this.features = createFeaturesApi(options.features, options.store, () => this.disposedFlag);
+    this.features = createFeaturesApi(
+      options.features,
+      options.store,
+      () => this.disposedFlag,
+      () => {
+        const activeId =
+          this.strategyRegistry !== undefined
+            ? this.strategyRegistry.defaultStrategyId
+            : undefined;
+        return {
+          free: activeId === "nodera.graph-layout.free",
+          editable: this.store.getState().connections === "editable",
+        };
+      },
+    );
     this.diagnostics = options.diagnostics;
     this.properties = options.properties;
     this.editor = options.editor;
@@ -1666,15 +1681,17 @@ class SdkBuilder implements Builder {
       return err([disposedIssue("graphLayout.setDefault")]);
     }
     const selected = this.strategyRegistry.setDefault(strategyId);
-    return selected.ok
-      ? ok(selected.value)
-      : err([
-          unknownLayoutStrategyIssue(
-            strategyId,
-            this.strategyRegistry.all().map((registered) => registered.id),
-            ["graph", "layout", "strategy"],
-          ),
-        ]);
+    if (!selected.ok) {
+      return err([
+        unknownLayoutStrategyIssue(
+          strategyId,
+          this.strategyRegistry.all().map((registered) => registered.id),
+          ["graph", "layout", "strategy"],
+        ),
+      ]);
+    }
+    this.store.setActiveGraphStrategyId(strategyId);
+    return ok(selected.value);
   }
 
   /**
@@ -2039,6 +2056,8 @@ export function createBuilder(
     connections: resolveConnectionsPolicy(declaredGraphLayout),
     ports: resolvePortsPolicy(declaredGraphLayout),
     edgeInsertion: features.value.edgeInsertion,
+    // Seed the active strategy so the adapter can read the live id on first paint.
+    activeGraphStrategyId: strategies.defaultStrategyId,
   });
 
   const graph = configuration.graph;

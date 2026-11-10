@@ -98,6 +98,8 @@ describe("createBuilder defaults", () => {
       validation: true,
       edgeInsertion: false,
       setEdgeInsertion: expect.any(Function),
+      edgeWaypointEditing: false,
+      setEdgeWaypointEditing: expect.any(Function),
     });
     expect(builder.registries.nodes.size).toBe(0);
     expect(builder.registries.edges.size).toBe(0);
@@ -232,6 +234,8 @@ describe("feature configuration", () => {
       validation: true,
       edgeInsertion: false,
       setEdgeInsertion: expect.any(Function),
+      edgeWaypointEditing: false,
+      setEdgeWaypointEditing: expect.any(Function),
     });
     expect(create({ features: { history: false } }).features.history).toBe(false);
   });
@@ -1500,5 +1504,49 @@ describe("graph layout removal policy", () => {
 
     expect(!refused.ok && refused.error[0]?.code).toBe("sdk.disposed");
     expect(builder.graphLayout.removalPolicy()).toBe("detach");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Active graph strategy id in UI state                               */
+/* ------------------------------------------------------------------ */
+
+describe("ui state active graph strategy id", () => {
+  it("seeds the active graph strategy id from the registry default", () => {
+    const builder = create();
+
+    expect(builder.store.getState().activeGraphStrategyId).toBe(
+      builder.graphLayout.active(),
+    );
+  });
+
+  it("updates the active graph strategy id when a new strategy is selected", () => {
+    const builder = create();
+
+    expect(builder.store.getState().activeGraphStrategyId).toBe(
+      builder.graphLayout.active(),
+    );
+
+    const strategies = builder.graphLayout.all();
+    // There are at least two strategies: free and layered.
+    const nextId = strategies.length > 1 ? strategies[1]!.id : strategies[0]!.id;
+
+    const selected = builder.graphLayout.setDefault(nextId);
+    expect(selected.ok).toBe(true);
+    expect(builder.store.getState().activeGraphStrategyId).toBe(nextId);
+    expect(builder.graphLayout.active()).toBe(nextId);
+  });
+
+  it("does not update when selecting the same strategy", () => {
+    const builder = create();
+    const before = builder.store.getState();
+    let notifications = 0;
+    builder.store.subscribe(() => notifications++);
+
+    const currentId = builder.graphLayout.active();
+    builder.graphLayout.setDefault(currentId);
+
+    expect(notifications).toBe(0);
+    expect(builder.store.getState()).toBe(before);
   });
 });

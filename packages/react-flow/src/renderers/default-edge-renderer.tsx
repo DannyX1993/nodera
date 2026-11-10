@@ -9,7 +9,7 @@ import type { FC, CSSProperties, PointerEvent as ReactPointerEvent, MouseEvent a
 import { useCallback, useRef, useState } from "react";
 
 import { edgeStyleHintsFromData } from "./edge-options.js";
-import { useNoderaEditor } from "../canvas/editor-context.js";
+import { useNoderaEditor, useNoderaWaypointEditing } from "../canvas/editor-context.js";
 import { useEditorGraph } from "../canvas/use-editor-graph.js";
 import { updateEdgeWaypoints } from "@nodera/application";
 
@@ -229,8 +229,9 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
   id,
   style: mappedStyle,
 }) => {
-  // --- Context: read editor and waypoints from mapped data ---
+  // --- Context: read editor, waypoints and gesture gate ---
   const editor = useNoderaEditor();
+  const waypointEditingEnabled = useNoderaWaypointEditing();
 
   // Read waypoints from edge data; the mapper puts them here from the domain.
   const edgeWaypoints = (data as { waypoints?: { x: number; y: number }[] } | undefined)
@@ -256,6 +257,10 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
   /*  sibling of the path and would never reach it. Handles (rendered  */
   /*  through <foreignObject>) bubble into the same wrapper. Pointer   */
   /*  capture keeps the gesture alive off the edge band.               */
+  /*                                                                  */
+  /*  When `waypointEditingEnabled` is false (the default), all       */
+  /*  gesture handlers no-op and no waypoint handles are rendered —  */
+  /*  the edge still routes through existing waypoints.              */
   /* ---------------------------------------------------------------- */
 
   type Gesture =
@@ -311,16 +316,18 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
 
   const onPathPointerDown = useCallback(
     (event: ReactPointerEvent<SVGGElement>) => {
+      if (!waypointEditingEnabled) return;
       if (gestureRef.current !== null) return;
       event.currentTarget.setPointerCapture?.(event.pointerId);
       const coords = flowCoordsFromEvent(event.nativeEvent);
       setGesture({ kind: "create", origin: coords, current: coords, moved: false });
     },
-    [flowCoordsFromEvent],
+    [flowCoordsFromEvent, waypointEditingEnabled],
   );
 
   const onPathPointerMove = useCallback(
     (event: ReactPointerEvent<SVGGElement>) => {
+      if (!waypointEditingEnabled) return;
       const current = gestureRef.current;
       if (current === null) return;
       const coords = flowCoordsFromEvent(event.nativeEvent);
@@ -330,11 +337,16 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
           (current.kind === "create" ? 5 : 2);
       setGesture({ ...current, current: coords, moved });
     },
-    [flowCoordsFromEvent],
+    [flowCoordsFromEvent, waypointEditingEnabled],
   );
 
   const onPathPointerUp = useCallback(
     (event: ReactPointerEvent<SVGGElement>) => {
+      if (!waypointEditingEnabled) {
+        setGesture(null);
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+        return;
+      }
       const current = gestureRef.current;
       setGesture(null);
       event.currentTarget.releasePointerCapture?.(event.pointerId);
@@ -350,22 +362,24 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
         ),
       );
     },
-    [commitWaypoints],
+    [commitWaypoints, waypointEditingEnabled],
   );
 
   const onPathDoubleClick = useCallback(
     (event: ReactMouseEvent<SVGGElement>) => {
       // Keep React Flow's pane double-click zoom out of the edge gesture.
       event.stopPropagation();
+      if (!waypointEditingEnabled) return;
       if (!editor || !id) return;
       const coords = flowCoordsFromEvent(event.nativeEvent);
       commitWaypoints([...(waypointsRef.current ?? []), coords]);
     },
-    [editor, id, flowCoordsFromEvent, commitWaypoints],
+    [editor, id, flowCoordsFromEvent, commitWaypoints, waypointEditingEnabled],
   );
 
   const onPointerDownHandle = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, index: number) => {
+      if (!waypointEditingEnabled) return;
       // A handle drag is not a path drag.
       event.stopPropagation();
       event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -374,21 +388,23 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
       setGesture({ kind: "move", index, origin: wp, current: wp, moved: false });
       event.currentTarget.focus();
     },
-    [],
+    [waypointEditingEnabled],
   );
 
   const onDoubleClickHandle = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>, index: number) => {
+      if (!waypointEditingEnabled) return;
       event.stopPropagation();
       const current = waypointsRef.current;
       if (current === undefined) return;
       commitWaypoints(current.filter((_, i) => i !== index));
     },
-    [commitWaypoints],
+    [commitWaypoints, waypointEditingEnabled],
   );
 
   const onKeyDownHandle = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>, index: number) => {
+      if (!waypointEditingEnabled) return;
       const current = waypointsRef.current;
       if (current === undefined) return;
       if (event.key === "Delete" || event.key === "Backspace") {
@@ -414,7 +430,7 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
         ),
       );
     },
-    [commitWaypoints],
+    [commitWaypoints, waypointEditingEnabled],
   );
 
   // --- Path: committed waypoints plus the live gesture position ----
@@ -498,10 +514,11 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
             }}
           />
         )}
-        {/* Waypoint handles: only when selected and there is something to
-            grab. Rendered as HTML inside <foreignObject>: a plain div inside
-            an SVG <g> is never painted by the browser. */}
-        {selected &&
+        {/* Waypoint handles: only when enabled, selected, and there is
+            something to grab. Rendered as HTML inside <foreignObject>: a
+            plain div inside an SVG <g> is never painted by the browser. */}
+        {waypointEditingEnabled &&
+          selected &&
           liveWaypoints.map((wp, index) => (
             <foreignObject
               key={`${id}-wp-${index}`}

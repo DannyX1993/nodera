@@ -4,13 +4,37 @@ import { Position } from "@xyflow/react";
 import type { CSSProperties } from "react";
 
 import { DefaultEdgeRenderer, defaultEdgeOptionsFromVisual } from "./default-edge-renderer.js";
-import { NoderaEditorProvider } from "../canvas/editor-context.js";
+import { NoderaEditorProvider, NoderaWaypointEditingProvider } from "../canvas/editor-context.js";
 import { EditorEngine } from "@nodera/application";
 import { addNode } from "@nodera/application";
 import { createEdge } from "@nodera/application";
 import { fireEvent } from "@testing-library/react";
 import { edgeStyleHints } from "./edge-options.js";
 import type { EdgeVisual } from "@nodera/edge-registry";
+
+/** Shared helper: builds an engine seeded with two nodes and one edge. */
+function makeEditorWithEdge(): EditorEngine {
+  const editor = new EditorEngine({ graphId: "graph-gestures" });
+  editor.domain.nodes.register({
+    id: "example.node",
+    name: "example.node",
+    version: "1.0.0",
+    ports: [
+      { id: "in", name: "in", direction: "input" },
+      { id: "out", name: "out", direction: "output" },
+    ],
+    properties: [],
+  } as never);
+  expect(addNode(editor, { definitionId: "example.node", nodeId: "a" }).ok).toBe(true);
+  expect(addNode(editor, { definitionId: "example.node", nodeId: "b" }).ok).toBe(true);
+  const edge = createEdge(editor, {
+    edgeId: "e1",
+    source: { nodeId: "a", portId: "out" },
+    target: { nodeId: "b", portId: "in" },
+  });
+  expect(edge.ok).toBe(true);
+  return editor;
+}
 
 /* ------------------------------------------------------------------ */
 /*  defaultEdgeOptionsFromVisual tests                                 */
@@ -526,21 +550,23 @@ describe("DefaultEdgeRenderer with waypoints (T5, S2, S3, S7)", () => {
 
   it("renders waypoint handles when selected", () => {
     const { container } = render(
-      <DefaultEdgeRenderer
-        id="e1"
-        sourceX={0}
-        sourceY={0}
-        targetX={100}
-        targetY={100}
-        sourcePosition={Position.Bottom}
-        targetPosition={Position.Top}
-        data={{
-          waypoints: [{ x: 50, y: 50 }],
-        }}
-        source="n1"
-        target="n2"
-        selected
-      />,
+      <NoderaWaypointEditingProvider enabled={true}>
+        <DefaultEdgeRenderer
+          id="e1"
+          sourceX={0}
+          sourceY={0}
+          targetX={100}
+          targetY={100}
+          sourcePosition={Position.Bottom}
+          targetPosition={Position.Top}
+          data={{
+            waypoints: [{ x: 50, y: 50 }],
+          }}
+          source="n1"
+          target="n2"
+          selected
+        />
+      </NoderaWaypointEditingProvider>,
     );
 
     // Waypoint handles are in the EdgeLabelRenderer layer.
@@ -593,21 +619,23 @@ describe("DefaultEdgeRenderer with waypoints (T5, S2, S3, S7)", () => {
 
   it("renders handles at waypoint coordinates", () => {
     const { container } = render(
-      <DefaultEdgeRenderer
-        id="e1"
-        sourceX={0}
-        sourceY={0}
-        targetX={100}
-        targetY={100}
-        sourcePosition={Position.Bottom}
-        targetPosition={Position.Top}
-        data={{
-          waypoints: [{ x: 42, y: 58 }],
-        }}
-        source="n1"
-        target="n2"
-        selected
-      />,
+      <NoderaWaypointEditingProvider enabled={true}>
+        <DefaultEdgeRenderer
+          id="e1"
+          sourceX={0}
+          sourceY={0}
+          targetX={100}
+          targetY={100}
+          sourcePosition={Position.Bottom}
+          targetPosition={Position.Top}
+          data={{
+            waypoints: [{ x: 42, y: 58 }],
+          }}
+          source="n1"
+          target="n2"
+          selected
+        />
+      </NoderaWaypointEditingProvider>,
     );
 
     const foreign = container.querySelector("foreignObject")!;
@@ -629,46 +657,25 @@ describe("DefaultEdgeRenderer with waypoints (T5, S2, S3, S7)", () => {
  * asserts against a REAL editor engine).
  */
 describe("DefaultEdgeRenderer waypoint gestures", () => {
-  function makeEditorWithEdge(): EditorEngine {
-    const editor = new EditorEngine({ graphId: "graph-gestures" });
-    editor.domain.nodes.register({
-      id: "example.node",
-      name: "example.node",
-      version: "1.0.0",
-      ports: [
-        { id: "in", name: "in", direction: "input" },
-        { id: "out", name: "out", direction: "output" },
-      ],
-      properties: [],
-    } as never);
-    expect(addNode(editor, { definitionId: "example.node", nodeId: "a" }).ok).toBe(true);
-    expect(addNode(editor, { definitionId: "example.node", nodeId: "b" }).ok).toBe(true);
-    const edge = createEdge(editor, {
-      edgeId: "e1",
-      source: { nodeId: "a", portId: "out" },
-      target: { nodeId: "b", portId: "in" },
-    });
-    expect(edge.ok).toBe(true);
-    return editor;
-  }
-
   function renderGesturedEdge(editor: EditorEngine, waypoints?: { x: number; y: number }[]) {
     return render(
-      <NoderaEditorProvider editor={editor}>
-        <DefaultEdgeRenderer
-          id="e1"
-          source="a"
-          target="b"
-          sourceX={0}
-          sourceY={0}
-          targetX={100}
-          targetY={100}
-          sourcePosition={Position.Bottom}
-          targetPosition={Position.Top}
-          data={waypoints === undefined ? {} : { waypoints }}
-          selected
-        />
-      </NoderaEditorProvider>,
+      <NoderaWaypointEditingProvider enabled={true}>
+        <NoderaEditorProvider editor={editor}>
+          <DefaultEdgeRenderer
+            id="e1"
+            source="a"
+            target="b"
+            sourceX={0}
+            sourceY={0}
+            targetX={100}
+            targetY={100}
+            sourcePosition={Position.Bottom}
+            targetPosition={Position.Top}
+            data={waypoints === undefined ? {} : { waypoints }}
+            selected
+          />
+        </NoderaEditorProvider>
+      </NoderaWaypointEditingProvider>,
     );
   }
 
@@ -759,5 +766,95 @@ describe("DefaultEdgeRenderer waypoint gestures", () => {
     fireEvent.keyDown(second, { key: "Delete" });
 
     expect(editor.getEdge("e1")?.waypoints).toEqual([{ x: 10, y: 10 }]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Waypoint editing gate (T8, S8)                                     */
+/* ------------------------------------------------------------------ */
+
+describe("DefaultEdgeRenderer waypoint editing gate", () => {
+  function renderDisabledEdge(editor: EditorEngine, waypoints?: { x: number; y: number }[]) {
+    return render(
+      <NoderaWaypointEditingProvider enabled={false}>
+        <NoderaEditorProvider editor={editor}>
+          <DefaultEdgeRenderer
+            id="e1"
+            source="a"
+            target="b"
+            sourceX={0}
+            sourceY={0}
+            targetX={100}
+            targetY={100}
+            sourcePosition={Position.Bottom}
+            targetPosition={Position.Top}
+            data={waypoints === undefined ? {} : { waypoints }}
+            selected
+          />
+        </NoderaEditorProvider>
+      </NoderaWaypointEditingProvider>,
+    );
+  }
+
+  it("does not render waypoint handles when disabled", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderDisabledEdge(editor, [{ x: 50, y: 50 }]);
+
+    const handles = container.querySelectorAll("[data-nodera-waypoint-index]");
+    expect(handles.length).toBe(0);
+  });
+
+  it("does not commit waypoint creation when disabled", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderDisabledEdge(editor);
+
+    const path = container.querySelector("path.react-flow__edge-path")!;
+    fireEvent.pointerDown(path, { pointerId: 1 });
+    fireEvent.pointerMove(path, { pointerId: 1, clientX: 50, clientY: 50 });
+    fireEvent.pointerUp(path, { pointerId: 1 });
+
+    // No waypoints created — the gesture was ignored.
+    expect(editor.getEdge("e1")?.waypoints).toBeUndefined();
+  });
+
+  it("does not commit waypoint movement when disabled", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderDisabledEdge(editor, [{ x: 10, y: 10 }]);
+
+    // Handles are not rendered when disabled — verify the DOM.
+    const handles = container.querySelectorAll("[data-nodera-waypoint-index]");
+    expect(handles.length).toBe(0);
+
+    // Path still routes through the waypoint (data prop drives rendering).
+    const path = container.querySelector("path.react-flow__edge-path")!;
+    const d = path.getAttribute("d");
+    const cCount = (d?.match(/C/g) || []).length;
+    expect(cCount).toBeGreaterThan(1);
+
+    // Domain waypoints remain absent — the gesture was ignored.
+    expect(editor.getEdge("e1")?.waypoints).toBeUndefined();
+  });
+
+  it("renders path through existing waypoints even when disabled", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderDisabledEdge(editor, [{ x: 50, y: 50 }]);
+
+    const path = container.querySelector("path.react-flow__edge-path")!;
+    const d = path.getAttribute("d");
+    // Path contains bezier segments (not a plain straight line), proving
+    // the path routes through the waypoint even when editing is off.
+    const cCount = (d?.match(/C/g) || []).length;
+    expect(cCount).toBeGreaterThan(1);
+  });
+
+  it("does not commit double-click addition when disabled", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderDisabledEdge(editor);
+
+    const path = container.querySelector("path.react-flow__edge-path")!;
+    fireEvent.doubleClick(path);
+
+    // No waypoint created — the gesture was ignored.
+    expect(editor.getEdge("e1")?.waypoints).toBeUndefined();
   });
 });

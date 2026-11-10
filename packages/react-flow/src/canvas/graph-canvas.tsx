@@ -53,6 +53,7 @@ import type {
 } from "@nodera/ui-core";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
 import { useEdgeInsertActions, useNoderaUi } from "@nodera/ui-react";
+import { NoderaWaypointEditingProvider } from "./editor-context.js";
 import {
   moveNode,
   createEdge,
@@ -1232,6 +1233,15 @@ export interface GraphCanvasProps {
    */
   readonly edgeInsertion?: boolean;
   /**
+   * Whether the canvas accepts waypoint reshaping on edges.
+   *
+   * The canvas composes this from the SDK feature flag, connections policy
+   * and active strategy; gestures and handles are gated when false (the
+   * default). An edge that already carries waypoints still routes through
+   * them — only editing is disabled.
+   */
+  readonly edgeWaypointEditing?: boolean;
+  /**
    * Axis the phantom placeholders step along (S21).
    *
    * The host declares it, because the canvas adapter can read neither
@@ -1330,6 +1340,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   connectionsPolicy = "editable",
   portsPolicy = "visible",
   edgeInsertion = false,
+  edgeWaypointEditing = false,
   nodeTransition = "instant",
   layoutDirection = "horizontal",
   renderEdgeInsert,
@@ -1695,9 +1706,10 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       : className;
 
   return (
-    <NoderaEditorProvider editor={editor}>
-      <div
-        className={frameClassName}
+    <NoderaWaypointEditingProvider enabled={edgeWaypointEditing}>
+      <NoderaEditorProvider editor={editor}>
+        <div
+          className={frameClassName}
         style={{ width: "100%", height: "100%" }}
         data-color-mode={colorMode}
         onDragOver={handleDragOver}
@@ -1759,5 +1771,6 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         </ReactFlow>
       </div>
     </NoderaEditorProvider>
+  </NoderaWaypointEditingProvider>
   );
 };

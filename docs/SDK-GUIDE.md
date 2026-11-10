@@ -140,7 +140,7 @@ export function createAppBuilder(): Builder {
         edges: [DATA_FLOW],
         layouts: [PIPELINE_LAYOUT],
       },
-      features: { minimap: true, history: true, validation: true },
+      features: { minimap: true, history: true, validation: true, edgeInsertion: false, edgeWaypointEditing: false },
       document: { format: "ggd", version: "1.0.0" },
       ui: { layout: "acme.layout.pipeline" },
       plugins: [plugin],
@@ -740,7 +740,21 @@ These are honest boundaries of Phase 6, not roadmap guesses.
   translation, so prefer the facades.
 - **No grouping, no runtime, no execution.** `features: { grouping: true }` is
   rejected with `sdk.feature-unsupported` because the capability does not exist;
-  only `minimap`, `history` and `validation` are implemented.
+  only `minimap`, `history`, `validation`, `edgeInsertion` and
+  `edgeWaypointEditing` are implemented.
+- **`edgeInsertion`** seeds the per-edge "+" affordance from configuration
+  (`features.edgeInsertion`), and `builder.features.setEdgeInsertion(enabled)`
+  flips it at runtime. The canvas re-renders without a rebuild; the value
+  written by the host is the boot value for the session.
+- **`edgeWaypointEditing`** gates the per-edge waypoint editing affordance.
+  `builder.features.setEdgeWaypointEditing(enabled)` refuses to enable unless
+  the active strategy is the free strategy (`nodera.graph-layout.free`) **and**
+  connections are editable — the setter returns `sdk.feature-unavailable` with
+  a diagnostic naming the missing condition. Even when the SDK flag is `true`,
+  the canvas additionally gates gesture handling and waypoint handle rendering
+  on the live value of `connections` and the active strategy id, so the
+  gesture layer never fires when any condition changes at runtime. Disabling
+  (`false`) is always allowed.
 
 ## Where to go next
 

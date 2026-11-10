@@ -1,4 +1,10 @@
-import { createContext, useContext, type FC, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  type FC,
+  type ReactNode,
+  type PropsWithChildren,
+} from "react";
 import type { EditorEngine } from "@nodera/application";
 
 /**
@@ -22,4 +28,29 @@ export const NoderaEditorProvider: FC<{
 /** Read the engine from context inside the canvas tree. */
 export function useNoderaEditor(): EditorEngine | null {
   return useContext(NoderaEditorContext);
+}
+
+/**
+ * Context that gates whether the canvas accepts waypoint editing gestures.
+ *
+ * The adapter composes this value from the SDK feature flag, connections
+ * policy and active strategy; the default edge renderer reads it to decide
+ * whether to paint handles and run gesture handlers. When false (the
+ * default), the edge still routes through existing waypoints — only
+ * interaction is gated.
+ */
+export const NoderaWaypointEditingContext = createContext<boolean>(false);
+
+/** Provider that exposes waypoint editing to the canvas tree. */
+export const NoderaWaypointEditingProvider: FC<PropsWithChildren<{
+  readonly enabled: boolean;
+}>> = ({ enabled, children }) => (
+  <NoderaWaypointEditingContext.Provider value={enabled}>
+    {children}
+  </NoderaWaypointEditingContext.Provider>
+);
+
+/** Read the waypoint editing gate from context inside the canvas tree. */
+export function useNoderaWaypointEditing(): boolean {
+  return useContext(NoderaWaypointEditingContext);
 }
