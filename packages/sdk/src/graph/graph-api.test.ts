@@ -238,6 +238,197 @@ describe("edge operations", () => {
     expect(connected.error[0]?.code).toBe("sdk.invalid-input");
     expect(builder.graph.edgeCount()).toBe(0);
   });
+
+  it("sets waypoints on an edge, reads them back, and undoes", () => {
+    const builder = create();
+    const source = addNodeOrThrow(builder, REQUEST);
+    const target = addNodeOrThrow(builder, RESPONSE);
+
+    const connected = builder.graph.connect({ source, target });
+    if (!connected.ok) throw new Error("unexpected connect failure");
+    const edgeId = connected.value.id;
+
+    // No waypoints initially
+    const edges = builder.graph.edges();
+    expect(edges.length).toBe(1);
+    expect(edges[0]!.waypoints).toBeUndefined();
+
+    // Set waypoints
+    const withWaypoints = builder.graph.setEdgeWaypoints(edgeId, [
+      { x: 10, y: 20 },
+      { x: 30, y: 40 },
+    ]);
+    expect(withWaypoints.ok).toBe(true);
+    if (!withWaypoints.ok) return;
+    expect(withWaypoints.value.waypoints).toEqual([
+      { x: 10, y: 20 },
+      { x: 30, y: 40 },
+    ]);
+
+    // History: can undo
+    expect(builder.graph.canUndo()).toBe(true);
+    expect(builder.graph.undo()).toBe(true);
+
+    // After undo, waypoints are cleared
+    const afterUndo = builder.graph.edges();
+    expect(afterUndo[0]!.waypoints).toBeUndefined();
+
+    // Redo restores them
+    expect(builder.graph.canRedo()).toBe(true);
+    expect(builder.graph.redo()).toBe(true);
+    const afterRedo = builder.graph.edges();
+    expect(afterRedo[0]!.waypoints).toEqual([
+      { x: 10, y: 20 },
+      { x: 30, y: 40 },
+    ]);
+  });
+
+  it("clears waypoints with an empty array", () => {
+    const builder = create();
+    const source = addNodeOrThrow(builder, REQUEST);
+    const target = addNodeOrThrow(builder, RESPONSE);
+
+    const connected = builder.graph.connect({ source, target });
+    if (!connected.ok) throw new Error("unexpected connect failure");
+    const edgeId = connected.value.id;
+
+    builder.graph.setEdgeWaypoints(edgeId, [{ x: 10, y: 20 }]);
+    const edgesAfterSet = builder.graph.edges();
+    expect(edgesAfterSet[0]!.waypoints).toEqual([{ x: 10, y: 20 }]);
+
+    const cleared = builder.graph.setEdgeWaypoints(edgeId, []);
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.value.waypoints).toBeUndefined();
+    expect(builder.graph.canUndo()).toBe(true);
+  });
+
+  it("clears waypoints with undefined", () => {
+    const builder = create();
+    const source = addNodeOrThrow(builder, REQUEST);
+    const target = addNodeOrThrow(builder, RESPONSE);
+
+    const connected = builder.graph.connect({ source, target });
+    if (!connected.ok) throw new Error("unexpected connect failure");
+    const edgeId = connected.value.id;
+
+    builder.graph.setEdgeWaypoints(edgeId, [{ x: 10, y: 20 }]);
+
+    const cleared = builder.graph.setEdgeWaypoints(edgeId);
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.value.waypoints).toBeUndefined();
+  });
+
+  it("rejects an unknown edge id without mutating the graph", () => {
+    const builder = create();
+    const result = builder.graph.setEdgeWaypoints("edge-missing", [
+      { x: 1, y: 2 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      severity: "error",
+      message: `Graph has no edge with id "edge-missing"`,
+      metadata: { useCaseCode: "edge-not-found", elementId: "edge-missing" },
+    });
+    expect(builder.graph.edgeCount()).toBe(0);
+  });
+
+  it("rejects a non-finite coordinate with a diagnostic", () => {
+    const builder = create();
+    const source = addNodeOrThrow(builder, REQUEST);
+    const target = addNodeOrThrow(builder, RESPONSE);
+
+    const connected = builder.graph.connect({ source, target });
+    if (!connected.ok) throw new Error("unexpected connect failure");
+    const edgeId = connected.value.id;
+
+    const result = builder.graph.setEdgeWaypoints(edgeId, [
+      { x: Infinity, y: 0 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["waypoints", "0", "x"],
+    });
+  });
+
+  it("rejects a non-object waypoint entry with a diagnostic", () => {
+    const builder = create();
+    const source = addNodeOrThrow(builder, REQUEST);
+    const target = addNodeOrThrow(builder, RESPONSE);
+
+    const connected = builder.graph.connect({ source, target });
+    if (!connected.ok) throw new Error("unexpected connect failure");
+    const edgeId = connected.value.id;
+
+    const result = builder.graph.setEdgeWaypoints(edgeId, [null as never]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["waypoints", "0"],
+    });
+  });
+
+  it("rejects a waypoint with a non-number coordinate", () => {
+    const builder = create();
+    const source = addNodeOrThrow(builder, REQUEST);
+    const target = addNodeOrThrow(builder, RESPONSE);
+
+    const connected = builder.graph.connect({ source, target });
+    if (!connected.ok) throw new Error("unexpected connect failure");
+    const edgeId = connected.value.id;
+
+    const result = builder.graph.setEdgeWaypoints(edgeId, [
+      { x: 1, y: "two" } as never,
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toHaveLength(1);
+    expect(result.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["waypoints", "0", "y"],
+    });
+  });
+
+  it("rejects an invalid edge id shape without reaching the use case", () => {
+    const builder = create();
+    const result = builder.graph.setEdgeWaypoints("not an id", [
+      { x: 1, y: 2 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["edgeId"],
+    });
+  });
+
+  it("refuses on a disposed builder", () => {
+    const builder = create();
+    builder.dispose();
+
+    const result = builder.graph.setEdgeWaypoints("any", [
+      { x: 1, y: 2 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error[0]).toMatchObject({
+      code: "sdk.disposed",
+      metadata: { operation: "graph.setEdgeWaypoints" },
+    });
+    expect(result.error[0]?.message).toContain("setEdgeWaypoints");
+  });
 });
 
 describe("selection", () => {
