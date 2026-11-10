@@ -176,6 +176,23 @@ three writes a document position, an edge or a history entry, so an `Arrange`
 after switching behaves exactly as before. The demo boots on
 `Node transition: animated`, which is what makes the snap-back visible at all.
 
+### Canvas interactions
+
+The framework binding wires these canvas gestures that do **not** go through the
+options panel:
+
+| Gesture | What it does |
+| --- | --- |
+| Drag an intermediate point on an edge | Adds a waypoint (or moves an existing one); the bend persists in the document — one undo restores the previous shape. |
+| Double-click on an edge path | Adds a waypoint at the click position. |
+| Double-click or Delete on a waypoint handle | Removes that waypoint. |
+| Drag a node | Moves it (when the drag policy allows it). |
+| Drag from a port handle | Creates a connection (when connections are `editable`). |
+| Click an edge | Selects it (so `builder.graph.selectedEdges()` includes it). |
+
+The edge-bending gestures work on every edge the canvas renders, regardless of
+its definition style.
+
 ## What to try
 
 - **The layout owns everything**: `layered` + `Manual drag: locked` +

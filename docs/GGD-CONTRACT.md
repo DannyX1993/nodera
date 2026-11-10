@@ -54,6 +54,7 @@ This document describes the portable document format **as implemented** by `@nod
 | `source`, `target` | `{ nodeId, portId, direction? }` | Required references, resolved at import time; `direction` may only be `input`, `output` or `bidirectional`. |
 | `label` | string | Optional (string when present). |
 | `metadata` | object | Optional; values must be JSON-serializable data (validated). |
+| `waypoints` | array of `{ x, y }` | Optional. Per-edge instance presentation state in flow coordinates; preserved unknown-field conventions apply. Absent means a straight source→target route. Like node `position`, this is per-instance, not definition-level, so documents without it are unchanged. |
 
 ## Carried document data (graph-boundary preservation)
 

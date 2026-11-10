@@ -54,9 +54,9 @@ export const DEMO_EDGE_LABEL = "Demo edge";
  * controls start from.
  *
  * The declared keys are the domain's `EdgeVisual` vocabulary; nothing else is
- * needed here, because every dimension — geometry, arrows, line style, color,
- * animation — is a renderer hint that lives on the definition, never document
- * state.
+ * needed here, because every dimension — geometry, width, arrows, line style,
+ * color, animation — is a renderer hint that lives on the definition, never
+ * document state.
  */
 export const DEMO_EDGE_STYLE = {
   geometry: "bezier",
@@ -65,6 +65,7 @@ export const DEMO_EDGE_STYLE = {
   arrowEnd: true,
   color: "#64748b",
   animation: "none",
+  width: 2,
 } as const satisfies EdgeStyleInput;
 
 /**
