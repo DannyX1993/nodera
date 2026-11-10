@@ -415,9 +415,11 @@ describe("graph layout: arranging an existing graph", () => {
         `unexpected arrange failure: ${horizontal.error.map((issue) => issue.code).join(", ")}`,
       );
     }
+    // The two isolated nodes share the widest rank, so the one-node ranks of
+    // `start` and `work` are centred on the cross axis at half a node spacing.
     expect(positions(builder)).toEqual({
-      start: { x: 0, y: 0 },
-      work: { x: 100, y: 0 },
+      start: { x: 0, y: 20 },
+      work: { x: 100, y: 20 },
       alpha: { x: 200, y: 0 },
       zeta: { x: 200, y: 40 },
     });
@@ -433,8 +435,8 @@ describe("graph layout: arranging an existing graph", () => {
       );
     }
     expect(positions(builder)).toEqual({
-      start: { x: 0, y: 0 },
-      work: { x: 0, y: 100 },
+      start: { x: 20, y: 0 },
+      work: { x: 20, y: 100 },
       alpha: { x: 0, y: 200 },
       zeta: { x: 40, y: 200 },
     });

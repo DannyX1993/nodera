@@ -373,17 +373,19 @@ describe("graph arrange: per-call overrides", () => {
     diamond(builder);
 
     arranged(builder);
+    // The only rank narrower than the widest one is the child's: it is centred
+    // over the two parents, half a spacing below the first of them.
     expect(positions(builder)).toEqual({
       a: { x: 0, y: 0 },
       b: { x: 0, y: 240 },
-      c: { x: 240, y: 0 },
+      c: { x: 240, y: 120 },
     });
 
     builder.graph.arrange({ spacing: 100, rankSpacing: 500 });
     expect(positions(builder)).toEqual({
       a: { x: 0, y: 0 },
       b: { x: 0, y: 100 },
-      c: { x: 500, y: 0 },
+      c: { x: 500, y: 50 },
     });
   });
 
@@ -465,11 +467,13 @@ describe("graph arrange: a scoped request", () => {
     const moved = arrangedFrom(builder, "a");
 
     expect(moved.map((node) => node.id)).toEqual(["a", "b", "c"]);
+    // `a` and `y` share the widest rank, so they keep the columns 0 and 240; the
+    // one-node ranks of `b` and `c` are centred between them at 120.
     expect(positions(builder)).toEqual({
       up: { x: 100, y: 100 },
       a: { x: 240, y: 0 },
-      b: { x: 480, y: 0 },
-      c: { x: 720, y: 0 },
+      b: { x: 480, y: 120 },
+      c: { x: 720, y: 120 },
       x: { x: 500, y: 500 },
       y: { x: 600, y: 600 },
     });
@@ -480,11 +484,13 @@ describe("graph arrange: a scoped request", () => {
     branched(builder);
 
     expect(arrangedFrom(builder, "c").map((node) => node.id)).toEqual(["c"]);
+    // Only `c` is written, and its one-node rank is centred over the widest rank
+    // at 120 instead of sitting in the first column.
     expect(positions(builder)).toEqual({
       up: { x: 100, y: 100 },
       a: { x: 200, y: 200 },
       b: { x: 300, y: 300 },
-      c: { x: 720, y: 0 },
+      c: { x: 720, y: 120 },
       x: { x: 500, y: 500 },
       y: { x: 600, y: 600 },
     });
@@ -506,11 +512,13 @@ describe("graph arrange: a scoped request", () => {
     });
 
     expect(builder.graph.redo()).toBe(true);
+    // The redone arrangement is the same grid: the one-node ranks of `b` and `c`
+    // are centred over the widest rank at 120.
     expect(positions(builder)).toEqual({
       up: { x: 100, y: 100 },
       a: { x: 240, y: 0 },
-      b: { x: 480, y: 0 },
-      c: { x: 720, y: 0 },
+      b: { x: 480, y: 120 },
+      c: { x: 720, y: 120 },
       x: { x: 500, y: 500 },
       y: { x: 600, y: 600 },
     });

@@ -118,9 +118,15 @@ at all.
      and any recalculation would drop it at the origin (the hole the demo
      reported when a node added from the palette landed top-left).
 6. **Orders each rank by a barycenter sweep** and then applies the axes:
-   `horizontal` puts the rank on `x` (`rank × rankSpacing`) and the in-rank index
-   on `y` (`index × nodeSpacing`); `vertical` swaps them. The sweep visits the
-   ranks in ascending order and orders each one by the **mean** in-rank index of
+   `horizontal` puts the rank on `x` (`rank × rankSpacing`) and the cross offset
+   on `y`; `vertical` swaps them. The cross offset of the node at in-rank index
+   `i` of a rank of `n` nodes is `(maxWidth - n) / 2 × nodeSpacing + i ×
+   nodeSpacing`, where `maxWidth` is the length of the widest rank in the graph
+   (the cycle-locked bucket included), so every rank is **centred** on the cross
+   axis over the widest one: a node several branches depart from sits over the
+   centre of those branches, and the widest rank itself keeps the cross
+   coordinate `0`. The sweep visits the ranks in ascending order and orders each
+   one by the **mean** in-rank index of
    a node's distinct parents in the previous rank (median was the alternative;
    the mean is what puts a node under the centre of its parents); equal keys fall
    back to node id, and a node with no parent in the previous rank — a source, an
@@ -134,8 +140,9 @@ at all.
    rank-permutation heuristic can promise that. The ranking itself is never
    touched: the sweep only chooses in-rank indices.
 7. **Filters by `scope`** last: `all` answers for every node, `unpositioned` drops
-   the nodes the document positions but keeps their in-rank index, so the slots of
-   the answered nodes do not move.
+   the nodes the document positions but keeps their in-rank index — and the
+   centring offset of the rank is computed from the **full** rank length, never
+   from the emitted subset — so the slots of the answered nodes do not move.
 
 The answer is a ranked, evenly spaced grid, which is what an explicit `Arrange`
 action needs. There is no edge routing and no edge bend point (see

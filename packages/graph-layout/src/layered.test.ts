@@ -37,6 +37,18 @@ function placed(result: ReturnType<typeof layered.place>) {
   }));
 }
 
+/** One placed node by id; fails the test when the answer does not carry it. */
+function positionOf(
+  entries: ReturnType<typeof placed>,
+  nodeId: string,
+): ReturnType<typeof placed>[number] {
+  const found = entries.find((entry) => entry.nodeId === nodeId);
+  if (found === undefined) {
+    throw new Error(`expected a position for the node ${nodeId}`);
+  }
+  return found;
+}
+
 /** The diagnostic of a failed call, pinning that a failure carries no geometry. */
 function failed(result: ReturnType<typeof layered.place>): GraphLayoutDiagnostic {
   if (result.ok) {
@@ -68,8 +80,11 @@ describe("createLayeredStrategy", () => {
       options: options({ direction: "vertical" }),
     });
 
+    // `a` is alone in its rank and its two children are not: the cross axis (now
+    // `x`) centres the one-node rank over the two-node one, so `a` sits at 20
+    // — the mean of its children's columns — instead of over `b`'s column.
     expect(placed(result)).toEqual([
-      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "a", x: 20, y: 0 },
       { nodeId: "b", x: 0, y: 100 },
       { nodeId: "c", x: 40, y: 100 },
     ]);
@@ -85,8 +100,10 @@ describe("createLayeredStrategy", () => {
       options: options(),
     });
 
+    // Retargeted again by the centring rule: `a` is alone in its rank over a
+    // two-node rank, so its cross coordinate is the mean of the children's.
     expect(placed(result)).toEqual([
-      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "a", x: 0, y: 20 },
       { nodeId: "b", x: 100, y: 0 },
       { nodeId: "c", x: 100, y: 40 },
     ]);
@@ -105,8 +122,10 @@ describe("createLayeredStrategy", () => {
       }),
     );
 
+    // Retargeted by the centring rule: `a` forks, so its one-node rank is
+    // centred over the two-node rank below it (`y: 20`, the mean of 0 and 40).
     expect(result).toEqual([
-      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "a", x: 0, y: 20 },
       { nodeId: "b", x: 100, y: 0 },
       { nodeId: "c", x: 100, y: 40 },
       // Crossed as [d, e]; the barycenter keeps each child under its own parent.
@@ -125,6 +144,8 @@ describe("createLayeredStrategy", () => {
     );
 
     // The ordering chooses an in-rank index; it never moves a node's rank.
+    // (The rank axis is untouched by the centring rule: it only shifts the
+    // cross coordinate, below.)
     expect(new Map(result.map((entry) => [entry.nodeId, entry.x]))).toEqual(
       new Map([
         ["a", 0],
@@ -134,9 +155,12 @@ describe("createLayeredStrategy", () => {
         ["e", 500],
       ]),
     );
+    // Centring: `[b, c]` and `[e, d]` both hold two nodes, so only the one-node
+    // rank of `a` is narrower than the widest one and shifts by
+    // (2 - 1) / 2 * 40 = 20.
     expect(new Map(result.map((entry) => [entry.nodeId, entry.y]))).toEqual(
       new Map([
-        ["a", 0],
+        ["a", 20],
         ["b", 0],
         ["c", 40],
         ["e", 0],
@@ -176,9 +200,12 @@ describe("createLayeredStrategy", () => {
       options: options(),
     });
 
+    // Retargeted by the centring rule: the widest rank holds two nodes ([c, d]
+    // in the cycle-locked bucket), so the one-node ranks of `a` and `b` are
+    // centred at `y: 20`. Rank order, ids and the rank axis are unchanged.
     expect(placed(cycleOnly)).toEqual([
-      { nodeId: "a", x: 0, y: 0 },
-      { nodeId: "b", x: 100, y: 0 },
+      { nodeId: "a", x: 0, y: 20 },
+      { nodeId: "b", x: 100, y: 20 },
       { nodeId: "c", x: 200, y: 0 },
       { nodeId: "d", x: 200, y: 40 },
     ]);
@@ -206,13 +233,16 @@ describe("createLayeredStrategy", () => {
     const nodes = [node("zeta"), node("alpha"), node("c"), node("a"), node("s"), node("b")];
     const edges = [edge("a", "b"), edge("b", "c"), edge("s", "c")];
 
+    // Retargeted by the centring rule: the widest rank holds two nodes
+    // ([a, s] and the isolated bucket [alpha, zeta]), so the one-node ranks of
+    // `b` and `c` take the cross coordinate 20 instead of 0.
     expect(
       placed(layered.place({ nodes, edges, options: options({ nodeSpacing: 40, rankSpacing: 100 }) })),
     ).toEqual([
       { nodeId: "a", x: 0, y: 0 },
       { nodeId: "s", x: 0, y: 40 },
-      { nodeId: "b", x: 100, y: 0 },
-      { nodeId: "c", x: 200, y: 0 },
+      { nodeId: "b", x: 100, y: 20 },
+      { nodeId: "c", x: 200, y: 20 },
       { nodeId: "alpha", x: 300, y: 0 },
       { nodeId: "zeta", x: 300, y: 40 },
     ]);
@@ -222,8 +252,8 @@ describe("createLayeredStrategy", () => {
     ).toEqual([
       { nodeId: "a", x: 0, y: 0 },
       { nodeId: "s", x: 40, y: 0 },
-      { nodeId: "b", x: 0, y: 100 },
-      { nodeId: "c", x: 0, y: 200 },
+      { nodeId: "b", x: 20, y: 100 },
+      { nodeId: "c", x: 20, y: 200 },
       { nodeId: "alpha", x: 0, y: 300 },
       { nodeId: "zeta", x: 40, y: 300 },
     ]);
@@ -242,6 +272,130 @@ describe("createLayeredStrategy", () => {
       { nodeId: "a", x: 0, y: 0 },
       { nodeId: "b", x: 0, y: 40 },
       { nodeId: "c", x: 0, y: 80 },
+    ]);
+  });
+
+  it("centres a rank over the widest one on the cross axis when the direction is vertical", () => {
+    // The reported defect: a node several branches depart from did not sit over
+    // the centre of those branches. `a` forks into `b` and `c`, so the one-node
+    // rank of `a` is centred over the two-node rank of its children instead of
+    // starting at the cross origin. The rank axis is untouched.
+    const result = placed(
+      layered.place({
+        nodes: [node("a"), node("b"), node("c")],
+        edges: [edge("a", "b"), edge("a", "c")],
+        options: options({ direction: "vertical", nodeSpacing: 40, rankSpacing: 100 }),
+      }),
+    );
+
+    const parent = positionOf(result, "a");
+    const left = positionOf(result, "b");
+    const right = positionOf(result, "c");
+
+    expect(left).toEqual({ nodeId: "b", x: 0, y: 100 });
+    expect(right).toEqual({ nodeId: "c", x: 40, y: 100 });
+    expect(parent.x).toBe((left.x + right.x) / 2);
+    expect(parent).toEqual({ nodeId: "a", x: 20, y: 0 });
+  });
+
+  it("centres a rank over the widest one on the cross axis when the direction is horizontal", () => {
+    // The same rule on the other axis: `y` carries the in-rank index, and the
+    // rank axis (`x`) is exactly `rank * rankSpacing`, unchanged.
+    const result = placed(
+      layered.place({
+        nodes: [node("a"), node("b"), node("c")],
+        edges: [edge("a", "b"), edge("a", "c")],
+        options: options({ direction: "horizontal", nodeSpacing: 40, rankSpacing: 100 }),
+      }),
+    );
+
+    const parent = positionOf(result, "a");
+    const left = positionOf(result, "b");
+    const right = positionOf(result, "c");
+
+    expect(left).toEqual({ nodeId: "b", x: 100, y: 0 });
+    expect(right).toEqual({ nodeId: "c", x: 100, y: 40 });
+    expect(parent.x).toBe(0);
+    expect(left.x).toBe(right.x);
+    expect(left.x).toBe(100);
+    expect(parent.y).toBe((left.y + right.y) / 2);
+    expect(parent).toEqual({ nodeId: "a", x: 0, y: 20 });
+  });
+
+  it("keeps every node of a one-node-per-rank chain on cross coordinate 0", () => {
+    // Preserved geometry: with exactly one node per rank the widest rank is the
+    // rank itself, so the centring offset `(maxWidth - n) / 2 * nodeSpacing` is
+    // zero and a linear chain is still a straight line on both directions.
+    const vertical = placed(
+      layered.place({
+        nodes: [node("a"), node("b"), node("c")],
+        edges: [edge("a", "b"), edge("b", "c")],
+        options: options({ direction: "vertical", nodeSpacing: 40, rankSpacing: 100 }),
+      }),
+    );
+
+    expect(vertical).toEqual([
+      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "b", x: 0, y: 100 },
+      { nodeId: "c", x: 0, y: 200 },
+    ]);
+
+    const horizontal = placed(
+      layered.place({
+        nodes: [node("a"), node("b"), node("c")],
+        edges: [edge("a", "b"), edge("b", "c")],
+        options: options({ direction: "horizontal", nodeSpacing: 40, rankSpacing: 100 }),
+      }),
+    );
+
+    expect(horizontal).toEqual([
+      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "b", x: 100, y: 0 },
+      { nodeId: "c", x: 200, y: 0 },
+    ]);
+  });
+
+  it("centres two parents over their shared child when that rank is the wider one", () => {
+    // `a -> c` and `b -> c`: the parents share the wide rank and the child is
+    // alone in its own, so the child is centred between the two columns.
+    const result = placed(
+      layered.place({
+        nodes: [node("a"), node("b"), node("c")],
+        edges: [edge("a", "c"), edge("b", "c")],
+        options: options({ direction: "horizontal", nodeSpacing: 40, rankSpacing: 100 }),
+      }),
+    );
+
+    const first = positionOf(result, "a");
+    const second = positionOf(result, "b");
+    const child = positionOf(result, "c");
+
+    expect(first).toEqual({ nodeId: "a", x: 0, y: 0 });
+    expect(second).toEqual({ nodeId: "b", x: 0, y: 40 });
+    expect(child).toEqual({ nodeId: "c", x: 100, y: 20 });
+    expect((first.y + second.y) / 2).toBe(child.y);
+  });
+
+  it("keeps the slot of a positioned node that scope unpositioned leaves out", () => {
+    // The centring offset comes from the **full** rank length, never from the
+    // emitted subset, so dropping `a` from the answer moves nothing else: the
+    // grid the host sees does not change with the scope.
+    const nodes = [node("a", { x: 700, y: 900 }), node("b"), node("c")];
+    const edges = [edge("a", "b"), edge("a", "c")];
+
+    const all = placed(layered.place({ nodes, edges, options: options({ scope: "all" }) }));
+    const unpositioned = placed(
+      layered.place({ nodes, edges, options: options({ scope: "unpositioned" }) }),
+    );
+
+    expect(all).toEqual([
+      { nodeId: "a", x: 0, y: 20 },
+      { nodeId: "b", x: 100, y: 0 },
+      { nodeId: "c", x: 100, y: 40 },
+    ]);
+    expect(unpositioned).toEqual([
+      { nodeId: "b", x: 100, y: 0 },
+      { nodeId: "c", x: 100, y: 40 },
     ]);
   });
 

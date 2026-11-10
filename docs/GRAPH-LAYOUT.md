@@ -760,7 +760,9 @@ Stated, not hidden:
   which removes the sibling crossings a plain id order produced. It **reduces**
   crossings; it does not guarantee a crossing-free drawing, because minimising
   crossings is NP-hard. There are no edge bend points and no edge routing either:
-  the layered strategy produces a ranked, evenly spaced grid.
+  the layered strategy produces a ranked, evenly spaced grid, and each rank is
+  centred on its cross axis over the widest rank, so a node several branches
+  depart from sits over the centre of those branches.
 - No node-size awareness: positions are computed from ids, edges and the declared
   spacings, so the result does not adapt to wide or tall node renderers.
 - `Arrange` always **computes** the whole graph (`scope: "all"` from the SDK);

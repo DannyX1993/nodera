@@ -298,10 +298,20 @@ function orderByBarycenter(
 /**
  * Turns the ranks into positions, in rank order and then in-rank order.
  *
- * `horizontal` puts the rank on `x` and the in-rank index on `y`; `vertical`
+ * Every rank is **centred** on the cross axis over the widest rank: a rank of
+ * `n` nodes whose widest sibling holds `maxWidth` starts at
+ * `(maxWidth - n) / 2 * nodeSpacing` and steps by `nodeSpacing` from there. A
+ * node that forks into several branches therefore sits over the centre of those
+ * branches instead of over the column of its first child, and the widest rank
+ * itself keeps the cross coordinate `0`. The in-rank order the barycenter sweep
+ * decided is preserved, and the rank axis is untouched: ranks stay at
+ * `rank * rankSpacing`.
+ *
+ * `horizontal` puts the rank on `x` and the cross offset on `y`; `vertical`
  * swaps the axes. With `scope: "unpositioned"` the nodes the document already
- * positions are dropped from the answer but keep their slot, so the grid the host
- * sees does not change with the scope.
+ * positions are dropped from the answer but keep their slot — the cross offset
+ * is computed from the **full** rank length, never from the emitted subset — so
+ * the grid the host sees does not change with the scope.
  */
 function placeRanks(
   ranks: ReadonlyMap<number, readonly NodeId[]>,
@@ -315,6 +325,11 @@ function placeRanks(
     }
   }
 
+  let widestRank = 0;
+  for (const ids of ranks.values()) {
+    widestRank = Math.max(widestRank, ids.length);
+  }
+
   const positions: GraphLayoutPlacedNode[] = [];
   for (const rank of [...ranks.keys()].sort((left, right) => left - right)) {
     const ids = ranks.get(rank) ?? [];
@@ -323,11 +338,12 @@ function placeRanks(
         return;
       }
       const rankOffset = rank * options.rankSpacing;
-      const indexOffset = indexInRank * options.nodeSpacing;
+      const crossOffset =
+        ((widestRank - ids.length) / 2) * options.nodeSpacing + indexInRank * options.nodeSpacing;
       const position =
         options.direction === "vertical"
-          ? { x: indexOffset, y: rankOffset }
-          : { x: rankOffset, y: indexOffset };
+          ? { x: crossOffset, y: rankOffset }
+          : { x: rankOffset, y: crossOffset };
       positions.push({ nodeId, position });
     });
   }
