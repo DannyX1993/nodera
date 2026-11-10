@@ -22,7 +22,7 @@ a native button with `aria-expanded` and `aria-controls` — that opens one pane
 above the canvas. The panel is the host's own HTML: nothing about it reaches the
 framework, which still ships no runtime toggle for placement (S20).
 
-The panel holds three labelled groups (`fieldset` / `legend`), and every control
+The panel holds four labelled groups (`fieldset` / `legend`), and every control
 is a native element named by its own visible label. Each policy control reads its
 value from the builder — `graphLayout.active()`, `dragPolicy()`,
 `connectionsPolicy()`, `portsPolicy()`, `arrangeOnChange()`, `removalPolicy()` —
@@ -52,6 +52,30 @@ line. Direction and the two spacings are per-call overrides: they start from the
 | Connections | `editable` / `fixed`            | `builder.graphLayout.setConnectionsPolicy(policy)` |
 | Ports       | `visible` / `hidden`            | `builder.graphLayout.setPortsPolicy(policy)` |
 | Edge "+"    | `on` / `off`                    | `builder.features.setEdgeInsertion(value)` — a runtime toggle, seeded from `builder.features.edgeInsertion` |
+
+### Edge style
+
+The demo registers one edge definition (`demo.edge.default`) and every seeded or
+newly drawn connection carries its type, so the definition's `EdgeVisual` —
+geometry, arrows, line style, color, animation — is what the canvas draws. This
+group edits that visual at runtime through the public API: an explicit replace
+(`registries.edges.unregister(type)` + `builder.registerEdge`), never a silent
+overwrite, so a refused replace leaves the previous style in place and the
+diagnostic lands in the status line.
+
+| Control    | Values                                      | SDK surface |
+| ---------- | ------------------------------------------- | ----------- |
+| Geometry   | `straight` / `bezier` / `step` / `smooth`   | `builder.registerEdge({ type, label, style: { geometry } })` after an explicit `unregister` |
+| Line style | `solid` / `dashed` / `dotted`               | same replace, `style: { lineStyle }` |
+| Animation  | `none` / `flow` / `dash` / `pulse`          | same replace, `style: { animation }` — this adapter animates `flow`/`dash` |
+| Arrow start| checkbox                                    | same replace, `style: { arrowStart }` |
+| Arrow end  | checkbox                                    | same replace, `style: { arrowEnd }` |
+| Color      | color picker                                | same replace, `style: { color }` |
+
+The style is presentation on the definition, never document state: the edges the
+document holds keep their endpoints and type, and only how the canvas draws them
+changes. New edges created after a change pick the definition's current visual
+up on their own.
 
 ### Actions
 
@@ -175,14 +199,20 @@ after switching behaves exactly as before. The demo boots on
   far away, then select `parse` and press `Arrange from "parse"` — only the
   selected node and its descendants move. Press `Arrange` to pull `ingest` back
   into the ranks.
+- **Edge styles**: with the panel open, switch `Geometry` to `smooth`, tick
+  `Arrow start`, change `Line style` to `dashed` and pick a color — every edge of
+  the demo's type re-renders at once, because they all draw from the one
+  definition's visual. New connections you draw (through a placeholder `"+"` or
+  `Add node…`) come out with the style the panel currently holds.
 
 ## The switching belongs to the host
 
 There is no framework toggle for placement. The Nodera SDK ships configuration
 (`graph.layout`) and one explicit command (`graph.arrange(options?)`), and the
 React Flow binding renders the canvas from the document. The panel in
-`src/app.tsx` — the disclosure, the three groups, the seven selects, the two
-number fields and the five actions — is plain host HTML/CSS **above** the canvas,
+`src/app.tsx` — the disclosure, the four groups, the ten selects, the two
+number fields, the three checkboxes, the color picker and the five actions — is
+plain host HTML/CSS **above** the canvas,
 never inside it, and every control calls the public SDK. A host that wants its
 own placement UI writes exactly this page; the framework still adds none.
 
@@ -202,11 +232,11 @@ own placement UI writes exactly this page; the framework still adds none.
   runner wired for `examples/`; the demo is verified by `typecheck` and `build`,
   and by reading the status line while clicking. The SDK behavior behind every
   control is covered by the SDK's own tests.
-- **The canvas' Delete key is not policy-aware.** `onRemove` is honoured by
-  `builder.graph.removeNode`, which the panel's `Remove "<node>"` action calls.
-  The canvas deletes through the application use case directly, so pressing
-  `Backspace` removes a node with its edges whatever the policy says — a
-  framework gap this demo reports instead of hiding.
+- **The canvas' Delete key is policy-aware.** The canvas routes deletions
+  through the same rule as `builder.graph.removeNode`: under `"splice"` a removed
+  middle node joins each predecessor to each successor in one history unit, under
+  `"detach"` it takes its edges with it. (Earlier rounds of this demo stated the
+  opposite — that gap is fixed in the binding.)
 - **Edge insertion is toggleable.** `builder.features.setEdgeInsertion(value)` flips it
   at runtime; the canvas re-renders from the UI store without a rebuild, so the host
   writes the toggle without touching the builder.
@@ -218,5 +248,10 @@ own placement UI writes exactly this page; the framework still adds none.
 - The layered strategy ranks by longest path and orders each rank by node id. It
   reduces crossing edges by ordering each rank around its parents, but does not guarantee a
   crossing-free drawing, and produces no edge bend points.
-- The status line is the only observability: the host reports its own
+- **Edge style changes remount the canvas.** Replacing an edge definition emits
+  no editor event, so the canvas would keep the old visual until the next graph
+  change — a framework gap this demo reports instead of hiding. The host remounts
+  `<NoderaEditor>` through a `key` on each style change, which re-derives the
+  canvas immediately at the cost of the viewport (zoom and pan reset).
+- **The status line is the only observability**: the host reports its own
   diagnostics instead of relying on a console.
