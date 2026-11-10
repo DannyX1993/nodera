@@ -36,6 +36,8 @@ export interface EdgeStyleInput {
   readonly arrowEnd?: boolean;
   readonly color?: string;
   readonly animation?: EdgeVisual["animation"];
+  /** Declared stroke thickness: becomes the edge visual's `width`. */
+  readonly width?: number;
   readonly stateIndicatorIds?: readonly string[];
   readonly [hint: string]: unknown;
 }
@@ -76,6 +78,7 @@ const VISUAL_STYLE_KEYS: readonly string[] = [
   "arrowEnd",
   "color",
   "animation",
+  "width",
   "stateIndicatorIds",
 ];
 

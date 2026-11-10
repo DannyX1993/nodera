@@ -56,6 +56,21 @@ describe("toEdgeDefinition", () => {
     });
   });
 
+  it("treats width as a declared visual key, not a renderer hint", () => {
+    const result = toEdgeDefinition({
+      type: "demo.flow",
+      label: "Data flow",
+      style: { width: 3, strokeWidth: 2 },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.definition.visual).toEqual({
+      width: 3,
+      metadata: { style: { strokeWidth: 2 } },
+    });
+  });
+
   it("merges declared visual hints with style hints", () => {
     const result = toEdgeDefinition({
       type: "demo.flow",
