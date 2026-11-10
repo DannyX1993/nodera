@@ -227,6 +227,7 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
   markerStart,
   markerEnd,
   id,
+  style: mappedStyle,
 }) => {
   // --- Context: read editor and waypoints from mapped data ---
   const editor = useNoderaEditor();
@@ -472,7 +473,16 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
     <>
       <BaseEdge
         path={path}
-        style={selected ? SELECTED_EDGE_STYLE : edgeStyle(data)}
+        // The mapper carries the definition's color and lineStyle as the
+        // edge's React Flow style; a bezier edge now renders here instead of
+        // on the built-in type, so that style must apply. Hint-driven fields
+        // (token stroke, hint strokeWidth/dashArray) come first: a mapped
+        // value wins only for the keys it actually sets.
+        style={
+          selected
+            ? SELECTED_EDGE_STYLE
+            : { ...edgeStyle(data), ...mappedStyle }
+        }
         className={selected ? "nodera-edge-selected" : undefined}
         onPointerDown={onPathPointerDown}
         onPointerMove={onPathPointerMove}

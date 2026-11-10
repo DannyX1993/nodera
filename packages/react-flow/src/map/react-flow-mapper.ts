@@ -37,7 +37,9 @@ const handleTypeForDirection = (direction: PortDirection): "source" | "target" =
  * Geometry mapping: Nodera EdgeGeometry → React Flow edge type.
  *
  * - straight  → "straight"
- * - bezier    → "default"  (BezierEdge in RF v12)
+ * - bezier    → undefined (routes to "nodera-default-edge", which draws the
+ *   same bezier and additionally carries the style hints and the waypoint
+ *   gestures; the built-in BezierEdge can do neither)
  * - step      → "step"
  * - smooth    → "smoothstep"
  */
@@ -45,7 +47,7 @@ const geometryToEdgeType = (
   geometry: string | undefined,
 ): string | undefined => {
   if (geometry === "straight") return "straight";
-  if (geometry === "bezier") return "default";
+  if (geometry === "bezier") return undefined;
   if (geometry === "step") return "step";
   if (geometry === "smooth") return "smoothstep";
   return undefined;

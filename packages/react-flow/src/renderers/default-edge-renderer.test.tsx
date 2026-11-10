@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { Position } from "@xyflow/react";
+import type { CSSProperties } from "react";
 
 import { DefaultEdgeRenderer, defaultEdgeOptionsFromVisual } from "./default-edge-renderer.js";
 import { edgeStyleHints } from "./edge-options.js";
@@ -181,7 +182,7 @@ describe("defaultEdgeOptionsFromVisual", () => {
  * (`var(--ndr-edge-*)`) otherwise.
  */
 describe("DefaultEdgeRenderer renderer-only style hints", () => {
-  function renderEdge(data: Record<string, unknown> = {}) {
+  function renderEdge(data: Record<string, unknown> = {}, style?: CSSProperties) {
     return render(
       <DefaultEdgeRenderer
         id="e1"
@@ -194,9 +195,28 @@ describe("DefaultEdgeRenderer renderer-only style hints", () => {
         sourcePosition={Position.Bottom}
         targetPosition={Position.Top}
         data={data}
+        {...(style === undefined ? {} : { style })}
       />,
     );
   }
+
+  it("applies the mapped edge style over the token fallbacks", () => {
+    // The mapper carries the definition's color and lineStyle as the edge's
+    // React Flow style; a renderer that ignores it loses both.
+    const path = renderEdge({}, { stroke: "#0a8f3c", strokeDasharray: "6 6" })
+      .container.querySelector("path");
+    expect((path as SVGPathElement).style.stroke).toBe("#0a8f3c");
+    expect((path as SVGPathElement).style.strokeDasharray).toBe("6 6");
+  });
+
+  it("keeps a hint strokeWidth the mapped style does not set", () => {
+    const path = renderEdge(
+      { styleHints: { strokeWidth: 3 } },
+      { stroke: "#0a8f3c" },
+    ).container.querySelector("path");
+    expect((path as SVGPathElement).style.strokeWidth).toBe("3");
+    expect((path as SVGPathElement).style.stroke).toBe("#0a8f3c");
+  });
 
   it("keeps the token fallbacks when the definition declares no hints", () => {
     const path = renderEdge().container.querySelector("path");

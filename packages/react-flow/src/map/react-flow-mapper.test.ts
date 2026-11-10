@@ -425,7 +425,7 @@ describe("toReactFlowEdges", () => {
     expect(result[0]!.type).toBe("vendor.custom-edge");
   });
 
-  it("maps geometry bezier → default (BezierEdge type)", () => {
+  it("routes a bezier edge to the Nodera default renderer", () => {
     const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
     const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
     const edge = makeEdge("e1", "n1", "p", "n2", "p", "edge-def");
@@ -437,7 +437,9 @@ describe("toReactFlowEdges", () => {
       }),
     );
 
-    expect(result[0]!.type).toBe("default");
+    // The Nodera default renderer draws the same bezier AND carries the
+    // waypoint gestures and the style hints; the built-in BezierEdge cannot.
+    expect(result[0]!.type).toBe("nodera-default-edge");
   });
 
   it("maps geometry step → step edge type", () => {
