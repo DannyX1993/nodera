@@ -5,13 +5,13 @@ import {
   Position,
   type EdgeProps,
 } from "@xyflow/react";
-import type { FC, CSSProperties } from "react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import type { FC, CSSProperties, PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { edgeStyleHintsFromData } from "./edge-options.js";
 import { useNoderaEditor } from "../canvas/editor-context.js";
 import { useEditorGraph } from "../canvas/use-editor-graph.js";
-import { selectEdge, updateEdgeWaypoints } from "@nodera/application";
+import { updateEdgeWaypoints } from "@nodera/application";
 
 /* ------------------------------------------------------------------ */
 /*  Token-driven edge styles (D2/D8)                                   */
@@ -236,143 +236,204 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
   const edgeWaypoints = (data as { waypoints?: { x: number; y: number }[] } | undefined)
     ?.waypoints;
 
-  // The mapper carries `true` when the edge has waypoints in the domain;
-  // React Flow re-derives edges, so we track changes through a ref.
+  // Stable ref so gesture handlers always see the committed waypoints.
   const waypointsRef = useRef(edgeWaypoints);
   waypointsRef.current = edgeWaypoints;
 
-  // Local state during drag: the transient position of the handle being
-  // moved (or the waypoint being created).
-  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
-  const [addingWaypoint, setAddingWaypoint] = useState(false);
-
-  // Stable refs for drag logic (avoid stale closures on pointer events).
-  const hasWaypointsRef = useRef(Boolean(waypointsRef.current));
-  hasWaypointsRef.current = Boolean(waypointsRef.current);
-
-  const addingRef = useRef(addingWaypoint);
-  addingRef.current = addingWaypoint;
-
-  const draggingRef = useRef(false);
-  draggingRef.current = dragPosition !== null;
-
-  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
-  const rafRef = useRef<number | null>(null);
-
-  // --- Editor graph hook: re-render when the document changes ---
-  // We read edge updates here so the handle list stays in sync with the
-  // document without needing an editor prop.  Only call when editor is set
-  // so unit tests that render the component without a provider do not crash.
+  // Re-render when the document changes so the handle list stays in sync.
+  // Only call when editor is set so unit tests that render the component
+  // without a provider do not crash.
   if (editor) {
     useEditorGraph(editor);
   }
 
-  // --- Helper: pointer → flow coordinates ---
-  const flowCoordsFromEvent = useCallback((event: PointerEvent) => {
-    // Use the React Flow canvas element's `screenToFlowPosition` if available.
-    const canvas = (event.target as SVGElement)?.closest(".react-flow__pane");
-    if (canvas && "getBoundingClientRect" in canvas) {
-      const rect = canvas.getBoundingClientRect();
-      return {
-        x: event.clientX - rect.left + canvas.scrollLeft,
-        y: event.clientY - rect.top + canvas.scrollTop,
-      };
+  /* ---------------------------------------------------------------- */
+  /*  Waypoint gestures                                                */
+  /*                                                                  */
+  /*  React Flow paints a ~20px transparent interaction band ABOVE the  */
+  /*  visible edge path, so handlers must live on this component's     */
+  /*  wrapper <g>, never on the path: an event on the band is a        */
+  /*  sibling of the path and would never reach it. Handles (rendered  */
+  /*  through <foreignObject>) bubble into the same wrapper. Pointer   */
+  /*  capture keeps the gesture alive off the edge band.               */
+  /* ---------------------------------------------------------------- */
+
+  type Gesture =
+    | {
+        kind: "create";
+        origin: { x: number; y: number };
+        current: { x: number; y: number };
+        moved: boolean;
+      }
+    | {
+        kind: "move";
+        index: number;
+        origin: { x: number; y: number };
+        current: { x: number; y: number };
+        moved: boolean;
+      }
+    | null;
+
+  const [gesture, setGesture] = useState<Gesture>(null);
+  const gestureRef = useRef<Gesture>(null);
+  gestureRef.current = gesture;
+
+  /** Pointer position in flow coordinates, undoing the viewport pan/zoom. */
+  const flowCoordsFromEvent = useCallback((event: PointerEvent | MouseEvent) => {
+    const pane = (event.target as Element | null)?.closest?.(".react-flow__pane");
+    if (!pane) {
+      return { x: event.clientX, y: event.clientY };
     }
-    // Fallback: approximate flow coordinates from the event.
-    return { x: event.clientX, y: event.clientY };
+    const rect = pane.getBoundingClientRect();
+    let x = event.clientX - rect.left;
+    let y = event.clientY - rect.top;
+    const viewport = pane.querySelector(".react-flow__viewport");
+    const transform = viewport ? window.getComputedStyle(viewport).transform : "none";
+    if (transform !== "none" && transform !== "" && typeof DOMMatrixReadOnly === "function") {
+      const matrix = new DOMMatrixReadOnly(transform);
+      x = (x - matrix.e) / (matrix.a || 1);
+      y = (y - matrix.f) / (matrix.d || 1);
+    }
+    return { x, y };
   }, []);
 
-  // --- Helper: commit the current waypoints (drag end) ---
-  const commitWaypoints = useCallback(() => {
-    if (!editor || !id) return;
-
-    const current = waypointsRef.current;
-    if (!current) return;
-
-    // Apply the current drag position to the waypoints array.
-    const updated = current.map((wp, i) => {
-      if (i === current.length - 1 && dragPosition) {
-        return dragPosition;
-      }
-      return wp;
-    });
-
-    // Remove the drag position (local state cleanup).
-    setDragPosition(null);
-    setAddingWaypoint(false);
-    addingRef.current = false;
-
-    // Commit: one history unit via the application use case.
-    updateEdgeWaypoints(editor, { edgeId: id, waypoints: updated });
-  }, [editor, id, dragPosition]);
-
-  // --- Waypoint drag handlers ---
-
-  const onPointerDownHandle = useCallback(
-    (event: React.PointerEvent, index: number) => {
+  /** Commits one waypoint list as ONE history unit (empty clears). */
+  const commitWaypoints = useCallback(
+    (points: readonly { x: number; y: number }[]) => {
       if (!editor || !id) return;
-
-      const current = waypointsRef.current;
-      if (!current || current.length === 0) return;
-
-      // Capture pointer so we continue receiving move/up even outside the handle.
-      (event.target as HTMLElement).setPointerCapture(event.pointerId);
-
-      // Set initial position as the new drag target.
-      const wp = current[index]!;
-      setDragPosition(wp);
-
-      // Prevent the pointer from triggering the edge's path handler.
-      event.stopPropagation();
-
-      // Handle focus for keyboard accessibility.
-      (event.target as HTMLElement).focus();
-    },
-    [editor, id],
-  );
-
-  const onPointerMoveHandle = useCallback(
-    (event: React.PointerEvent) => {
-      if (dragPosition === null || !editor) return;
-
-      const coords = flowCoordsFromEvent(event.nativeEvent);
-      setDragPosition({ x: coords.x, y: coords.y });
-
-      // Throttle re-renders with requestAnimationFrame.
-      if (rafRef.current !== null) return;
-      rafRef.current = requestAnimationFrame(() => {
-        rafRef.current = null;
+      updateEdgeWaypoints(editor, {
+        edgeId: id,
+        waypoints: points.length === 0 ? undefined : points,
       });
     },
-    [dragPosition, editor, flowCoordsFromEvent],
-  );
-
-  const onPointerUpHandle = useCallback(() => {
-    if (dragPosition === null) return;
-    commitWaypoints();
-  }, [dragPosition, commitWaypoints]);
-
-  const onDoubleClickHandle = useCallback(
-    (event: React.MouseEvent) => {
-      if (!editor || !id) return;
-
-      const current = waypointsRef.current;
-      if (!current || current.length === 0) return;
-
-      // Remove the last waypoint on double-click.
-      const updated = current.slice(0, -1);
-      updateEdgeWaypoints(editor, { edgeId: id, waypoints: updated });
-    },
     [editor, id],
   );
 
-  // --- Path computation ---
+  const onPathPointerDown = useCallback(
+    (event: ReactPointerEvent<SVGGElement>) => {
+      if (gestureRef.current !== null) return;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      const coords = flowCoordsFromEvent(event.nativeEvent);
+      setGesture({ kind: "create", origin: coords, current: coords, moved: false });
+    },
+    [flowCoordsFromEvent],
+  );
+
+  const onPathPointerMove = useCallback(
+    (event: ReactPointerEvent<SVGGElement>) => {
+      const current = gestureRef.current;
+      if (current === null) return;
+      const coords = flowCoordsFromEvent(event.nativeEvent);
+      const moved =
+        current.moved ||
+        Math.hypot(coords.x - current.origin.x, coords.y - current.origin.y) >
+          (current.kind === "create" ? 5 : 2);
+      setGesture({ ...current, current: coords, moved });
+    },
+    [flowCoordsFromEvent],
+  );
+
+  const onPathPointerUp = useCallback(
+    (event: ReactPointerEvent<SVGGElement>) => {
+      const current = gestureRef.current;
+      setGesture(null);
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      // A plain click (no drag) stays a selection for React Flow.
+      if (current === null || !current.moved) return;
+      if (current.kind === "create") {
+        commitWaypoints([...(waypointsRef.current ?? []), current.current]);
+        return;
+      }
+      commitWaypoints(
+        (waypointsRef.current ?? []).map((wp, i) =>
+          i === current.index ? current.current : wp,
+        ),
+      );
+    },
+    [commitWaypoints],
+  );
+
+  const onPathDoubleClick = useCallback(
+    (event: ReactMouseEvent<SVGGElement>) => {
+      // Keep React Flow's pane double-click zoom out of the edge gesture.
+      event.stopPropagation();
+      if (!editor || !id) return;
+      const coords = flowCoordsFromEvent(event.nativeEvent);
+      commitWaypoints([...(waypointsRef.current ?? []), coords]);
+    },
+    [editor, id, flowCoordsFromEvent, commitWaypoints],
+  );
+
+  const onPointerDownHandle = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>, index: number) => {
+      // A handle drag is not a path drag.
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      const wp = waypointsRef.current?.[index];
+      if (wp === undefined) return;
+      setGesture({ kind: "move", index, origin: wp, current: wp, moved: false });
+      event.currentTarget.focus();
+    },
+    [],
+  );
+
+  const onDoubleClickHandle = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>, index: number) => {
+      event.stopPropagation();
+      const current = waypointsRef.current;
+      if (current === undefined) return;
+      commitWaypoints(current.filter((_, i) => i !== index));
+    },
+    [commitWaypoints],
+  );
+
+  const onKeyDownHandle = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>, index: number) => {
+      const current = waypointsRef.current;
+      if (current === undefined) return;
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        commitWaypoints(current.filter((_, i) => i !== index));
+        return;
+      }
+      const steps: Readonly<Record<string, { dx?: number; dy?: number }>> = {
+        ArrowUp: { dy: -1 },
+        ArrowDown: { dy: 1 },
+        ArrowLeft: { dx: -1 },
+        ArrowRight: { dx: 1 },
+      };
+      const step = steps[event.key];
+      if (step === undefined) return;
+      event.preventDefault();
+      const scale = event.shiftKey ? 10 : 1;
+      commitWaypoints(
+        current.map((wp, i) =>
+          i === index
+            ? { x: wp.x + (step.dx ?? 0) * scale, y: wp.y + (step.dy ?? 0) * scale }
+            : wp,
+        ),
+      );
+    },
+    [commitWaypoints],
+  );
+
+  // --- Path: committed waypoints plus the live gesture position ----
+  const baseWaypoints = edgeWaypoints ?? [];
+  const liveWaypoints =
+    gesture === null
+      ? baseWaypoints
+      : gesture.kind === "create"
+        ? gesture.moved
+          ? [...baseWaypoints, gesture.current]
+          : baseWaypoints
+        : baseWaypoints.map((wp, i) => (i === gesture.index ? gesture.current : wp));
+
   let path: string;
   let labelX: number;
   let labelY: number;
 
-  if (edgeWaypoints && edgeWaypoints.length > 0) {
-    // Use waypoint-aware path.
+  if (liveWaypoints.length > 0) {
+    // Route through the waypoints (committed + the one being created/moved).
     [path, labelX, labelY] = buildEdgePathThroughWaypoints(
       sourceX,
       sourceY,
@@ -380,7 +441,7 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
       targetY,
       sourcePosition,
       targetPosition,
-      edgeWaypoints,
+      liveWaypoints,
     );
   } else {
     // No waypoints: use the classic bezier (byte-identical to pre-change).
@@ -399,99 +460,87 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
     label ??
     (typeof labelFromData === "string" && labelFromData.length > 0 ? labelFromData : undefined);
 
-  // --- Pointer event for path-based waypoint creation ---
-  const onPathPointerDown = useCallback(
-    (event: React.PointerEvent) => {
-      if (!hasWaypointsRef.current && !addingRef.current) {
-        // First pointer-down on the path: start tracking drag distance.
-        const coords = flowCoordsFromEvent(event.nativeEvent);
-        lastPointerRef.current = coords;
-        return;
-      }
-
-      // If we already have waypoints, the path pointer is for dragging
-      // an intermediate point: create a new waypoint.
-      if (editor && id && lastPointerRef.current) {
-        // Start a drag from this point.
-        setDragPosition(lastPointerRef.current);
-        setAddingWaypoint(true);
-        addingRef.current = true;
-      }
-      lastPointerRef.current = null;
-    },
-    [editor, id, flowCoordsFromEvent],
-  );
-
-  const onPathPointerMove = useCallback(
-    (event: React.PointerEvent) => {
-      if (lastPointerRef.current === null) return;
-
-      const coords = flowCoordsFromEvent(event.nativeEvent);
-      const dx = coords.x - lastPointerRef.current.x;
-      const dy = coords.y - lastPointerRef.current.y;
-
-      if (addingRef.current && editor && id) {
-        // Already in add mode: update the new waypoint position.
-        setDragPosition({ x: coords.x, y: coords.y });
-
-        // Throttle re-renders.
-        if (rafRef.current !== null) return;
-        rafRef.current = requestAnimationFrame(() => {
-          rafRef.current = null;
-        });
-      } else if (Math.sqrt(dx * dx + dy * dy) > 5 && !hasWaypointsRef.current) {
-        // Dragged beyond 5px on a no-waypoint edge: create first waypoint.
-        setDragPosition({ x: coords.x, y: coords.y });
-        setAddingWaypoint(true);
-        addingRef.current = true;
-      }
-
-      lastPointerRef.current = coords;
-    },
-    [editor, id, flowCoordsFromEvent],
-  );
-
-  const onPathPointerUp = useCallback(() => {
-    if (addingRef.current) {
-      // Commit the newly created waypoint.
-      commitWaypoints();
-      lastPointerRef.current = null;
-    } else {
-      // Simple click (no drag): select the edge.
-      if (editor && id) {
-        selectEdge(editor, { edgeId: id });
-      }
-      lastPointerRef.current = null;
-    }
-  }, [commitWaypoints, editor, id]);
-
-  // --- Compute active waypoint position (either dragged WP or last one) ---
-  const currentWaypoints = waypointsRef.current;
-  const activeWaypointIndex = dragPosition !== null && currentWaypoints ? currentWaypoints.length - 1 : -1;
-
   return (
     <>
-      <BaseEdge
-        path={path}
-        // The mapper carries the definition's color and lineStyle as the
-        // edge's React Flow style; a bezier edge now renders here instead of
-        // on the built-in type, so that style must apply. Hint-driven fields
-        // (token stroke, hint strokeWidth/dashArray) come first: a mapped
-        // value wins only for the keys it actually sets.
-        style={
-          selected
-            ? SELECTED_EDGE_STYLE
-            : { ...edgeStyle(data), ...mappedStyle }
-        }
-        className={selected ? "nodera-edge-selected" : undefined}
+      {/* Gesture wrapper: reachable by the pointer whatever path layer RF
+          paints. The handles live inside it so their events bubble here. */}
+      <g
         onPointerDown={onPathPointerDown}
         onPointerMove={onPathPointerMove}
         onPointerUp={onPathPointerUp}
-        // The resolved marker references React Flow derived from the edge
-        // object: without forwarding them the arrows are set but never paint.
-        {...(markerStart === undefined ? {} : { markerStart })}
-        {...(markerEnd === undefined ? {} : { markerEnd })}
-      />
+        onDoubleClick={onPathDoubleClick}
+      >
+        <BaseEdge
+          path={path}
+          style={
+            selected
+              ? SELECTED_EDGE_STYLE
+              : { ...edgeStyle(data), ...mappedStyle }
+          }
+          className={selected ? "nodera-edge-selected" : undefined}
+          // The resolved marker references React Flow derived from the edge
+          // object: without forwarding them the arrows are set but never paint.
+          {...(markerStart === undefined ? {} : { markerStart })}
+          {...(markerEnd === undefined ? {} : { markerEnd })}
+        />
+        {/* Ghost waypoint while a create drag is active: visible feedback
+            before the edge is even selected (selection lands on the click). */}
+        {gesture?.kind === "create" && gesture.moved && (
+          <circle
+            data-nodera-waypoint-ghost=""
+            cx={gesture.current.x}
+            cy={gesture.current.y}
+            r={5}
+            style={{
+              fill: "var(--ndr-edge-stroke-color-selected, #2563eb)",
+              stroke: "#fff",
+              strokeWidth: 2,
+            }}
+          />
+        )}
+        {/* Waypoint handles: only when selected and there is something to
+            grab. Rendered as HTML inside <foreignObject>: a plain div inside
+            an SVG <g> is never painted by the browser. */}
+        {selected &&
+          liveWaypoints.map((wp, index) => (
+            <foreignObject
+              key={`${id}-wp-${index}`}
+              x={wp.x - 8}
+              y={wp.y - 8}
+              width={16}
+              height={16}
+              style={{ overflow: "visible" }}
+            >
+              <div
+                data-nodera-waypoint-index={index}
+                data-nodera-waypoint-id={`${id}-wp-${index}`}
+                role="button"
+                aria-label={`Waypoint ${index + 1}: drag to move, double-click to remove, arrow keys to nudge, Delete to remove`}
+                tabIndex={0}
+                style={{
+                  width: "16px",
+                  height: "16px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "transparent",
+                  cursor: "grab",
+                }}
+                onPointerDown={(event) => onPointerDownHandle(event, index)}
+                onDoubleClick={(event) => onDoubleClickHandle(event, index)}
+                onKeyDown={(event) => onKeyDownHandle(event, index)}
+              >
+                <span
+                  style={
+                    gesture?.kind === "move" && gesture.index === index
+                      ? WAYPOINT_HANDLE_ACTIVE_STYLE
+                      : WAYPOINT_HANDLE_STYLE
+                  }
+                />
+              </div>
+            </foreignObject>
+          ))}
+      </g>
       {text && (
         <EdgeLabelRenderer>
           <div
@@ -509,89 +558,6 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
             {text}
           </div>
         </EdgeLabelRenderer>
-      )}
-      {/* Waypoint handles: only visible when the edge is selected and has waypoints */}
-      {/* Rendered as plain divs (not EdgeLabelRenderer) so unit tests without
-          ReactFlowProvider do not crash.  Positioning is flow-coordinate based
-          via the wrapper div. */}
-      {selected && currentWaypoints && currentWaypoints.length > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            pointerEvents: "none",
-            zIndex: 5,
-          }}
-        >
-          {currentWaypoints.map((wp, index) => {
-            const isActive = index === activeWaypointIndex;
-            const isActiveDragging = draggingRef.current && index === activeWaypointIndex;
-
-            return (
-              <div
-                key={`${id}-wp-${index}`}
-                data-nodera-waypoint-index={index}
-                data-nodera-waypoint-id={`${id}-wp-${index}`}
-                role="button"
-                aria-label={`Waypoint ${index + 1}: double-click to remove, drag to move, arrow keys to nudge`}
-                tabIndex={0}
-                style={{
-                  position: "absolute",
-                  left: `${wp.x}px`,
-                  top: `${wp.y}px`,
-                  transform: "translate(-50%, -50%)",
-                  ...WAYPOINT_HANDLE_STYLE,
-                  ...(isActiveDragging ? WAYPOINT_HANDLE_ACTIVE_STYLE : {}),
-                }}
-                onPointerDown={(e) => onPointerDownHandle(e, index)}
-                onPointerMove={onPointerMoveHandle}
-                onPointerUp={onPointerUpHandle}
-                onDoubleClick={onDoubleClickHandle}
-                // Keyboard: arrow keys nudge the waypoint.
-                onKeyDown={(e) => {
-                  if (!editor || !id) return;
-                  const step = e.shiftKey ? 10 : 1;
-                  if (!currentWaypoints) return;
-                    let newWps: { x: number; y: number }[] | undefined = [...currentWaypoints];
-
-                  if (e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "Delete" || e.key === "Backspace") {
-                    e.preventDefault();
-                  }
-
-                  if (e.key === "Delete" || e.key === "Backspace") {
-                    // Remove this waypoint.
-                    newWps.splice(index, 1);
-                    if (newWps.length === 0) newWps = undefined;
-                    updateEdgeWaypoints(editor, { edgeId: id, waypoints: newWps });
-                    return;
-                  }
-
-                  if (e.key === "Enter" || e.key === " ") {
-                    // Keep the waypoint (no change needed, just release drag).
-                    return;
-                  }
-
-                  if (e.key === "ArrowUp") {
-                    const wp = newWps[index]!; newWps[index] = { ...wp, y: wp.y - step };
-                  } else if (e.key === "ArrowDown") {
-                    const wp2 = newWps[index]!; newWps[index] = { ...wp2, y: wp2.y + step };
-                  } else if (e.key === "ArrowLeft") {
-                    const wp3 = newWps[index]!; newWps[index] = { ...wp3, x: wp3.x - step };
-                  } else if (e.key === "ArrowRight") {
-                    const wp4 = newWps[index]!; newWps[index] = { ...wp4, x: wp4.x + step };
-                  } else {
-                    return;
-                  }
-
-                  updateEdgeWaypoints(editor, { edgeId: id, waypoints: newWps });
-                }}
-              />
-            );
-          })}
-        </div>
       )}
     </>
   );

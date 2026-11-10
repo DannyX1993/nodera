@@ -4,6 +4,11 @@ import { Position } from "@xyflow/react";
 import type { CSSProperties } from "react";
 
 import { DefaultEdgeRenderer, defaultEdgeOptionsFromVisual } from "./default-edge-renderer.js";
+import { NoderaEditorProvider } from "../canvas/editor-context.js";
+import { EditorEngine } from "@nodera/application";
+import { addNode } from "@nodera/application";
+import { createEdge } from "@nodera/application";
+import { fireEvent } from "@testing-library/react";
 import { edgeStyleHints } from "./edge-options.js";
 import type { EdgeVisual } from "@nodera/edge-registry";
 
@@ -605,8 +610,154 @@ describe("DefaultEdgeRenderer with waypoints (T5, S2, S3, S7)", () => {
       />,
     );
 
-    const handle = container.querySelector("[data-nodera-waypoint-index]") as HTMLElement;
-    expect(handle.style.left).toBe("42px");
-    expect(handle.style.top).toBe("58px");
+    const foreign = container.querySelector("foreignObject")!;
+    expect(foreign.getAttribute("x")).toBe("34"); // 42 - half handle size
+    expect(foreign.getAttribute("y")).toBe("50"); // 58 - half handle size
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  DefaultEdgeRenderer waypoint gestures (browser-correct path)        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The waypoint gestures must run on the wrapper the pointer can actually
+ * reach: React Flow paints a 20px transparent interaction band ABOVE the
+ * visible edge path, so handlers attached to the path element itself never
+ * fire in a browser (they do fire in jsdom, where tests used to dispatch
+ * directly on the path — this suite dispatches like the browser does and
+ * asserts against a REAL editor engine).
+ */
+describe("DefaultEdgeRenderer waypoint gestures", () => {
+  function makeEditorWithEdge(): EditorEngine {
+    const editor = new EditorEngine({ graphId: "graph-gestures" });
+    editor.domain.nodes.register({
+      id: "example.node",
+      name: "example.node",
+      version: "1.0.0",
+      ports: [
+        { id: "in", name: "in", direction: "input" },
+        { id: "out", name: "out", direction: "output" },
+      ],
+      properties: [],
+    } as never);
+    expect(addNode(editor, { definitionId: "example.node", nodeId: "a" }).ok).toBe(true);
+    expect(addNode(editor, { definitionId: "example.node", nodeId: "b" }).ok).toBe(true);
+    const edge = createEdge(editor, {
+      edgeId: "e1",
+      source: { nodeId: "a", portId: "out" },
+      target: { nodeId: "b", portId: "in" },
+    });
+    expect(edge.ok).toBe(true);
+    return editor;
+  }
+
+  function renderGesturedEdge(editor: EditorEngine, waypoints?: { x: number; y: number }[]) {
+    return render(
+      <NoderaEditorProvider editor={editor}>
+        <DefaultEdgeRenderer
+          id="e1"
+          source="a"
+          target="b"
+          sourceX={0}
+          sourceY={0}
+          targetX={100}
+          targetY={100}
+          sourcePosition={Position.Bottom}
+          targetPosition={Position.Top}
+          data={waypoints === undefined ? {} : { waypoints }}
+          selected
+        />
+      </NoderaEditorProvider>,
+    );
+  }
+
+  const pathOf = (container: HTMLElement) =>
+    container.querySelector("path.react-flow__edge-path") as SVGPathElement;
+
+  it("committing drag-creation reaches the document through the use case", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderGesturedEdge(editor);
+
+    fireEvent.pointerDown(pathOf(container), { pointerId: 1, clientX: 50, clientY: 50 });
+    fireEvent.pointerMove(pathOf(container), { pointerId: 1, clientX: 70, clientY: 80 });
+    fireEvent.pointerUp(pathOf(container), { pointerId: 1, clientX: 70, clientY: 80 });
+
+    // The edge had NO waypoints before; the drag must have created one.
+    expect(editor.getEdge("e1")?.waypoints).toEqual([{ x: 70, y: 80 }]);
+  });
+
+  it("shows the ghost waypoint while the create drag is active and clears it after", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderGesturedEdge(editor);
+
+    fireEvent.pointerDown(pathOf(container), { pointerId: 1, clientX: 50, clientY: 50 });
+    fireEvent.pointerMove(pathOf(container), { pointerId: 1, clientX: 70, clientY: 80 });
+    expect(
+      container.querySelector("[data-nodera-waypoint-ghost]"),
+    ).not.toBeNull();
+
+    fireEvent.pointerUp(pathOf(container), { pointerId: 1, clientX: 70, clientY: 80 });
+    expect(
+      container.querySelector("[data-nodera-waypoint-ghost]"),
+    ).toBeNull();
+    expect(editor.getEdge("e1")?.waypoints).toEqual([{ x: 70, y: 80 }]);
+  });
+
+  it("a plain click on the path does not create a waypoint", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderGesturedEdge(editor);
+
+    fireEvent.pointerDown(pathOf(container), { pointerId: 1, clientX: 50, clientY: 50 });
+    fireEvent.pointerUp(pathOf(container), { pointerId: 1, clientX: 50, clientY: 50 });
+
+    expect(editor.getEdge("e1")?.waypoints).toBeUndefined();
+  });
+
+  it("double-clicking the path adds a waypoint at that point", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderGesturedEdge(editor);
+
+    fireEvent.doubleClick(pathOf(container), { clientX: 30, clientY: 40 });
+
+    expect(editor.getEdge("e1")?.waypoints).toEqual([{ x: 30, y: 40 }]);
+  });
+
+  it("double-clicking a handle removes THAT waypoint, not the last one", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderGesturedEdge(editor, [
+      { x: 10, y: 10 },
+      { x: 80, y: 80 },
+    ]);
+
+    const first = container.querySelector('[data-nodera-waypoint-index="0"]') as HTMLElement;
+    fireEvent.doubleClick(first);
+
+    expect(editor.getEdge("e1")?.waypoints).toEqual([{ x: 80, y: 80 }]);
+  });
+
+  it("dragging a handle moves that waypoint and commits once", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderGesturedEdge(editor, [{ x: 10, y: 10 }]);
+
+    const handle = container.querySelector('[data-nodera-waypoint-index="0"]') as HTMLElement;
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 44, clientY: 66 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 44, clientY: 66 });
+
+    expect(editor.getEdge("e1")?.waypoints).toEqual([{ x: 44, y: 66 }]);
+  });
+
+  it("Delete on a focused handle removes that waypoint", () => {
+    const editor = makeEditorWithEdge();
+    const { container } = renderGesturedEdge(editor, [
+      { x: 10, y: 10 },
+      { x: 80, y: 80 },
+    ]);
+
+    const second = container.querySelector('[data-nodera-waypoint-index="1"]') as HTMLElement;
+    fireEvent.keyDown(second, { key: "Delete" });
+
+    expect(editor.getEdge("e1")?.waypoints).toEqual([{ x: 10, y: 10 }]);
   });
 });
