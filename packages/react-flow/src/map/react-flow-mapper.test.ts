@@ -2,7 +2,7 @@ import type {
   EdgeChange,
   NodeChange,
 } from "@xyflow/react";
-import { Position } from "@xyflow/react";
+import { Position, MarkerType } from "@xyflow/react";
 import { createElement } from "react";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -463,7 +463,7 @@ describe("toReactFlowEdges", () => {
     expect(result[0]!.style).toEqual({ stroke: "red" });
   });
 
-  it("sets markerEnd from visual.arrowEnd", () => {
+  it("sets markerEnd from visual.arrowEnd as a renderable marker object", () => {
     const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
     const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
     const edge = makeEdge("e1", "n1", "p", "n2", "p", "edge-def");
@@ -475,10 +475,13 @@ describe("toReactFlowEdges", () => {
       }),
     );
 
-    expect(result[0]!.markerEnd).toBe("arrow");
+    // React Flow v12 only renders the `<defs><marker>` a marker reference
+    // points at when `markerEnd` is a marker object; a bare string becomes a
+    // `url(#…)` attribute with no definition behind it, so no arrow paints.
+    expect(result[0]!.markerEnd).toEqual({ type: MarkerType.ArrowClosed });
   });
 
-  it("sets markerStart from visual.arrowStart", () => {
+  it("colours the marker from the visual and mirrors it on markerStart", () => {
     const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
     const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
     const edge = makeEdge("e1", "n1", "p", "n2", "p", "edge-def");
@@ -486,11 +489,11 @@ describe("toReactFlowEdges", () => {
 
     const result = toReactFlowEdges(graph, () =>
       mockEdgeDefinition({
-        visual: { arrowStart: true },
+        visual: { arrowStart: true, color: "#ff0000" },
       }),
     );
 
-    expect(result[0]!.markerStart).toBe("arrow");
+    expect(result[0]!.markerStart).toEqual({ type: MarkerType.ArrowClosed, color: "#ff0000" });
   });
 
   it("sets edge label from edge instance", () => {

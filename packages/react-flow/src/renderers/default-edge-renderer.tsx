@@ -67,6 +67,8 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
   data,
   label,
   selected,
+  markerStart,
+  markerEnd,
 }) => {
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
@@ -88,6 +90,10 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
         path={path}
         style={selected ? SELECTED_EDGE_STYLE : edgeStyle(data)}
         className={selected ? "nodera-edge-selected" : undefined}
+        // The resolved marker references React Flow derived from the edge
+        // object: without forwarding them the arrows are set but never paint.
+        {...(markerStart === undefined ? {} : { markerStart })}
+        {...(markerEnd === undefined ? {} : { markerEnd })}
       />
       {text && (
         <EdgeLabelRenderer>
