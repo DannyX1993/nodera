@@ -179,10 +179,23 @@ export const toReactFlowEdges = (
 
     // Determine RF edge type from definition.renderer or geometry.
     // Precedence: definition.renderer > geometry-mapped type > default.
-    const type =
+    let type =
       definition?.renderer ??
       geometryToEdgeType(visual?.geometry) ??
       "nodera-default-edge";
+
+    // An edge carrying waypoints needs a renderer that routes through them:
+    // the built-in geometry types cannot draw intermediate points. When the
+    // resolved type is one of those built-ins, hand the edge to the Nodera
+    // default renderer instead. A host custom renderer keeps precedence —
+    // waypoint drawing is then its job.
+    if (
+      type !== "nodera-default-edge" &&
+      definition?.renderer === undefined &&
+      (edge.waypoints?.length ?? 0) > 0
+    ) {
+      type = "nodera-default-edge";
+    }
 
     // Build edge object.
     const rfEdge: ReactFlowEdge = {

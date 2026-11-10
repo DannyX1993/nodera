@@ -388,6 +388,43 @@ describe("toReactFlowEdges", () => {
     expect(result[0]!.type).toBe("straight");
   });
 
+  it("routes an edge carrying waypoints to the Nodera default renderer", () => {
+    const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
+    const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
+    const edge = makeEdge("e1", "n1", "p", "n2", "p", "edge-def");
+    edge.setWaypoints([{ x: 150, y: 50 }]);
+    const graph = buildGraph([node1, node2], [edge]);
+
+    const result = toReactFlowEdges(graph, () =>
+      mockEdgeDefinition({
+        visual: { geometry: "bezier" },
+      }),
+    );
+
+    // A built-in geometry type cannot draw intermediate points, so the mapper
+    // hands the edge to the renderer that implements waypoint routing.
+    expect(result[0]!.type).toBe("nodera-default-edge");
+    expect(result[0]!.data?.waypoints).toEqual([{ x: 150, y: 50 }]);
+  });
+
+  it("keeps a host custom renderer for an edge carrying waypoints", () => {
+    const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
+    const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
+    const edge = makeEdge("e1", "n1", "p", "n2", "p", "edge-def");
+    edge.setWaypoints([{ x: 150, y: 50 }]);
+    const graph = buildGraph([node1, node2], [edge]);
+
+    const result = toReactFlowEdges(graph, () =>
+      mockEdgeDefinition({
+        renderer: "vendor.custom-edge",
+        visual: { geometry: "bezier" },
+      }),
+    );
+
+    // A host renderer keeps precedence: waypoint drawing is its job.
+    expect(result[0]!.type).toBe("vendor.custom-edge");
+  });
+
   it("maps geometry bezier → default (BezierEdge type)", () => {
     const node1 = buildNode("n1", "d", [buildPortInstance("p", "output")]);
     const node2 = buildNode("n2", "d", [buildPortInstance("p", "input")]);
