@@ -67,6 +67,12 @@ export {
 } from "./renderers/default-edge-renderer.js";
 export { PortHandle } from "./renderers/port-renderer.js";
 export type { PortHandleProps } from "./renderers/port-renderer.js";
+export {
+  PORT_PLACEMENTS,
+  defaultPortPlacement,
+  resolvePortPlacement,
+} from "./renderers/port-placement.js";
+export type { PortAxis, PortPlacement } from "./renderers/port-placement.js";
 export { defaultEdgeOptionsFromVisual, type EdgeOptions } from "./renderers/edge-options.js";
 export type {
   NoderaNodeData,
@@ -79,7 +85,10 @@ export type {
 export {
   NoderaEditorProvider,
   NoderaEditorContext,
+  NoderaPortAxisProvider,
+  NoderaPortAxisContext,
   useNoderaEditor,
+  useNoderaPortAxis,
 } from "./canvas/editor-context.js";
 export { NoderaCanvasProvider, useNoderaCanvas } from "./canvas/nodera-canvas-provider.js";
 export {

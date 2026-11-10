@@ -7,6 +7,8 @@ import {
 } from "react";
 import type { EditorEngine } from "@nodera/application";
 
+import type { PortAxis } from "../renderers/port-placement.js";
+
 /**
  * Context that gives the default edge renderer access to the editor so it
  * can push waypoint updates through the application use case.
@@ -53,4 +55,29 @@ export const NoderaWaypointEditingProvider: FC<PropsWithChildren<{
 /** Read the waypoint editing gate from context inside the canvas tree. */
 export function useNoderaWaypointEditing(): boolean {
   return useContext(NoderaWaypointEditingContext);
+}
+
+/**
+ * Context carrying the axis the active layout grows along.
+ *
+ * The canvas knows it (it is the `layoutDirection` the host declares, the same
+ * value the insertion placeholders use); port handles need it too, because the
+ * default side of a port follows the axis: an input faces left in a horizontal
+ * graph and top in a vertical one. Defaults to `horizontal`, so a handle
+ * rendered outside the canvas keeps the side Nodera has always drawn.
+ */
+export const NoderaPortAxisContext = createContext<PortAxis>("horizontal");
+
+/** Provider that exposes the layout axis to the canvas tree. */
+export const NoderaPortAxisProvider: FC<PropsWithChildren<{
+  readonly axis: PortAxis;
+}>> = ({ axis, children }) => (
+  <NoderaPortAxisContext.Provider value={axis}>
+    {children}
+  </NoderaPortAxisContext.Provider>
+);
+
+/** Read the layout axis from context inside the canvas tree. */
+export function useNoderaPortAxis(): PortAxis {
+  return useContext(NoderaPortAxisContext);
 }

@@ -22,7 +22,11 @@
  */
 
 import type { EdgeDefinition } from "@nodera/edge-registry";
-import type { PortDeclaration, PortDirection } from "@nodera/graph-model";
+import type {
+  PortDeclaration,
+  PortDirection,
+  PortPlacement,
+} from "@nodera/graph-model";
 import type { NodeDefinition } from "@nodera/node-registry";
 import type { PropertyDefinition } from "@nodera/property-system";
 
@@ -51,6 +55,13 @@ export interface PortView {
   readonly required: boolean;
   /** Renderer id the presentation layer resolves for this port. */
   readonly renderer?: string;
+  /**
+   * Side of the node the port is drawn on, when the definition pins one.
+   *
+   * Absent means the presentation layer derives it from the direction and the
+   * layout axis, so a host reads back exactly what it declared.
+   */
+  readonly placement?: PortPlacement;
 }
 
 /** One node definition, in the §9 vocabulary a host authored. */
@@ -118,6 +129,9 @@ export function toPortView(port: PortDeclaration): PortView {
     ...(port.maxConnections === undefined ? {} : { maxConnections: port.maxConnections }),
     required: (port.minConnections ?? 0) >= 1,
     ...(port.visual?.renderer === undefined ? {} : { renderer: port.visual.renderer }),
+    ...(port.visual?.placement === undefined
+      ? {}
+      : { placement: port.visual.placement }),
   };
 }
 

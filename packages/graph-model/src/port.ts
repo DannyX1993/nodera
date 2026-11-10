@@ -9,6 +9,16 @@
 /** Direction a port faces. */
 export type PortDirection = "input" | "output" | "bidirectional";
 
+/**
+ * Side of a node a port is drawn on.
+ *
+ * A pure presentation vocabulary: `PortDirection` says what the port is for,
+ * this says where it sits. They are independent on purpose — an input may face
+ * the top of the node in a vertical graph and the left in a horizontal one —
+ * so a renderer never has to infer one from the other.
+ */
+export type PortPlacement = "left" | "right" | "top" | "bottom";
+
 /** How many connections a port accepts. */
 export type PortMultiplicity = "single" | "multiple";
 
@@ -19,6 +29,12 @@ export type PortMultiplicity = "single" | "multiple";
 export interface PortVisual {
   /** Renderer or display hint understood by the presentation layer. */
   readonly renderer?: string;
+  /**
+   * Side of the node the port is drawn on. `undefined` leaves the side to the
+   * presentation layer, which derives it from the port direction and the
+   * layout axis.
+   */
+  readonly placement?: PortPlacement;
   /** Additional presentation metadata. */
   readonly metadata?: Readonly<Record<string, unknown>>;
 }

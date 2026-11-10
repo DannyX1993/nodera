@@ -80,6 +80,51 @@ describe("toPortDeclarations", () => {
     ]);
   });
 
+  it("declares the side a port is drawn on as port visual metadata", () => {
+    const result = toPortDeclarations({
+      inputs: [{ id: "in", placement: "top" }],
+      outputs: [{ id: "out", placement: "bottom" }],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual([
+      { id: "in", direction: "input", visual: { placement: "top" } },
+      { id: "out", direction: "output", visual: { placement: "bottom" } },
+    ]);
+  });
+
+  it("combines a declared renderer and placement in one visual entry", () => {
+    const result = toPortDeclarations({
+      outputs: [{ id: "out", renderer: "demo.port", placement: "left" }],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0]).toEqual({
+      id: "out",
+      direction: "output",
+      visual: { renderer: "demo.port", placement: "left" },
+    });
+  });
+
+  it("rejects a placement outside the sides a port can occupy", () => {
+    const result = toPortDeclarations({
+      inputs: [{ id: "in", placement: "diagonal" as never }],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      severity: "error",
+      path: ["ports", "inputs", "in"],
+    });
+    expect(result.error[0]?.message).toContain("placement");
+    expect(result.error[0]?.message).toContain("top");
+    expect(result.error[0]?.message).toContain('received the string "diagonal"');
+  });
+
   it("keeps a declared null max connection as unbounded", () => {
     const result = toPortDeclarations({
       outputs: [{ id: "unbounded", multiplicity: "multiple", maxConnections: null }],

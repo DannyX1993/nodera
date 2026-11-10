@@ -53,7 +53,7 @@ import type {
 } from "@nodera/ui-core";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
 import { useEdgeInsertActions, useNoderaUi } from "@nodera/ui-react";
-import { NoderaWaypointEditingProvider } from "./editor-context.js";
+import { NoderaWaypointEditingProvider, NoderaPortAxisProvider } from "./editor-context.js";
 import {
   moveNode,
   createEdge,
@@ -91,6 +91,11 @@ import type {
   EdgeRendererRegistry,
 } from "../registries/renderer-registries.js";
 import { DefaultEdgeRenderer } from "../renderers/default-edge-renderer.js";
+import { positionForPlacement } from "../renderers/port-renderer.js";
+import {
+  defaultPortPlacement,
+  type PortPlacement,
+} from "../renderers/port-placement.js";
 import type {
   NoderaNodeData,
   NoderaNodeRendererProps,
@@ -1021,18 +1026,23 @@ export interface CanvasConnection {
  */
 function inertPort(props: NoderaPortRendererProps, hidden: boolean): ReactNode {
   const isInput = props.direction === "input";
+  // The side follows the same rule a painted handle does. Without it, hiding or
+  // freezing the ports moved every edge anchor back to the left/right border of
+  // a vertical graph.
+  const placement: PortPlacement =
+    props.placement ?? defaultPortPlacement(props.direction, "horizontal");
   return (
     <Handle
       id={props.portId}
       type={isInput ? "target" : "source"}
-      position={isInput ? Position.Left : Position.Right}
+      position={positionForPlacement(placement)}
       isConnectable={false}
       aria-label={props.name ?? props.portId}
       aria-hidden={hidden}
       data-nodera-port-id={props.portId}
       data-nodera-port-direction={props.direction ?? "bidirectional"}
       className="nodera-port-handle"
-      style={hidden ? hiddenPortHandleStyle(isInput) : INERT_PORT_HANDLE_STYLE}
+      style={hidden ? hiddenPortHandleStyle(placement) : INERT_PORT_HANDLE_STYLE}
     />
   );
 }
@@ -1071,7 +1081,7 @@ const INERT_PORT_HANDLE_STYLE: CSSProperties = {
  * port dot, glaring without one. With the centre exactly on the border the edge
  * reaches the node whether the ports are painted or not.
  */
-function hiddenPortHandleStyle(isInput: boolean): CSSProperties {
+function hiddenPortHandleStyle(placement: PortPlacement): CSSProperties {
   return {
     width: 0,
     height: 0,
@@ -1079,9 +1089,16 @@ function hiddenPortHandleStyle(isInput: boolean): CSSProperties {
     borderStyle: "none",
     opacity: 0,
     pointerEvents: "none",
-    top: "50%",
-    transform: "translateY(-50%)",
-    ...(isInput ? { left: 0, right: "auto" } : { right: 0, left: "auto" }),
+    // The handle is pinned to the border of the side it occupies, and the
+    // transform pulls its own box back onto that border so the edge centre sits
+    // exactly on the node outline whichever side it is on.
+    ...(placement === "left"
+      ? { left: 0, right: "auto", top: "50%", bottom: "auto", transform: "translateY(-50%)" }
+      : placement === "right"
+        ? { right: 0, left: "auto", top: "50%", bottom: "auto", transform: "translateY(-50%)" }
+        : placement === "top"
+          ? { top: 0, bottom: "auto", left: "50%", right: "auto", transform: "translateX(-50%)" }
+          : { bottom: 0, top: "auto", left: "50%", right: "auto", transform: "translateX(-50%)" }),
   };
 }
 
@@ -1706,6 +1723,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       : className;
 
   return (
+    <NoderaPortAxisProvider axis={layoutDirection}>
     <NoderaWaypointEditingProvider enabled={edgeWaypointEditing}>
       <NoderaEditorProvider editor={editor}>
         <div
@@ -1771,6 +1789,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         </ReactFlow>
       </div>
     </NoderaEditorProvider>
-  </NoderaWaypointEditingProvider>
+    </NoderaWaypointEditingProvider>
+    </NoderaPortAxisProvider>
   );
 };

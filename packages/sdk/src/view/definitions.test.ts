@@ -94,6 +94,22 @@ describe("toPortView", () => {
     expect("visual" in view).toBe(false);
   });
 
+  it("maps the declared port placement alongside the renderer", () => {
+    const view = toPortView({
+      id: "log",
+      direction: "output",
+      visual: { renderer: "vendor.port", placement: "left" },
+    });
+
+    expect(view).toMatchObject({
+      id: "log",
+      direction: "output",
+      renderer: "vendor.port",
+      placement: "left",
+    });
+    expect("visual" in view).toBe(false);
+  });
+
   it("omits every optional key instead of setting it to undefined", () => {
     const view = toPortView({ id: "out", direction: "output" });
 

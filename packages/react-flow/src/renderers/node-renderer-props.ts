@@ -23,9 +23,11 @@ export interface NoderaNodePort {
   readonly name?: string;
   readonly direction: "input" | "output" | "bidirectional";
   readonly dataType?: string;
-  /** Presentation hints declared by the port (renderer id + metadata). */
+  /** Presentation hints declared by the port (renderer id, side + metadata). */
   readonly visual?: {
     readonly renderer?: string;
+    /** Side the port is drawn on; absent leaves it to the canvas default. */
+    readonly placement?: "left" | "right" | "top" | "bottom";
     readonly metadata?: Readonly<Record<string, unknown>>;
   };
 }
@@ -60,5 +62,14 @@ export interface NoderaPortRendererProps {
   readonly portId: string;
   readonly direction: NoderaNodePort["direction"];
   readonly name?: string;
+  /**
+   * Side of the node the port is drawn on, already resolved.
+   *
+   * The canvas fills it with the declared `visual.placement`, or with the side
+   * its default rule derives from the direction and the layout axis. A renderer
+   * can therefore draw the port where the graph needs it without knowing the
+   * rule.
+   */
+  readonly placement?: "left" | "right" | "top" | "bottom";
   readonly visual?: NoderaNodePort["visual"];
 }

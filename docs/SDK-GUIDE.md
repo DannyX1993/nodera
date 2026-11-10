@@ -314,6 +314,45 @@ and both halves and restores the original edge with its id and ports.
 The whole feature — the two placement modes, the layer split, the defaults, the
 `Arrange` command and the example — is on one page: `docs/GRAPH-LAYOUT.md`.
 
+### Where a port is drawn
+
+A port carries two independent facts. Its **direction** (`inputs` / `outputs` /
+`bidirectional` in the authoring API) says what the port is for and becomes the
+React Flow handle type. Its **placement** (`placement` on a port declaration)
+says which side of the node it is drawn on: `"left"`, `"right"`, `"top"` or
+`"bottom"`.
+
+`placement` is presentation metadata (`PortVisual.placement`) and stays out of
+the portable document, exactly like `renderer`. Omitted, the canvas derives it
+from the direction and the axis `graph.layout.direction` declares:
+
+| layout axis | input | output / bidirectional |
+| --- | --- | --- |
+| `horizontal` | left | right |
+| `vertical` | top | bottom |
+
+A declared side always wins, so a node can pin one port regardless of the
+layout:
+
+```ts
+const ACME_NODE: NodeDefinitionInput = {
+  // ...
+  ports: {
+    inputs: [{ id: "in", name: "In" }],
+    outputs: [
+      { id: "response", placement: "left" }, // pinned: leaf the node sideways
+      { id: "log" }, // derived: right on a horizontal graph, bottom on a vertical one
+    ],
+  },
+};
+```
+
+The same effective value reaches a host port renderer as
+`NoderaPortRendererProps.placement`, so a registered component draws the port
+where the built-in `PortHandle` would without repeating the rule. An unknown
+value is `sdk.invalid-input` at path `ports.<group>.<id>` and the definition is
+not registered.
+
 ### Arranging an existing graph
 
 `Arrange` is a command, never a side effect. Nothing arranges on an add, on an

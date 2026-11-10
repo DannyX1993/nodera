@@ -1,5 +1,10 @@
 import { Handle, Position } from "@xyflow/react";
 
+import { useNoderaPortAxis } from "../canvas/editor-context.js";
+import {
+  defaultPortPlacement,
+  type PortPlacement,
+} from "./port-placement.js";
 import type { NoderaPortRendererProps } from "./node-renderer-props.js";
 
 /* ------------------------------------------------------------------ */
@@ -35,28 +40,54 @@ const PORT_HANDLE_STYLE = {
   borderRadius: "var(--ndr-handle-radius, 50%)",
 } as const;
 
+/** React Flow position for each side a port may occupy. */
+const POSITION_BY_PLACEMENT: Readonly<Record<PortPlacement, Position>> = {
+  left: Position.Left,
+  right: Position.Right,
+  top: Position.Top,
+  bottom: Position.Bottom,
+};
+
+/**
+ * React Flow position of a port that occupies `placement`.
+ *
+ * Exported because the canvas also draws inert and hidden handles under its
+ * connection and ports policies: every handle of one port must land on the same
+ * side, or the edge anchors rake across the node when the policy changes.
+ */
+export function positionForPlacement(placement: PortPlacement): Position {
+  return POSITION_BY_PLACEMENT[placement];
+}
+
 /**
  * Renders a React Flow {@link Handle} wired to a single port.
  *
- * Position mapping (documented for Canvas consumers):
- *   - input   → left  (target handle; Canvas runs with ConnectionMode=loose)
- *   - output  → right (source handle; Canvas runs with ConnectionMode=loose)
- *   - bidirectional → right (treated as source)
+ * Placement and handle type are independent:
+ *   - the handle type comes from the port direction — `input` → target handle,
+ *     `output`/`bidirectional` → source handle;
+ *   - the side comes from `placement` when given, otherwise from the default
+ *     rule for the current layout axis and the direction (input faces left on a
+ *     horizontal graph and top on a vertical one; output and bidirectional face
+ *     right and bottom respectively).
  *
- * The canvas layer uses `ConnectionMode="loose"` which allows
- * connections to any handle regardless of source/target semantics,
- * so direction only drives accessible labelling and visual placement.
+ * The canvas layer uses `ConnectionMode="loose"` which allows connections to
+ * any handle regardless of source/target semantics, so the direction drives the
+ * handle type and the accessible labelling, never the geometry alone.
  */
 export function PortHandle({
   portId,
   direction = "bidirectional",
   name,
+  placement,
 }: PortHandleProps) {
+  const axis = useNoderaPortAxis();
+
   const type: "target" | "source" =
     direction === "input" ? "target" : "source";
 
-  const position: Position =
-    direction === "input" ? Position.Left : Position.Right;
+  const position: Position = positionForPlacement(
+    placement ?? defaultPortPlacement(direction, axis),
+  );
 
   // Prefer the semantic name for accessibility; fall back to the id.
   const ariaLabel = name ?? portId;

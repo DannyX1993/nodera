@@ -1,7 +1,13 @@
-import { type FC, type ComponentType, type ReactNode, useMemo } from "react";
+import { type FC, type ComponentType, type ReactNode, useEffect, useMemo } from "react";
+
+import { useUpdateNodeInternals } from "@xyflow/react";
 
 import { PortHandle } from "../renderers/port-renderer.js";
 import { DefaultNodeRenderer } from "../renderers/default-node-renderer.js";
+import {
+  resolvePortPlacement,
+  type PortAxis,
+} from "../renderers/port-placement.js";
 import type {
   NoderaNodeData,
   NoderaNodePort,
@@ -14,6 +20,7 @@ import {
   DEFAULT_PORT_RENDERER_ID,
   resolvePortRenderer,
 } from "../registries/renderer-registries.js";
+import { useNoderaPortAxis } from "./editor-context.js";
 
 /* ------------------------------------------------------------------ */
 /*  Extended data type                                                 */
@@ -34,11 +41,20 @@ export interface NoderaNodeDataWithRenderer extends NoderaNodeData {
 /*  Port rendering                                                     */
 /* ------------------------------------------------------------------ */
 
-/** Builds the props a port renderer receives from a port data entry. */
-function portRendererProps(port: NoderaNodePort): NoderaPortRendererProps {
+/**
+ * Builds the props a port renderer receives from a port data entry.
+ *
+ * `placement` is resolved here, once, so every port renderer — the built-in
+ * handle and a host component alike — draws the port on the same side.
+ */
+function portRendererProps(
+  port: NoderaNodePort,
+  axis: PortAxis,
+): NoderaPortRendererProps {
   return {
     portId: port.id,
     direction: port.direction,
+    placement: resolvePortPlacement(port, axis),
     ...(port.name !== undefined ? { name: port.name } : {}),
     ...(port.visual !== undefined ? { visual: port.visual } : {}),
   };
@@ -76,12 +92,50 @@ function resolvePortComponent(
  */
 function renderPorts(
   ports: NoderaNodeData["ports"],
+  axis: PortAxis,
   registry?: PortRendererRegistry,
 ): ReactNode[] {
   return ports.map((port) => {
     const PortComponent = resolvePortComponent(port, registry);
-    return <PortComponent key={port.id} {...portRendererProps(port)} />;
+    return <PortComponent key={port.id} {...portRendererProps(port, axis)} />;
   });
+}
+
+/**
+ * Props the node-type wrapper accepts: the renderer contract plus the node id
+ * React Flow supplies, which the wrapper needs to report handle movement.
+ */
+export type NoderaNodeComponentProps = NoderaNodeRendererProps & {
+  readonly id?: string;
+};
+
+/**
+ * Tells React Flow to re-measure the node's handles whenever their side can have
+ * changed.
+ *
+ * React Flow caches every node's handle bounds and draws each edge from that
+ * cache. Moving a handle — which is exactly what a layout axis or a declared
+ * `placement` does — without this call leaves the edges anchored to the side the
+ * handle used to occupy, even though the handle itself has moved. The signature
+ * covers both inputs, so the call fires once per actual side change and never on
+ * an unrelated re-render.
+ */
+function usePortInternalsReporter(
+  nodeId: string | undefined,
+  ports: NoderaNodeData["ports"],
+  axis: PortAxis,
+): void {
+  const updateNodeInternals = useUpdateNodeInternals();
+  const portSides = ports
+    .map((port) => `${port.id}:${resolvePortPlacement(port, axis)}`)
+    .join("|");
+
+  useEffect(() => {
+    if (nodeId === undefined) {
+      return;
+    }
+    updateNodeInternals(nodeId);
+  }, [updateNodeInternals, nodeId, portSides]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -108,11 +162,12 @@ function renderPorts(
 export function createNodeType(
   registry?: NodeRendererRegistry,
   portRendererRegistry?: PortRendererRegistry,
-): ComponentType<NoderaNodeRendererProps> {
+): ComponentType<NoderaNodeComponentProps> {
   return function NoderaNodeRendererComponent({
+    id,
     data,
     selected,
-  }: NoderaNodeRendererProps): ReactNode {
+  }: NoderaNodeComponentProps): ReactNode {
     // Determine the renderer id from extended data.
     const rendererId = (data as NoderaNodeDataWithRenderer).rendererId;
 
@@ -131,8 +186,11 @@ export function createNodeType(
 
     // Port handles are rendered by the wrapper for ALL renderers,
     // ensuring hosts can always see ports even when supplying
-    // custom renderers that don't include them.
-    const portHandles = renderPorts(data.ports, portRendererRegistry);
+    // custom renderers that don't include them. The side follows the
+    // layout axis the canvas publishes.
+    const axis = useNoderaPortAxis();
+    usePortInternalsReporter(id, data.ports, axis);
+    const portHandles = renderPorts(data.ports, axis, portRendererRegistry);
 
     return (
       <>
@@ -155,11 +213,11 @@ export function createNodeType(
  * applications that do not use the factory pattern.
  */
 export const NoderaNodeRenderer: FC<
-  NoderaNodeRendererProps & {
+  NoderaNodeComponentProps & {
     nodeRendererRegistry?: NodeRendererRegistry;
     portRendererRegistry?: PortRendererRegistry;
   }
-> = ({ data, selected, nodeRendererRegistry, portRendererRegistry }) => {
+> = ({ id, data, selected, nodeRendererRegistry, portRendererRegistry }) => {
   // Determine the renderer id from extended data.
   const rendererId = (data as NoderaNodeDataWithRenderer).rendererId;
 
@@ -175,7 +233,9 @@ export const NoderaNodeRenderer: FC<
     RendererComponent = DefaultNodeRenderer;
   }
 
-  const portHandles = renderPorts(data.ports, portRendererRegistry);
+  const axis = useNoderaPortAxis();
+  usePortInternalsReporter(id, data.ports, axis);
+  const portHandles = renderPorts(data.ports, axis, portRendererRegistry);
 
   return (
     <>

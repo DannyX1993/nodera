@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type { FC } from "react";
 
 import { PortHandle } from "./port-renderer.js";
+import { NoderaPortAxisProvider } from "../canvas/editor-context.js";
 
 /* ------------------------------------------------------------------ */
 /*  Test harness: minimal provider chain for Handle                    */
@@ -80,6 +81,45 @@ describe("PortHandle", () => {
     const { container } = render(<PortHandle portId="attr-test" />, { wrapper: TestWrapper });
     const div = container.querySelector("[data-nodera-port-id='attr-test']");
     expect(div).not.toBeNull();
+  });
+
+  it("renders a declared placement instead of the direction default", () => {
+    const { container } = render(
+      <PortHandle portId="pinned" direction="input" placement="bottom" />,
+      { wrapper: TestWrapper },
+    );
+
+    expect(container.querySelector("[data-handlepos='bottom']")).not.toBeNull();
+    expect(container.querySelector("[data-handlepos='left']")).toBeNull();
+  });
+
+  it("derives the default side from the layout axis and the port direction", () => {
+    const vertical = ({ children }: { children: ReactNode }) => (
+      <TestWrapper>
+        <NoderaPortAxisProvider axis="vertical">{children}</NoderaPortAxisProvider>
+      </TestWrapper>
+    );
+
+    const input = render(<PortHandle portId="in" direction="input" />, {
+      wrapper: vertical,
+    });
+    expect(input.container.querySelector("[data-handlepos='top']")).not.toBeNull();
+    input.unmount();
+
+    const output = render(<PortHandle portId="out" direction="output" />, {
+      wrapper: vertical,
+    });
+    expect(output.container.querySelector("[data-handlepos='bottom']")).not.toBeNull();
+  });
+
+  it("keeps direction as the handle type whatever the placement is", () => {
+    const { container } = render(
+      <PortHandle portId="in-top" direction="input" placement="top" />,
+      { wrapper: TestWrapper },
+    );
+
+    expect(container.querySelector("[data-handlepos='top']")).not.toBeNull();
+    expect(container.querySelector("[data-nodera-port-direction='input']")).not.toBeNull();
   });
 
   /* ---------------------------------------------------------------- */

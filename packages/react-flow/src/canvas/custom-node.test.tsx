@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import type { FC, ComponentType } from "react";
@@ -6,6 +6,20 @@ import type { FC, ComponentType } from "react";
 import { NoderaNodeRenderer, createNodeType, useNodeTypes } from "./custom-node.js";
 import { NodeRendererRegistry, PortRendererRegistry } from "../registries/renderer-registries.js";
 import type { NoderaPortRendererProps } from "../renderers/node-renderer-props.js";
+import { NoderaPortAxisProvider } from "./editor-context.js";
+
+/**
+ * React Flow caches each node's handle bounds and only re-measures when the
+ * node tells it to. Moving a handle without that call leaves every edge
+ * anchored to the side the handle used to occupy, so the wrapper has to report
+ * its ports whenever their side can have changed.
+ */
+const updateNodeInternals = vi.hoisted(() => vi.fn());
+
+vi.mock("@xyflow/react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@xyflow/react")>()),
+  useUpdateNodeInternals: () => updateNodeInternals,
+}));
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -35,6 +49,45 @@ function mockNodeData(
 function CustomMarker(): import("react").ReactNode {
   return <span data-testid="custom-marker">CUSTOM</span>;
 }
+
+describe("port handle measurement", () => {
+  const data = {
+    definitionId: "test-def",
+    label: "Measured",
+    ports: [
+      { id: "in", direction: "input" as const },
+      { id: "out", direction: "output" as const },
+    ],
+    properties: {},
+  };
+
+  it("re-measures the node when the layout axis moves its ports", () => {
+    updateNodeInternals.mockClear();
+    const NodeType = createNodeType();
+
+    const { rerender } = render(
+      <ReactFlowProvider>
+        <NoderaPortAxisProvider axis="horizontal">
+          <NodeType id="n1" data={data as any} selected={false} />
+        </NoderaPortAxisProvider>
+      </ReactFlowProvider>,
+    );
+
+    expect(updateNodeInternals).toHaveBeenCalledWith("n1");
+    const onMount = updateNodeInternals.mock.calls.length;
+
+    rerender(
+      <ReactFlowProvider>
+        <NoderaPortAxisProvider axis="vertical">
+          <NodeType id="n1" data={data as any} selected={false} />
+        </NoderaPortAxisProvider>
+      </ReactFlowProvider>,
+    );
+
+    expect(updateNodeInternals.mock.calls.length).toBeGreaterThan(onMount);
+    expect(updateNodeInternals).toHaveBeenLastCalledWith("n1");
+  });
+});
 
 /* ------------------------------------------------------------------ */
 /*  NoderaNodeRenderer tests                                           */
@@ -174,6 +227,7 @@ function PortMarker({
   direction,
   name,
   visual,
+  placement,
 }: NoderaPortRendererProps) {
   return (
     <span
@@ -182,6 +236,7 @@ function PortMarker({
       data-port-direction={direction}
       data-port-name={name ?? ""}
       data-port-renderer={visual?.renderer ?? ""}
+      data-port-placement={placement ?? ""}
       data-port-metadata={JSON.stringify(visual?.metadata ?? null)}
     />
   );
@@ -229,6 +284,44 @@ describe("custom port renderers", () => {
     expect(marker.getAttribute("data-port-name")).toBe("Custom");
     expect(marker.getAttribute("data-port-renderer")).toBe("acme.port");
     expect(marker.getAttribute("data-port-metadata")).toBe('{"shape":"diamond"}');
+  });
+
+  it("hands every port renderer the resolved side, declared or derived from the axis", () => {
+    const portRegistry = new PortRendererRegistry();
+    portRegistry.register("acme.port", PortMarker as ComponentType<NoderaPortRendererProps>);
+
+    const NodeType = createNodeType(undefined, portRegistry);
+    const data = {
+      definitionId: "test-def",
+      label: "Sides",
+      ports: [
+        {
+          id: "p-pinned",
+          direction: "input" as const,
+          visual: { renderer: "acme.port", placement: "right" },
+        },
+        { id: "p-in", direction: "input" as const, visual: { renderer: "acme.port" } },
+        { id: "p-out", direction: "output" as const, visual: { renderer: "acme.port" } },
+      ],
+      properties: {},
+    };
+
+    const { container } = render(
+      <ReactFlowProvider>
+        <NoderaPortAxisProvider axis="vertical">
+          <NodeType data={data as any} selected={false} />
+        </NoderaPortAxisProvider>
+      </ReactFlowProvider>,
+    );
+
+    const side = (portId: string): string | null =>
+      container
+        .querySelector(`[data-port-id='${portId}']`)
+        ?.getAttribute("data-port-placement") ?? null;
+
+    expect(side("p-pinned")).toBe("right");
+    expect(side("p-in")).toBe("top");
+    expect(side("p-out")).toBe("bottom");
   });
 
   it("falls back to PortHandle for an unregistered id and for a port without visual", () => {

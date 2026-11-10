@@ -87,6 +87,63 @@ describe("GraphCanvas", () => {
     cleanup();
   });
 
+  it("keeps the hidden and inert handles on the same side as a painted one", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 10, y: 20 } });
+
+    const hidden = renderCanvas(engine, {
+      layoutDirection: "vertical",
+      portsPolicy: "hidden",
+    });
+    expect(hidden.container.querySelector("[data-handlepos='top']")).not.toBeNull();
+    expect(hidden.container.querySelector("[data-handlepos='bottom']")).not.toBeNull();
+    expect(hidden.container.querySelector("[data-handlepos='left']")).toBeNull();
+    expect(hidden.container.querySelector("[data-handlepos='right']")).toBeNull();
+    cleanup();
+
+    const inert = renderCanvas(engine, {
+      layoutDirection: "vertical",
+      connectionsPolicy: "fixed",
+    });
+    expect(inert.container.querySelector("[data-handlepos='top']")).not.toBeNull();
+    expect(inert.container.querySelector("[data-handlepos='bottom']")).not.toBeNull();
+    expect(inert.container.querySelector("[data-handlepos='left']")).toBeNull();
+    cleanup();
+  });
+
+  it("anchors a hidden handle on the border of the side it occupies", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 10, y: 20 } });
+
+    const { container } = renderCanvas(engine, {
+      layoutDirection: "vertical",
+      portsPolicy: "hidden",
+    });
+
+    const top = container.querySelector("[data-handlepos='top']") as HTMLElement;
+    expect(top.style.top).toBe("0px");
+    expect(top.style.bottom).toBe("auto");
+    expect(top.style.getPropertyValue("transform")).toBe("translateX(-50%)");
+    cleanup();
+  });
+
+  it("draws the port handles on the axis the declared layout grows along", () => {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 10, y: 20 } });
+
+    const horizontal = renderCanvas(engine);
+    expect(horizontal.container.querySelector("[data-handlepos='left']")).not.toBeNull();
+    expect(horizontal.container.querySelector("[data-handlepos='right']")).not.toBeNull();
+    expect(horizontal.container.querySelector("[data-handlepos='top']")).toBeNull();
+    cleanup();
+
+    const vertical = renderCanvas(engine, { layoutDirection: "vertical" });
+    expect(vertical.container.querySelector("[data-handlepos='top']")).not.toBeNull();
+    expect(vertical.container.querySelector("[data-handlepos='bottom']")).not.toBeNull();
+    expect(vertical.container.querySelector("[data-handlepos='left']")).toBeNull();
+    cleanup();
+  });
+
   it("reflects the requested color mode on its container", () => {
     const engine = makeEngine();
     const { container } = renderCanvas(engine, { colorMode: "dark" });

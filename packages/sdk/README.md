@@ -196,6 +196,13 @@ assertValid(builder.registerNode(HTTP_REQUEST));
 `bidirectional`), `properties?`, `connectionPolicy?`, `visual?`,
 `validationRuleIds?`, `metadata?` and `renderer?`.
 
+A port also accepts `placement` (`"left" | "right" | "top" | "bottom"`), the
+side of the node it is drawn on. It is presentation metadata, so it is stored in
+`PortVisual`, never in the portable document, and the SDK reads it back as
+`PortView.placement`. Omitted, the canvas derives the side from the port
+direction and `graph.layout.direction` (see § "Where a port is drawn" in
+`docs/SDK-GUIDE.md`).
+
 Two deliberate deviations from `docs/FASE6-DEFINITION.md`:
 
 - **`type` must be globally qualified** (`vendor.feature-name`, at least one
@@ -219,7 +226,7 @@ author writes and what the same host reads back are the same names.
 | --- | --- | --- |
 | node definition | `type`, `label` | `NodeDefinitionView.type`, `.label` |
 | edge definition | `type`, `label` | `EdgeDefinitionView.type`, `.label` |
-| port | `id`, `dataType`, `required` | `PortView.id`, `.dataType`, `.required` |
+| port | `id`, `dataType`, `required`, `placement` | `PortView.id`, `.dataType`, `.required`, `.placement` |
 | node instance | `type`, `position`, `properties` | `NodeInstanceView` — same names |
 | edge instance | `type`, `source`, `sourcePort`, `target`, `targetPort` | `EdgeInstanceView` — same names, flat |
 | core shape (`Node`, `Edge`, `NodeDefinition`, `EdgeDefinition`) | — | only through `builder.editor`, the documented escape hatch |

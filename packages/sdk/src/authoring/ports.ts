@@ -12,6 +12,7 @@ import type {
   PortDeclaration,
   PortDirection,
   PortMultiplicity,
+  PortPlacement,
 } from "@nodera/graph-model";
 import {
   isPlainObject,
@@ -43,6 +44,14 @@ export interface PortInput {
   readonly customConditionId?: string;
   /** Renderer id the presentation layer resolves for this port. */
   readonly renderer?: string;
+  /**
+   * Side of the node the port is drawn on.
+   *
+   * Omitted, the presentation layer derives it from the port direction and the
+   * layout axis. Set it to pin a port regardless of the layout, e.g. an output
+   * that must always leave to the right.
+   */
+  readonly placement?: PortPlacement;
   /** Additional declaration metadata. */
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
@@ -63,7 +72,31 @@ const GROUPS: readonly (readonly [keyof PortGroupInput, PortDirection])[] = [
 /** A port id is a short local identifier, not a qualified one. */
 const PORT_ID_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/;
 
+/** Every side a port may be drawn on, in the order diagnostics list them. */
+const PORT_PLACEMENTS: readonly PortPlacement[] = ["left", "right", "top", "bottom"];
+
+function isPortPlacement(value: unknown): value is PortPlacement {
+  return PORT_PLACEMENTS.some((placement) => placement === value);
+}
+
+/**
+ * Visual hints of a port, present only when the author declared any.
+ *
+ * Both hints share one `visual` entry, so declaring one must never drop the
+ * other.
+ */
+function toVisual(port: PortInput): PortDeclaration["visual"] {
+  if (port.renderer === undefined && port.placement === undefined) {
+    return undefined;
+  }
+  return {
+    ...(port.renderer === undefined ? {} : { renderer: port.renderer }),
+    ...(port.placement === undefined ? {} : { placement: port.placement }),
+  };
+}
+
 function toDeclaration(port: PortInput, direction: PortDirection): PortDeclaration {
+  const visual = toVisual(port);
   return {
     id: port.id,
     direction,
@@ -81,7 +114,7 @@ function toDeclaration(port: PortInput, direction: PortDirection): PortDeclarati
     ...(port.customConditionId === undefined
       ? {}
       : { customConditionId: port.customConditionId }),
-    ...(port.renderer === undefined ? {} : { visual: { renderer: port.renderer } }),
+    ...(visual === undefined ? {} : { visual }),
     ...(port.metadata === undefined ? {} : { metadata: port.metadata }),
   };
 }
@@ -163,6 +196,16 @@ export function toPortDeclarations(
         return;
       }
       firstGroupById.set(port.id, groupName);
+      if (port.placement !== undefined && !isPortPlacement(port.placement)) {
+        issues.push(
+          shapeIssue(
+            `Port "${port.id}" must declare placement as one of "left", "right", "top" or "bottom"`,
+            port.placement,
+            path,
+          ),
+        );
+        return;
+      }
       declarations.push(toDeclaration(port, direction));
     });
   }

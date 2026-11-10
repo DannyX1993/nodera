@@ -57,6 +57,7 @@ export type {
   Node,
   NodePosition,
   PortDeclaration,
+  PortPlacement,
 } from "@nodera/graph-model";
 
 export type {
