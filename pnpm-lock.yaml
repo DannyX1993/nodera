@@ -438,6 +438,9 @@ importers:
       '@nodera/plugin-api':
         specifier: workspace:*
         version: link:../plugin-api
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../sdk
     devDependencies:
       typescript:
         specifier: ^5.7.2
