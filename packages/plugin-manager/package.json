@@ -2,5 +2,21 @@
   "name": "@nodera/plugin-manager",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/plugin-manager"
+  "type": "module",
+  "description": "Plugin infrastructure for the Nodera plugin ecosystem: manifest validation, dependency resolution and conflict detection.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/contracts": "workspace:*",
+    "@nodera/plugin-api": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }
