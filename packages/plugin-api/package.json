@@ -2,5 +2,20 @@
   "name": "@nodera/plugin-api",
   "version": "0.0.0",
   "private": true,
-  "description": "packages/plugin-api"
+  "type": "module",
+  "description": "Plugin manifest, lifecycle and validation contracts for the Nodera plugin ecosystem. Framework- and engine-agnostic.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }

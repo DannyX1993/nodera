@@ -1,0 +1,69 @@
+# feature: fase7-plugin-ecosystem
+
+Phase 7 Plugin Ecosystem for Nodera, per docs/ROADMAP.md (Fase 7) and docs/FASE7-DEFINITION.md.
+Branch: `feature/fase7-plugin-ecosystem` (off master, single-branch delivery like fase1-6).
+
+## Specs
+
+- S1 (ROADMAP Fase 7, verbatim): "Implementar: Plugin Manifest. Plugin Registry. Dependency Resolution. Lifecycle. Conflict Detection. Example Plugins. Plugin Documentation. Resultado: ecosistema extensible y distribuible."
+- S2 (FASE7, verbatim): "Un plugin podrá aportar uno o varios elementos: Nuevos nodos. Nuevos edges. Nuevos renderizadores. Nuevos tipos de propiedades. Nuevas herramientas. Nuevos paneles. Nuevos validadores. Nuevos temas. Nuevos importadores. Nuevos exportadores. Nuevas acciones de interfaz."
+- S3 (FASE7, verbatim): "Cada plugin deberá declarar: Plugin ID. Name. Version. Description. Author. Dependencies. Compatibility. Contributions. Permissions, si aplica."
+- S4 (FASE7, verbatim): "Debe existir un ciclo de vida: 1. Discover. 2. Resolve dependencies. 3. Validate manifest. 4. Register contributions. 5. Activate. 6. Deactivate. 7. Unregister."
+- S5 (FASE7, verbatim): "Se debe evitar que dos plugins registren accidentalmente el mismo identificador."
+- S6 (FASE7, verbatim): "Seguridad: los plugins ejecutables deben tratarse como código de terceros. No se debe permitir que un documento JSON/YAML active código arbitrario. La carga de plugins debe ser explícita y estar controlada por la aplicación host."
+- S7 (FASE7, verbatim): "Se recomienda soportar: Paquetes npm públicos. Paquetes npm privados. Plugins internos de una aplicación. Plugins cargados explícitamente en tiempo de ejecución." / "No recomiendo implementar inicialmente un marketplace ni un sistema de descarga dinámica de plugins. Primero debe estabilizarse el contrato de extensión."
+- S8 (FASE7, verbatim): "Cada plugin debe declarar: Su versión. La versión compatible del SDK. Las dependencias necesarias. Las versiones de las definiciones que aporta."
+- S9 (user decision, L2): "Los 5 plugins" — implementar los cinco directorios placeholder de `plugins/` (`basic-nodes`, `data-nodes`, `ai-nodes`, `developer-tools`, `example-plugin`) como plugins reales, chicos, cada uno con un aporte distinto y con `package.json` real (`main`/`types`/`scripts`/deps a `@nodera/sdk` + `@nodera/plugin-api`).
+- S10 (user decision, L2): "Completa" — exponer en el SDK la superficie completa de contribuciones: nodes, edges, properties, renderers, tools, panels, validators, themes, layouts, importers, exporters, dialogs y layout strategies. "Nuevas acciones de interfaz" (S2) se mapean a tools/dialogs/panels (el registro `tools` del SDK ya representa acciones de UI).
+- S11: "debes respetar la arquitectura global presente en @docs/GLOBAL-ARCHITECTURE.md" — el "Sistema de plugins" es responsabilidad de Infrastructure (GLOBAL-ARCHITECTURE §Infrastructure Layer); dirección "Plugins --> Public SDK" (PROJECT-STRUCTURE). AGENTS.md §9: toda contribución por APIs públicas explícitas; ids globalmente cualificados `vendor.feature-name`; detectar duplicados sin sobrescribir en silencio; ciclo de vida install/activate/deactivate/retire; "Nodera nunca ejecuta tools aportadas por plugins."
+- S12: "debes tener en cuenta lo que se ha hecho en la fase 1 ... fase 6" — construir sobre, no reimplementar: registries del core (`node-registry`, `edge-registry`, `property-system`, `validation`, `theme-engine`, `ui-core` panels/tools/dialogs, `layout-engine`, `graph-layout`, `domain` io-registries importer/exporter), el contrato de plugin de Fase 6 en `packages/sdk/src/plugin/plugin.ts` (`BuilderPlugin`, `BuilderPluginApi`, `installPlugin`, `builder.use`), los eventos `plugin.registered`/`plugin.error` (`packages/application/src/events.ts`). La Fase 6 se mantiene aditiva (non-breaking): `BuilderPlugin`/`installPlugin`/`builder.use()` siguen funcionando exactamente igual.
+- S13: "Recuerda que debes usar TDD estricto" — RED observado antes de cada unidad de implementación; tests por la interfaz pública; cada test aserta todo efecto observable de la regla que cubre (resultado/eventos, y que el input rechazado no altera estado registrado).
+- S14: "Haz una investigacion profunda para hacer la planificacion de tareas tambien" — investigación registrada en Log (L3).
+
+## Non-goals
+
+- Marketplace ni descarga dinámica de plugins (S7).
+- Ejecución de código activado desde documentos JSON/YAML (S6): el documento nunca activa plugins; `DocumentExtensionReference`/`extensions` siguen declarativos.
+- Cambios al contrato GGD del documento ni a los registries del core existentes.
+- Romper el contrato de plugin de Fase 6 (S12): la Fase 7 es aditiva sobre él.
+- React / `@xyflow` dentro de `plugin-api` / `plugin-manager`.
+- Publicar a npm, release automation, i18n, a11y (Fase 8).
+
+## Decisions
+
+- D1: Dos paquetes nuevos, con la dirección de dependencias fija.
+  - `@nodera/plugin-api` — contratos puros, framework/engine-agnostic, sin React ni `@xyflow`, sin dependencia de `@nodera/sdk`. Define `PluginManifest`, descriptores tipados de contribuciones, `PluginApi` (la superficie completa que recibe un plugin al activarse), `PluginDefinition` + hooks de ciclo de vida, tipos de resultado de validación y códigos de error de plugin.
+  - `@nodera/plugin-manager` — infraestructura. Depende de `@nodera/plugin-api` + `@nodera/sdk`. Implementa `PluginRegistry`, `ManifestValidator`, `DependencyResolver`, `ConflictDetector` y el `PluginManager` que orquesta el ciclo de vida (S4) adaptando un `Builder` del SDK a un `PluginApi`.
+  - El SDK **no** depende de `plugin-api` ni de `plugin-manager` (sin ciclo): el SDK solo gana los slots de contribución faltantes y los eventos de ciclo de vida, y su `BuilderPluginApi` queda estructuralmente compatible con `PluginApi`.
+- D2: El manifest es declarativo y el código vive aparte. `PluginManifest.contributions` es una lista declarada de `{ type, id }` que habilita la detección de conflictos *pre-flight* (S5) antes de ejecutar código; el callback `activate(ctx)` del plugin es el que efectivamente registra las contribuciones a través del `PluginApi`, y el manager cruza lo declarado con lo registrado para poder desregistrar con precisión en `deactivate`/`unregister`.
+- D3: Resolución de dependencias solo dentro del conjunto descubierto. `discover` recibe explícitamente la lista de `PluginDefinition` que la app host controla (S6, S7); el resolver hace orden topológico por `dependencies` (ids de plugin), detecta dependencias faltantes, ciclos, y valida rangos de versión (semver) contra las versiones instaladas. No descarga de npm.
+- D4: Superficie completa (S10) mapeada a los registries existentes. `validators` → `validation` `ValidatorRegistry`; `importers`/`exporters` → `domain` `ImporterRegistry`/`ExporterRegistry` (hoy no expuestos por el SDK, se agregan); `dialogs` → `ui-core` `DialogRegistry`; `layoutStrategies` → `graph-layout` `LayoutStrategyRegistry`. `renderers` sigue siendo el slot de `renderers.bind` (nodos/edges/ports/properties). "Acciones de interfaz" → `tools`/`panels`/`dialogs`.
+- D5: Eventos de ciclo de vida en el contrato de eventos de aplicación (additivo). Se agregan `plugin.activated`, `plugin.deactivated`, `plugin.unregistered` a `packages/application/src/events.ts` (junto a `plugin.registered`/`plugin.error` existentes). Se actualizan los tests de contrato cerrado (`packages/application/src/events.test.ts` y `packages/sdk/src/public-api.test.ts`).
+- D6: Ownership de contribuciones para poder retirar. El manager mantiene un mapa `pluginId → contributionIds` registrados durante `activate`, de modo que `deactivate`/`unregister` revierten exactamente lo que ese plugin registró (a diferencia del `Set<string>` de la Fase 6, que solo recuerda ids sin consultarlos).
+- D7: Convenciones de paquete idénticas a Fase 5/6: `"type": "module"`, `main`/`types` → `./src/index.ts`, archivos kebab-case, tests colocalizados `src/**/*.test.ts`, `vitest.config.ts` por paquete, `tsc --noEmit`, scripts `build`/`test`/`typecheck` reales para que turbo los ejecute.
+- D8: Reglas de arquitectura nuevas en `scripts/check-architecture.mjs`: `plugin-api` nunca menciona React/`@xyflow`/engine; `plugin-manager` solo importa `@nodera/plugin-api` + `@nodera/sdk` + contratos; los plugins de `plugins/*` importan solo `@nodera/sdk` + `@nodera/plugin-api` (nunca un paquete interno del core).
+
+## Verification
+
+- TDD estricto por unidad: RED antes de implementar; tests por interfaz pública.
+- `pnpm test`, `pnpm typecheck`, `pnpm build`, `pnpm lint`, `pnpm check:architecture` (turbo).
+- Prueba funcional: al menos un ejemplo que compone un builder y activa/desactiva/desinstala un plugin con manifest importando solo `@nodera/sdk` + `@nodera/plugin-api` (+ `@nodera/plugin-manager` como host), sin acceder a módulos internos.
+- Differential check (código compartido tocado): los eventos de aplicación y el `BuilderPluginApi` son compartidos por toda la suite — comparar salida de `packages/application` y `packages/sdk` antes/después (ninguna aserción eliminada; solo adiciones).
+- Verificación independiente final (`gentle-ai-verify`) por introducir contratos públicos nuevos (Task Size item 3).
+
+## Tasks
+
+- T1 (S3,S8): `@nodera/plugin-api` — `PluginManifest`, descriptores de contribución, `PluginApi`, `PluginDefinition` + hooks de ciclo de vida, tipos de validación y códigos de error. Route: inline (TDD). Commit: yes.
+- T2 (S3,S5,S8): `@nodera/plugin-manager` lógica pura — `ManifestValidator`, `DependencyResolver` (topo-sort, ciclos, faltantes, rangos semver), `ConflictDetector` (ids de plugin + ids de contribución). Route: worker (TDD). Commit: yes.
+- T3 (S4,S5): `@nodera/plugin-manager` — `PluginRegistry` + `PluginManager` (discover → resolve → validate → register → activate → deactivate → unregister) + ownership de contribuciones + eventos. Route: worker (TDD). Commit: yes.
+- T4 (S2,S10): SDK — slots de contribución faltantes en `BuilderPluginApi` (validators, importers, exporters, dialogs, layout strategies) + cableado al builder. Route: worker (TDD). Commit: yes.
+- T5 (S4,S5): SDK + application — eventos de ciclo de vida `plugin.activated`/`plugin.deactivated`/`plugin.unregistered`, actualización de contratos de eventos cerrados. Route: worker (TDD, misma superficie SDK que T4). Commit: yes.
+- T6 (S1,S9): cinco plugins de ejemplo reales en `plugins/{basic-nodes,data-nodes,ai-nodes,developer-tools,example-plugin}` con manifest + `src/index.ts` + `package.json` real y tests. Route: worker (TDD). Commit: yes.
+- T7 (S1,S6,S7): documentación + reglas de arquitectura — `docs/PLUGINS.md`, READMEs de `plugin-api`/`plugin-manager`/plugins, `scripts/check-architecture.mjs` (D8), estado Fase 7 en `docs/ROADMAP.md`. Route: inline. Commit: yes.
+- T8 (S1..S14): cierre — turbo test/typecheck/build/lint/architecture, differential check, prueba funcional, risk lines, verificación independiente `gentle-ai-verify`. Route: inline + verify. Commit: no (evidence only).
+
+## Log
+
+- L1 (user, verbatim): "Vamos a hacer ahora solo la Fase 7 especificada en @docs/ROADMAP.md . La definición de modulos de esta fase está en @docs/FASE7-DEFINITION.md (y si ves que falta algo comprueba @docs/PRODUCT-DESCRIPTION.md ) y debes respetar la arquitectura global presente en @docs/GLOBAL-ARCHITECTURE.md. Además debes tener en cuenta lo que se ha hecho en la fase 1 definida en el documento @docs/FASE1-DEFINITION.md y en la fase 2 definida en @docs/FASE2-DEFINITION.md y fase 3 @docs/FASE3-DEFINITION.md y fase 4 @docs/FASE4-DEFINITION.md y fase 5 @docs/FASE5-DEFINITION.md y fase 6 @docs/FASE6-DEFINITION.md . Recuerda que debes usar TDD estricto. Haz una investigacion profunda para hacer la planificacion de tareas tambien."
+- L2 (user decisions on the two planning questions, verbatim): examples — "Los 5 plugins"; contribution surface — "Completa". → S9, S10, D4.
+- L3 (research evidence, explorer map): `packages/plugin-api` y `packages/plugin-manager` son placeholders (`package.json` only, sin `src`/scripts/deps); `plugins/*` son 5 placeholders (`package.json` only). El contrato de plugins actual vive entero en `packages/sdk/src/plugin/plugin.ts`: `BuilderPluginApi` con slots `nodes/edges/properties/panels/tools/themes/layouts/renderers` (sin validators/importers/exporters/dialogs/layout-strategies); `BuilderPlugin = { id, version, install(api) }`; `installPlugin` síncrono y aditivo con `WeakMap<Builder, Set<string>>` de ids instalados (sin unregister posible); `pluginIssues()` valida id cualificado + semver + `install` función; códigos `sdk.plugin-invalid`/`sdk.plugin-conflict`. Eventos: solo `plugin.registered`/`plugin.error` en `packages/application/src/events.ts` (contrato cerrado por `events.test.ts` y `public-api.test.ts`). Registries del core listos para registrar/desregistrar y con `duplicate-id` (`contracts/src/registry.ts`); importers/exporters existen en `@nodera/domain` pero no llegan al SDK. Testing: vitest por paquete (`src/**/*.test.ts`, `vitest.config.ts`), turbo `test`/`typecheck`/`build`/`lint`/`check:architecture`. `scripts/check-architecture.mjs` no cubre plugins aún. Fase 6 (L20/L21 de `fase6-sdk.md`): `PluginManifest` + `sdkVersion` + declaración de dependencias + política de compatibilidad quedaron explícitamente diferidos a la Fase 7.
