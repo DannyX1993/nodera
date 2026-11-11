@@ -33,7 +33,8 @@ commands. React Flow never crosses into the domain or application layers.
 
 ### Public API
 
-- `GraphCanvas` — renders the graph from an `EditorEngine`; subscribes to the engine event bus; translates drag, connect, select and delete interactions back into use cases (`moveNode`, `createEdge`, `removeNode`, `removeEdge`, `selectNode`, `selectEdge`, `selectMultiple`, `clearSelection`). Props: `editor`, optional `nodeRenderers` / `edgeRenderers` / `portRenderers` registries, `interactionMode`, the presentation policies (`dragPolicy`, `nodeTransition`, `connectionsPolicy`, `portsPolicy`), `showMinimap`, `showControls`, `colorMode` ("light" | "dark" | "system"), the insert affordance props (`edgeInsertion`, `layoutDirection`, `renderEdgeInsert`, `renderPlaceholder`), and passthrough callbacks (`onNodeClick`, `onEdgeClick`, `onConnect`, `onNodesChange`, `onEdgesChange`, `onLinkValidate`, `onDropNodeDefinition`).
+- `GraphCanvas` — renders the graph from an `EditorEngine`; subscribes to the engine event bus; translates drag, connect, select and delete interactions back into use cases (`moveNode`, `createEdge`, `removeNode`, `removeEdge`, `selectNode`, `selectEdge`, `selectMultiple`, `clearSelection`). Props: `editor`, optional `nodeRenderers` / `edgeRenderers` / `portRenderers` registries, `interactionMode`, the presentation policies (`dragPolicy`, `nodeTransition`, `connectionsPolicy`, `portsPolicy`), the camera framing reader (`viewportFit`), `showMinimap`, `showControls`, `colorMode` ("light" | "dark" | "system"), the insert affordance props (`edgeInsertion`, `layoutDirection`, `layoutRankSpacing`, `layoutNodeSpacing`, `renderEdgeInsert`, `renderPlaceholder`), and passthrough callbacks (`onNodeClick`, `onEdgeClick`, `onConnect`, `onNodesChange`, `onEdgesChange`, `onLinkValidate`, `onDropNodeDefinition`).
+- `startViewportPlan` / `selectionViewportPlan` / `viewportFitOptions` — the pure camera rules behind `viewportFit`: what to frame on mount, what to frame after a selection change (and when to leave the camera alone), and the `fitView` options an absolute zoom becomes. No React, no DOM, and nothing that writes state, so they are tested on their own (`canvas/viewport-fit.test.ts`).
 - `NoderaCanvasProvider` / `useNoderaCanvas` — React Flow provider wrapper.
 - `useEditorGraph` — derives `{ nodes, edges, selectedNodeIds, selectedEdgeIds }` from the engine, event-driven.
 - `NodeRendererRegistry` / `EdgeRendererRegistry` — register custom renderers by definition renderer id; duplicates fail loudly; resolution falls back to `nodera-default-node` / `nodera-default-edge`. The mapper carries the definition's `renderer` id in node `data.rendererId`, so a registered renderer is used automatically (see the demo's `transform-card`).
@@ -42,6 +43,46 @@ commands. React Flow never crosses into the domain or application layers.
 - Mappers: `toReactFlowNodes`, `toReactFlowEdges`, `nodePositionFromReactFlow`, `connectionFromReactFlow`, `removedIdsFromReactFlowChanges`.
 - Selection: click selects, Shift-click adds, click on the pane clears, RF box/multi selection syncs into the engine through `selectMultiple`; drag positions commit through `commitDraggedNodes` (one undo unit per moved node) and RF selection changes through `commitSelectionFromReactFlow`.
 - Keyboard: `Delete` and `Backspace` remove the selected elements (they flow through the `removeNode` / `removeEdge` use cases). Other shortcuts (copy/paste, undo/redo) belong to the host application layer.
+
+### Camera framing — `viewportFit`
+
+`GraphCanvas.viewportFit` is a **reader** (`() => ViewportConfiguration |
+undefined`), the same shape as `removalPolicy`: the framing is host configuration
+(the SDK's `viewport` group), not UI state, so the canvas reads it at the moment
+it frames and never re-renders on it. `<NoderaEditor>` passes
+`() => builder.viewport()`; a host composing the canvas layer directly passes its
+own reader, and `undefined` — or a reader that returns nothing — is today's
+behaviour byte for byte: React Flow's own boolean `fitView` on init and no camera
+movement on selection.
+
+What it frames is decided by three pure functions in `canvas/viewport-fit.ts`:
+
+| Reader declares | On mount | After a selection change |
+| --- | --- | --- |
+| nothing | React Flow's plain `fitView` | nothing |
+| `start` | the whole graph, or the node `start.node` names | — |
+| `selection` | — | the selected nodes (and edges, with `edges: true`); the `start` framing once the selection empties |
+
+The camera is moved through the captured `ReactFlowInstance`'s `fitView` and
+never through component state: the viewport stays React Flow's (canvas state,
+AGENTS.md §5.3). Applying a framing writes no document position, pushes no
+history unit, emits no application event and stores nothing in a node's `data`.
+
+Zoom has two modes, and the difference is what the plan carries: an absolute
+`zoom` becomes React Flow's own clamp (`minZoom === maxZoom === zoom`), so the
+camera lands exactly on that level with no coordinate maths; without `zoom` the
+framing fits with `padding` (default `0.1`) and stops at `maxZoom` (default
+`1.5`). `duration` (default `200` ms, `0` instant) is passed straight through.
+Edges are **off** by default, because framing a single edge zooms violently:
+with `edges: true` an edge is framed with the graph-fit rule, never an absolute
+level.
+
+The subscription lives on the engine's `selection.changed` event — the one event
+that knows both "the selection changed" and "the selection is now empty" — and
+not on `useEditorGraph`, which deliberately skips it to avoid re-entering React
+Flow's own selection emission. A repeated identical framing (React Flow reports
+the same selection back through `commitSelectionFromReactFlow`) is a no-op, and
+the subscription is removed on unmount.
 
 ### Interaction mode and canvas background
 
@@ -116,7 +157,7 @@ looks like:
 | Prop | Replaces | The host receives |
 | --- | --- | --- |
 | `renderEdgeInsert` | the "+" at the midpoint of one edge | `edgeId: string` |
-| `renderPlaceholder` | the dashed phantom box **and** its "+", for both the empty state and the successor placeholders | the whole `PhantomPlaceholder`: `kind` (`"empty-state"` / `"successor"`), `anchorId`, `box` (`x`/`y`/`width`/`height` in flow units) and `connector` |
+| `renderPlaceholder` | the dashed phantom box **and** its "+", for both the empty state and the successor placeholders | the whole `PhantomPlaceholder`: `kind` (`"empty-state"` / `"successor"`), `anchorId`, `box` (`x`/`y`/`width`/`height` in flow units) and `connectors` (the straight run(s) the canvas draws to that box; one for a slot in the anchor's column, two when the slot slid to a neighbouring lane) |
 
 ```tsx
 import { NoderaEditor } from "@nodera/react-flow";
@@ -142,7 +183,15 @@ Two rules make the replacement honest:
 - **the geometry stays the framework's.** The "+" stays at the midpoint of the edge;
   the placeholder stays in the slot the derivation chose (and keeps its dashed
   connector, which is the placeholder's shape rather than its control). Only the
-  control is the host's.
+  control is the host's. A slot is the space a whole node takes, and the search
+  tries three placements in this order: the anchor's own column one **rank pitch**
+  further along the axis (`layoutRankSpacing`, 240 flow units by default); one
+  lane either side of that slot on the **same flow line**, which keeps the ghost
+  in its anchor's rank band; and only when the whole flow line is blocked, the
+  forward walk down the column. A candidate keeps at least the shortest drawable
+  connector's distance from any box sharing its lane, so two boxes never touch or
+  overlap — not even when the rank of the layout and the placeholder's own step
+  are different grids.
 
 What the host replaces along with the look is the **behaviour**: recording
 `UiState.pendingEdgeInsertId` / `pendingAppendAnchorId` and opening the
@@ -163,6 +212,40 @@ beside `GraphCanvas`, and not re-exported from the package root — the same pla
 `DefaultEdgeInsertButton` already was), and the overlay discipline is unchanged: no
 placeholder and no branching handle ever enters React Flow's `nodes` / `edges`
 arrays, the document, the history or the events, whichever component paints it.
+
+#### Placeholder geometry: `layoutDirection`, `layoutRankSpacing`, `layoutNodeSpacing`
+
+The placeholder walk needs three numbers the canvas adapter cannot read from the
+document, because they are SDK configuration and presentation geometry rather
+than document data: `graph.layout.direction`, `rankSpacing` and `spacing`. The
+host declares them, and each one only shapes the overlay — no document state, no
+history, no event:
+
+| Prop | Meaning | Default |
+| --- | --- | --- |
+| `layoutDirection` | axis the walk steps along (`"horizontal"` / `"vertical"`) | `"horizontal"` |
+| `layoutRankSpacing` | flow step between consecutive ranks, in flow units | `240` (`PHANTOM_NODE_OFFSET`) |
+| `layoutNodeSpacing` | gap between neighbouring boxes of one rank, in flow units | `240` (`PHANTOM_NODE_OFFSET`) |
+
+`layoutRankSpacing` is what makes a phantom land on the **rank line of its
+sibling**: without it the step is a fixed 240 while a layered rank may sit 280
+away, so the ghost of one branch floats 40 units above the real node that
+occupies the same rank in the other branch. The flow step is
+`max(layoutRankSpacing, boxExtentAlongTheAxis + PHANTOM_CONNECTOR_MIN_LENGTH)`, so
+a box larger than the pitch grows the step instead of collapsing the connector,
+and every whole step of the forward walk uses it.
+
+`layoutNodeSpacing` is the sideways pitch: a lane sits `crossExtent +
+layoutNodeSpacing` from the anchor's column — one box of that rank plus the gap
+the layout leaves between neighbours — so it lands exactly where the next column
+would. Both are axis-swapped from that one rule (the flow extent is the height on
+a vertical graph and the width on a horizontal one; the cross extent the other
+way round), so no literal belongs to an axis.
+
+A host that declares no rank pitch keeps the flow step it had (240 flow units).
+The lane pitch always carries the box's own cross extent, so declaring no node
+gap means "a 240-unit gap past the box", not a bare 240-unit offset: a lane
+lands where that rank's next column would instead of half a column short.
 
 ### Usage
 
@@ -295,6 +378,8 @@ container, canvas and context menu, in one component.
 | `renderEdgeInsert` | replaces the per-edge "+" (S6) |
 | `renderPlaceholder` | replaces the phantom placeholder box and its "+" (S6) |
 | `layoutDirection` | axis the placeholders step along (`"horizontal"` by default) |
+| `layoutRankSpacing` | rank pitch the placeholders step by (the layout's `rankSpacing`; `240` by default) |
+| `layoutNodeSpacing` | gap between neighbouring boxes of one rank, which sets the sideways lane pitch (`240` by default) |
 | `className` | wrapper class for host styling |
 
 ```tsx

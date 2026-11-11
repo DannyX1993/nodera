@@ -340,12 +340,14 @@ describe("graph.insertNode: the downstream auto policy", () => {
     inserted(builder, edgeId, { nodeId: "node-middle" });
 
     // The inserted node and its descendant take the arrangement; the source
-    // anchors it and the sibling branch keeps every coordinate it had. The
-    // target is alone in its rank, so it is centred over the wider one at 120.
+    // anchors it and the sibling branch keeps every coordinate it had. Rewritten
+    // by the alignment rule: the target has one parent, so it takes that parent's
+    // column `0` (old: 140, half a pitch — the default 40-tall box plus the 240
+    // gap — because its one-node rank was centred over the wider one).
     expect(positionsOf(builder)).toEqual({
       "node-source": { x: 0, y: 500 },
       "node-sibling": { x: 1000, y: 1000 },
-      "node-target": { x: 480, y: 120 },
+      "node-target": { x: 480, y: 0 },
       "node-middle": { x: 240, y: 0 },
     });
     const outcome = builder.graph.lastAutoArrangement();

@@ -40,6 +40,7 @@ import {
 } from "@nodera/application";
 import type {
   GraphLayoutDiagnostic,
+  GraphLayoutNodeSize,
   GraphLayoutPlacedNode,
   LayoutStrategyRegistry,
 } from "@nodera/graph-layout";
@@ -193,6 +194,14 @@ export interface ArrangeSettings {
   readonly strategies: LayoutStrategyRegistry;
   /** Distance between consecutive ranks; `graph.layout.rankSpacing ?? spacing`. */
   readonly rankSpacing: number;
+  /**
+   * Fallback node box the host declared (`graph.layout.nodeSize`), when any.
+   *
+   * Passed through to the strategy as `GraphLayoutOptions.nodeSize` and left
+   * absent when the host declared none, so the strategy's own default is the one
+   * and only default.
+   */
+  readonly nodeSize: GraphLayoutNodeSize | undefined;
   /** Policy `graph.layout.arrangeOnChange` in effect today. */
   readonly arrangeOnChange: () => ArrangeOnChange;
 }
@@ -805,6 +814,12 @@ function computePlacement(
   }
   // The graph is read here, not passed in: the strategy never sees a graph
   // instance, a node class or a canvas, only plain data (S11).
+  //
+  // No per-node `width`/`height`: a `Node` in `@nodera/graph-model` holds ports,
+  // properties, a position and metadata, and no box, so this boundary has no
+  // size to pass and invents none — measuring the rendered box is the canvas
+  // adapter's business, and the SDK may not depend on one (AGENTS.md §4). A host
+  // that knows its boxes declares the fallback with `graph.layout.nodeSize`.
   const placed = strategy.place({
     nodes: editor.graph.getNodes().map((node) => ({
       id: node.id,
@@ -819,6 +834,7 @@ function computePlacement(
       nodeSpacing: request?.spacing ?? graphLayout.spacing,
       rankSpacing: request?.rankSpacing ?? settings.rankSpacing,
       scope: "all",
+      ...(settings.nodeSize === undefined ? {} : { nodeSize: settings.nodeSize }),
     },
   });
   return placed.ok

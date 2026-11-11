@@ -22,6 +22,24 @@ export interface GraphLayoutNodeInput {
   readonly id: NodeId;
   /** Current position, when the document already has one. */
   readonly position?: NodePosition | undefined;
+  /**
+   * Width of the node's box, in flow units, when the host knows it.
+   *
+   * A **layout hint**, never document data: the document carries a position and
+   * nothing else about the box, so a strategy that measures its nodes (a canvas
+   * adapter, a host renderer) may pass what it measured. A strategy that uses
+   * boxes falls back to `GraphLayoutOptions.nodeSize` for a node without one, so
+   * omitting both is always valid input.
+   */
+  readonly width?: number | undefined;
+  /** Height of the node's box, in flow units. See {@link GraphLayoutNodeInput.width}. */
+  readonly height?: number | undefined;
+}
+
+/** A box in flow units: what a strategy may assume about a node nobody measured. */
+export interface GraphLayoutNodeSize {
+  readonly width: number;
+  readonly height: number;
 }
 
 /** One connection between two nodes, by stable node id. */
@@ -43,14 +61,35 @@ export type GraphLayoutDirection = "horizontal" | "vertical";
  */
 export type GraphLayoutScope = "all" | "unpositioned";
 
-/** Placement options the host declares; there are no framework-invented defaults. */
+/**
+ * Placement options the host declares: the geometry is never invented here.
+ *
+ * `direction`, `nodeSpacing`, `rankSpacing` and `scope` are required, so the host
+ * — or the SDK's documented resolution of its configuration — always says what
+ * the grid measures. `nodeSize` is the one optional member, and only because its
+ * absence has a single documented meaning: the strategy's own fallback box.
+ */
 export interface GraphLayoutOptions {
   readonly direction: GraphLayoutDirection;
-  /** Distance between two neighbours of the same rank. */
+  /**
+   * Gap between two **neighbouring boxes** of the same rank, in flow units.
+   *
+   * It is a gap, not the distance between two positions: a rank steps by the
+   * widest box it holds plus this value, which is what keeps two boxes apart
+   * however wide their renderer paints them.
+   */
   readonly nodeSpacing: number;
   /** Distance between two consecutive ranks. */
   readonly rankSpacing: number;
   readonly scope: GraphLayoutScope;
+  /**
+   * The fallback box of a node that carries no `width`/`height` of its own.
+   *
+   * Only a fallback: a node's own size always wins. The layered strategy defaults
+   * it to `{ width: 140, height: 40 }`, the `--ndr-node-min-width` /
+   * `--ndr-node-min-height` token defaults of the default node renderer.
+   */
+  readonly nodeSize?: GraphLayoutNodeSize | undefined;
 }
 
 /** Everything a strategy needs: plain data, no graph instance. */

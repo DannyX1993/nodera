@@ -370,11 +370,21 @@ const scoped = assertOk(builder.graph.arrange({ from: "node-fetch" }));
 ```
 
 `arrange()` reads the graph, asks the strategy selected by `graph.layout.strategy`
-with the host's `direction`, `spacing` (in-rank distance) and `rankSpacing`
-(between ranks, default `spacing`), and applies the answer through the
-application layer. A strategy that answers a diagnostic makes it fail with
-`sdk.invalid-input` and moves nothing; `nodera.graph-layout.free` and an empty
-graph both return an empty list and push no history entry.
+with the host's `direction`, `spacing` (**gap between two neighbouring node
+boxes** of a rank), `rankSpacing` (between ranks, default `spacing`) and, when the
+host declared one, `nodeSize` (the fallback box of a node that carries no size of
+its own, default `{ width: 140, height: 40 }`), and applies the answer through the
+application layer. The cross axis is therefore reserved in boxes: a rank steps by
+its widest box plus `spacing`, so two neighbours are exactly `spacing` apart
+whatever their renderer paints. On that cross axis the placement **aligns each
+node with its neighbours** — a node with several children sits over the mean of
+them, and a node with one parent sits in that parent's column — so a branch's
+last node stays under its branch instead of drifting between branches. `nodeSize` is configuration, never document
+data, and the SDK passes no per-node size because a node in `@nodera/graph-model`
+carries no box — measuring a rendered node is the canvas adapter's business. A
+strategy that answers a diagnostic makes it fail with `sdk.invalid-input` and moves
+nothing; `nodera.graph-layout.free` and an empty graph both return an empty list
+and push no history entry.
 
 `from` scopes the **writes**, never the computation: the strategy still answers for
 the whole graph, because a rank is a property of all of it, and the SDK applies
@@ -497,6 +507,91 @@ There is no runtime toggle in any of this: a user never chooses the strategy, th
 host does. The placement rule the layered strategy applies is documented in
 `packages/graph-layout/README.md`, and the feature as a whole in
 `docs/GRAPH-LAYOUT.md`.
+
+### What the camera frames
+
+`viewport` is the one configuration group that decides what the **camera** does:
+what it frames when the canvas mounts, and whether it follows the selection. It
+is presentation, not graph data (AGENTS.md §5.3) — nothing in it reaches the
+portable document, the UI state, a node's `data` or the history, and moving the
+camera emits no application event and pushes no history unit.
+
+```ts
+createBuilder({
+  viewport: {
+    // On mount: frame one node, at an exact level, instantly.
+    start: { node: "node-http", zoom: 1.25, duration: 0 },
+    // On selection: follow it, and return to `start` once the selection empties.
+    selection: { maxZoom: 1.2, padding: 0.15, duration: 200, edges: false },
+  },
+});
+```
+
+| Group | Absent means | What it frames |
+| --- | --- | --- |
+| `start` | today's plain React Flow `fitView` | the whole graph, or the single node `start.node` names |
+| `selection` | no camera movement on selection, ever | the selected nodes, plus the selected edges when `edges` is on |
+
+**An absolute zoom wins; otherwise the framing fits.** `zoom` pins the level
+exactly, through React Flow's own clamp rather than coordinate maths; without it
+the camera fits with `padding` and stops at `maxZoom`.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `zoom` | absent | Absolute level; when present it decides the zoom on its own |
+| `maxZoom` | `1.5` | Ceiling used only while `zoom` is absent |
+| `padding` | `0.1` | React Flow padding around what is framed |
+| `duration` | `200` | Animation length in ms; `0` is instant |
+| `selection.edges` | `false` | Whether a selected edge is framed too |
+
+Three consequences a host should know before turning it on:
+
+- **Edges are off by default.** Framing one edge zooms violently, so an
+  edge-only selection leaves the camera alone. With `edges: true` a selected edge
+  is framed with the graph-fit rule — never an absolute `zoom` — and so is a
+  framed set that mixes nodes and edges.
+- **Clearing the selection restores the `start` framing**, absolute zoom
+  included. With no `start` group the camera restores the whole graph under the
+  selection rule's own ceiling, padding and duration, so clearing never leaves
+  the camera wherever it stopped.
+- **The two groups have independent zoom rules.** Following a selection uses
+  `selection`'s level, and returning uses `start`'s.
+
+`builder.viewport()` reads the resolved configuration back — defaults applied,
+frozen — and `undefined` means the host declared no camera configuration at all,
+which is what keeps a canvas on today's plain `fitView`.
+
+It is **runtime-changeable**, like the other presentation policies: a host calls
+`builder.setViewport(configuration | undefined)` instead of composing again. A
+successful call returns the resolved, frozen configuration and `builder.viewport()`
+returns it immediately; `undefined` restores today's behaviour — React Flow's own
+`fitView` on mount and no camera movement on selection; a refused value returns
+every `sdk.invalid-input` issue and **keeps the previous configuration in force**,
+so a host can report the diagnostics and leave the camera as it was. A disposed
+builder refuses with `sdk.disposed`.
+
+```ts
+const applied = builder.setViewport({ selection: { maxZoom: 3, duration: 0 } });
+if (!applied.ok) setStatus(issueSummary(applied.error)); // the old camera still applies
+```
+
+Nothing about the change is document data: no portable-document write, no UI
+store state, no history unit and no application event.
+
+Because the presentation binding reads the configuration live
+(`GraphCanvas.viewportFit`), a `selection` change applies on the next selection
+change with no remount. `start` is different: the canvas resolves it once, when
+it mounts, so a host that changes the start framing applies it by remounting the
+canvas — a new `key` on the editor component is enough, which is what the demo
+does.
+
+A value the declared shape cannot hold is refused where it sits and no builder is
+created: a group that is not an object, a `start.node` that is not a non-empty
+string, a `zoom` / `maxZoom` / `padding` that is not a positive finite number, a
+`duration` that is negative or not finite, or a `selection.edges` that is not a
+boolean is `sdk.invalid-input` at `["viewport", ...]`. `setViewport` runs the same
+validation and returns the same issues, refusing the change while the previous
+configuration stays in force.
 
 ### Reading a graph
 

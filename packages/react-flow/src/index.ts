@@ -101,6 +101,20 @@ export {
 export type { CanvasBackgroundOptions } from "./canvas/graph-canvas.js";
 export { canvasInteractionSettings } from "./canvas/interaction-mode.js";
 export type { CanvasInteractionMode, CanvasInteractionSettings } from "./canvas/interaction-mode.js";
+// Camera framing: the pure rules that turn the host's `viewport` configuration
+// (`@nodera/sdk`) into a `fitView` call, plus the configuration type itself so a
+// host composing the canvas layer directly can name what `GraphCanvas.viewportFit`
+// returns without importing the SDK for it.
+export {
+  selectionViewportPlan,
+  startViewportPlan,
+  viewportFitOptions,
+} from "./canvas/viewport-fit.js";
+export type {
+  SelectionForViewport,
+  ViewportFitPlan,
+} from "./canvas/viewport-fit.js";
+export type { ViewportConfiguration } from "@nodera/sdk";
 export { useEditorGraph } from "./canvas/use-editor-graph.js";
 export {
   NODE_DEFINITION_MIME_TYPE,

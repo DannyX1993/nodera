@@ -33,6 +33,7 @@ import type {
   ArrangeOnChange,
   BuilderConfiguration,
   GraphLayoutConfiguration,
+  ViewportConfiguration,
   RemovalPolicy,
 } from "./configuration.js";
 
@@ -83,6 +84,13 @@ function fail(configuration?: BuilderConfiguration): SdkIssues {
     throw new Error("expected the builder configuration to be rejected");
   }
   return result.error;
+}
+
+/** Positions of every node of a graph, keyed by instance id. */
+function positionsOf(
+  builder: Builder,
+): Record<string, { readonly x: number; readonly y: number } | undefined> {
+  return Object.fromEntries(builder.graph.nodes().map((node) => [node.id, node.position]));
 }
 
 describe("createBuilder defaults", () => {
@@ -1361,6 +1369,67 @@ describe("graph layout connections and ports policy", () => {
   });
 });
 
+describe("graph layout node size", () => {
+  it("refuses a nodeSize that is not a box, at graph.layout.nodeSize", () => {
+    const issues = fail({
+      graph: { layout: { nodeSize: "158x34" } as unknown as GraphLayoutConfiguration },
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      code: "sdk.invalid-input",
+      path: ["graph", "layout", "nodeSize"],
+    });
+  });
+
+  it.each([
+    { width: 0, height: 40, field: "width" },
+    { width: -158, height: 34, field: "width" },
+    { width: Number.NaN, height: 34, field: "width" },
+    { width: "158", height: 34, field: "width" },
+    { width: 158, height: 0, field: "height" },
+    { width: 158, height: Number.POSITIVE_INFINITY, field: "height" },
+  ])(
+    "refuses an invalid nodeSize at graph.layout.nodeSize.$field and creates no builder",
+    ({ field, ...nodeSize }) => {
+      const issues = fail({
+        graph: { layout: { nodeSize } as unknown as GraphLayoutConfiguration },
+      });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({
+        code: "sdk.invalid-input",
+        path: ["graph", "layout", "nodeSize", field],
+      });
+    },
+  );
+
+  it("reaches the strategy through arrange: the box drives the pitch of a rank", () => {
+    const builder = create({
+      registry: { nodes: [nodeInput()] },
+      graph: { layout: { nodeSize: { width: 60, height: 20 } } },
+    });
+    expect(builder.graph.addNode({ type: "demo.node", nodeId: "a" }).ok).toBe(true);
+    expect(builder.graph.addNode({ type: "demo.node", nodeId: "b" }).ok).toBe(true);
+
+    // Two boxes in one rank, so there is no centring offset to apply: the pitch
+    // is the declared box plus the default spacing of 240 (20 + 240 = 260 on the
+    // horizontal cross axis, 60 + 240 = 300 on the vertical one). The default
+    // box (140 wide) would have produced 280 and 380 instead.
+    expect(builder.graph.arrange().ok).toBe(true);
+    expect(positionsOf(builder)).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 0, y: 260 },
+    });
+
+    expect(builder.graph.arrange({ direction: "vertical" }).ok).toBe(true);
+    expect(positionsOf(builder)).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 300, y: 0 },
+    });
+  });
+});
+
 describe("graph layout arrangeOnChange policy", () => {
   it("arranges nothing automatically by default", () => {
     expect(create().graphLayout.arrangeOnChange()).toBe("never");
@@ -1548,5 +1617,169 @@ describe("ui state active graph strategy id", () => {
 
     expect(notifications).toBe(0);
     expect(builder.store.getState()).toBe(before);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Camera framing (viewport)                                          */
+/* ------------------------------------------------------------------ */
+
+describe("viewport configuration", () => {
+  it("declares no camera configuration by default, today's behaviour", () => {
+    expect(create().viewport()).toBeUndefined();
+  });
+
+  it("resolves the documented defaults and freezes the result", () => {
+    const builder = create({
+      viewport: { start: { node: "n1" }, selection: { edges: true } },
+    });
+
+    expect(builder.diagnostics).toEqual([]);
+    expect(builder.viewport()).toEqual({
+      start: { node: "n1", maxZoom: 1.5, padding: 0.1, duration: 200 },
+      selection: { edges: true, maxZoom: 1.5, padding: 0.1, duration: 200 },
+    });
+    expect(Object.isFrozen(builder.viewport())).toBe(true);
+    expect(Object.isFrozen(builder.viewport()?.start)).toBe(true);
+    expect(Object.isFrozen(builder.viewport()?.selection)).toBe(true);
+  });
+
+  it("keeps a declared absolute zoom next to the resolved ceiling", () => {
+    const builder = create({ viewport: { start: { zoom: 1.25, duration: 0 } } });
+
+    expect(builder.viewport()?.start).toEqual({
+      zoom: 1.25,
+      maxZoom: 1.5,
+      padding: 0.1,
+      duration: 0,
+    });
+  });
+
+  it("materializes no field the host did not declare", () => {
+    const builder = create({ viewport: { start: {} } });
+    const start = builder.viewport()?.start ?? {};
+
+    expect("node" in start).toBe(false);
+    expect("zoom" in start).toBe(false);
+    expect(builder.viewport()?.selection).toBeUndefined();
+  });
+
+  it("refuses a viewport that is not an object at its configuration path", () => {
+    const issues = fail({ viewport: 42 as unknown as ViewportConfiguration });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ code: "sdk.invalid-input", path: ["viewport"] });
+  });
+
+  const refusedGroups: ReadonlyArray<readonly [unknown, readonly string[]]> = [
+    [{ start: "n1" }, ["viewport", "start"]],
+    [{ selection: [] }, ["viewport", "selection"]],
+    [{ start: { node: "" } }, ["viewport", "start", "node"]],
+    [{ start: { node: 42 } }, ["viewport", "start", "node"]],
+    [{ start: { zoom: 0 } }, ["viewport", "start", "zoom"]],
+    [{ start: { zoom: Number.POSITIVE_INFINITY } }, ["viewport", "start", "zoom"]],
+    [{ start: { maxZoom: -1 } }, ["viewport", "start", "maxZoom"]],
+    [{ start: { padding: 0 } }, ["viewport", "start", "padding"]],
+    [{ start: { duration: -1 } }, ["viewport", "start", "duration"]],
+    [{ start: { duration: Number.NaN } }, ["viewport", "start", "duration"]],
+    [{ selection: { zoom: Number.NaN } }, ["viewport", "selection", "zoom"]],
+    [{ selection: { maxZoom: 0 } }, ["viewport", "selection", "maxZoom"]],
+    [{ selection: { padding: Number.NEGATIVE_INFINITY } }, ["viewport", "selection", "padding"]],
+    [{ selection: { duration: -0.5 } }, ["viewport", "selection", "duration"]],
+    [{ selection: { edges: "yes" } }, ["viewport", "selection", "edges"]],
+  ];
+
+  it.each(refusedGroups)(
+    "refuses the viewport value %j at %j and creates no builder",
+    (viewport, path) => {
+      const issues = fail({ viewport: viewport as ViewportConfiguration });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({ code: "sdk.invalid-input", path });
+    },
+  );
+
+  it("accepts every documented value without a diagnostic", () => {
+    const builder = create({
+      viewport: {
+        start: { node: "n1", zoom: 1.25, maxZoom: 2, padding: 0.2, duration: 0 },
+        selection: { zoom: 2, maxZoom: 3, padding: 0.05, duration: 120, edges: false },
+      },
+    });
+
+    expect(builder.diagnostics).toEqual([]);
+    expect(builder.viewport()?.start?.duration).toBe(0);
+  });
+
+  it("applies a valid configuration at runtime and resolves it like composition", () => {
+    const builder = create();
+
+    const changed = builder.setViewport({
+      start: { node: "n2", duration: 0 },
+      selection: { maxZoom: 2, edges: true },
+    });
+
+    expect(changed.ok).toBe(true);
+    expect(changed.ok && changed.value).toEqual({
+      start: { node: "n2", maxZoom: 1.5, padding: 0.1, duration: 0 },
+      selection: { edges: true, maxZoom: 2, padding: 0.1, duration: 200 },
+    });
+    // The reader and the setter hand back the same resolved object.
+    expect(builder.viewport()).toBe(changed.ok ? changed.value : undefined);
+    expect(Object.isFrozen(builder.viewport())).toBe(true);
+    expect(Object.isFrozen(builder.viewport()?.start)).toBe(true);
+    expect(Object.isFrozen(builder.viewport()?.selection)).toBe(true);
+  });
+
+  it("clears the camera configuration when the host passes undefined", () => {
+    const builder = create({ viewport: { start: { node: "n1" } } });
+
+    const cleared = builder.setViewport(undefined);
+
+    expect(cleared.ok).toBe(true);
+    expect(cleared.ok && cleared.value).toBeUndefined();
+    expect(builder.viewport()).toBeUndefined();
+  });
+
+  it("refuses an invalid runtime value and keeps the previous configuration", () => {
+    const builder = create({ viewport: { start: { node: "n1" }, selection: {} } });
+    const before = builder.viewport();
+
+    const refused = builder.setViewport({
+      start: { zoom: -1 },
+      selection: { maxZoom: 0 },
+    });
+
+    expect(refused.ok).toBe(false);
+    const issues = refused.ok ? [] : refused.error;
+    expect(issues).toHaveLength(2);
+    for (const issue of issues) {
+      expect(issue).toMatchObject({ code: "sdk.invalid-input" });
+      expect(issue.path?.[0]).toBe("viewport");
+    }
+    expect(issues.map((issue) => issue.path)).toEqual([
+      ["viewport", "start", "zoom"],
+      ["viewport", "selection", "maxZoom"],
+    ]);
+    // The previous framing is still the one the canvas would read.
+    expect(builder.viewport()).toBe(before);
+    expect(builder.viewport()?.start?.node).toBe("n1");
+  });
+
+  it("refuses a camera change on a disposed builder", () => {
+    const builder = create({ viewport: { start: { node: "n1" } } });
+    const before = builder.viewport();
+    builder.dispose();
+
+    const refused = builder.setViewport({ start: { node: "n2" } });
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error[0]).toMatchObject({
+      code: "sdk.disposed",
+      severity: "error",
+    });
+    expect(!refused.ok && refused.error[0]?.path).toBeUndefined();
+    expect(!refused.ok && refused.error[0]?.message).toContain('"setViewport"');
+    expect(builder.viewport()).toBe(before);
   });
 });

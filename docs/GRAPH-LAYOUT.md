@@ -115,8 +115,9 @@ Two consequences worth stating, because they are easy to break:
 | --- | --- | --- |
 | `mode` | `"free"` or `"auto"` | `"free"` |
 | `direction` | `"horizontal"` or `"vertical"` | `"horizontal"` |
-| `spacing` | positive finite number, document units: distance between adjacent automatic slots, and the in-rank distance of an `Arrange` | `240` |
+| `spacing` | positive finite number, document units: **gap between two neighbouring node boxes** of an `Arrange` rank, and the step between adjacent automatic slots | `240` |
 | `rankSpacing` | positive finite number, document units: distance between consecutive `Arrange` ranks | the declared `spacing` |
+| `nodeSize` | `{ width, height }`, positive finite numbers in document units: the fallback box of a node that carries no size of its own, so `Arrange` can reserve the room it takes | the strategy's `{ width: 140, height: 40 }` |
 | `strategy` | globally qualified strategy id | `nodera.graph-layout.layered` |
 | `drag` | `"locked"` or `"snap-back"`: what a manual drag does when the layout owns the positions (inert under `mode: "free"`) | `"locked"` |
 | `nodeTransition` | `"animated"` or `"instant"`: whether a node moves to its new position or appears there (independent of `mode`) | `"instant"` |
@@ -137,8 +138,9 @@ const builder = assertValid(
       layout: {
         mode: "auto",                            // default "free"
         direction: "vertical",                   // default "horizontal"
-        spacing: 160,                            // default 240
+        spacing: 160,                            // default 240; a GAP between boxes
         rankSpacing: 320,                        // default: spacing
+        nodeSize: { width: 158, height: 34 },     // default: 140 x 40, the token defaults
         strategy: "nodera.graph-layout.layered", // the built-in default
         drag: "locked",                          // default; or "snap-back"
         nodeTransition: "instant",               // default; or "animated"
@@ -160,7 +162,55 @@ const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }))
 
 An invalid value is a configuration problem and fails closed: `createBuilder`
 returns `err` with `sdk.invalid-input` at `graph.layout.<field>` and no builder is
-created. Nothing is guessed.
+created — including `graph.layout.nodeSize.width` / `.height` when the box is not
+a positive finite number. Nothing is guessed.
+
+### What `spacing` measures, and the box `nodeSize` declares
+
+`spacing` is the **gap between two neighbouring boxes** of a rank, not the
+distance between two positions. A rank therefore steps by its widest box plus
+`spacing`, and the emitted position stays the box's top-left corner:
+
+```text
+pitch(rank)   = max(width of the boxes of the rank) + spacing      # `vertical`
+              = max(height of the boxes of the rank) + spacing     # `horizontal`
+base(i)       = i * pitch                                          # i = in-rank index
+```
+
+The cross coordinate of a node is **not** derived from the length of its rank.
+The base above is only the starting point: the placement aligns each node with
+its neighbours — the mean of its parents (downward pass), then the mean of its
+children (upward pass) — restores the order and the `pitch` separation after
+every move, and repeats that pair **once more**. Two pairs are the budget, not a
+convergence loop: the first puts every node on its neighbours, the second lets a
+parent the upward pass moved pull its children along. The grid then comes out
+like this:
+
+- a node with **several children** sits over the mean of those children, so a
+  branch that forks has its parent in the middle of the fork;
+- a node with **one parent** lands in that parent's column, so the last node of a
+  branch stays in the column of the branch and its edge does not jog sideways;
+- a **chain** stays one straight column, and a diamond is symmetric around its
+  fork and its join;
+- the answer is normalised at the end, so the graph starts at cross coordinate
+  `0` in both directions.
+
+This is a **change of meaning** worth calling out when upgrading: a `spacing` of
+`240` used to put two rank neighbours `240` apart from origin to origin, and now
+puts their boxes `240` apart. For a node that paints `158` wide the old grid was
+`158 + 82` apart, so the same number now yields a slightly airier grid. The
+earlier rule — every rank centred over the largest rank — is gone: it pushed the
+last node of a short branch to the midpoint between the branches.
+
+The box the arithmetic reads comes from, in order: the node's own `width` /
+`height` (a hint a strategy may receive), then `nodeSize`, then the strategy's
+`{ width: 140, height: 40 }` default — the `--ndr-node-min-width` /
+`--ndr-node-min-height` token defaults of the default node renderer. `nodeSize` is
+a **fallback**, never a measurement: it is configuration, never document data, and
+nothing about it reaches the portable document, the history or an event. The SDK
+itself passes no per-node size, because a node in `@nodera/graph-model` carries no
+box; measuring one is the canvas adapter's business. `rankSpacing` is unaffected:
+it still measures rank line to rank line.
 
 ### Manual drags and the positions the layout owns
 
@@ -454,11 +504,11 @@ it looks like:
 | Prop (`GraphCanvas`, forwarded by `NoderaEditor`) | Replaces | Host receives |
 | --- | --- | --- |
 | `renderEdgeInsert` | the "+" at the midpoint of one edge | `edgeId` |
-| `renderPlaceholder` | the dashed placeholder box **and** its "+", for the empty state *and* every successor placeholder | `PhantomPlaceholder`: `kind`, `anchorId`, `box`, `connector` |
+| `renderPlaceholder` | the dashed placeholder box **and** its "+", for the empty state *and* every successor placeholder | `PhantomPlaceholder`: `kind`, `anchorId`, `box`, `connectors` |
 
 **What the host may replace.** The control: its element, its icon, its label, its
 styling, and — because it is the host's component — what activating it does. One
-component covers both placeholder kinds, so a host that wants `box` or `connector`
+component covers both placeholder kinds, so a host that wants `box` or `connectors`
 to move with the layout reads them from the placeholder it receives instead of
 recomputing geometry.
 
@@ -541,18 +591,23 @@ placeholder avoids the collision itself, on every render:
   before the first measurement;
 - for each node that qualifies (leaf successors in **node id order**, so the
   result never depends on the order the document reported them in) it takes the
-  **first slot along the layout axis that intersects no occupied box**, and adds
-  the accepted placeholder to the occupied set before deriving the next one;
-- the walk starts one step past the node (`PHANTOM_NODE_OFFSET`, and never
-  shorter than the node plus `PHANTOM_CONNECTOR_MIN_LENGTH` so the connector
-  cannot collapse) and advances by whole steps while the candidate box hits
-  something. It only pushes **forward along the axis**: the cross-axis position
-  stays on the node's own row, because a placeholder belongs next to its node and
-  not somewhere else on the canvas. The walk is bounded by the farthest occupied
-  edge along the axis, so it always terminates on a free slot;
-- the connector spans the **actual distance** to the chosen box, so a pushed
-  placeholder keeps its dashed line attached — a collision never detaches it or
-  leaves it pointing at the slot the placeholder did not take.
+  first free slot and adds the accepted placeholder to the occupied set before
+  deriving the next one. A slot is free only when no occupied box in its band is
+  closer than `PHANTOM_CONNECTOR_MIN_LENGTH`: the placeholder takes **the same
+  space as a node**, so touching the corner of a real box is not "free";
+- the search has three placements, in order: the node's own column one **rank
+  pitch** past it (`layoutRankSpacing`, 240 flow units by default, never shorter
+  than the node plus `PHANTOM_CONNECTOR_MIN_LENGTH` so the connector cannot
+  collapse); one **cross pitch** to either side **on the same rank line** — the
+  box's own cross extent plus `layoutNodeSpacing`, which is where the layout puts
+  the next column of that rank — with the lower cross coordinate first, so it is
+  deterministic; and only when the whole line is blocked, the forward walk down
+  its own column, bounded by the farthest occupied edge, so it always terminates
+  on a free slot;
+- the connector spans the **actual distance** to the chosen box, as one run when
+  the slot is aligned and as two (flow run + cross run to the box's near edge)
+  when the slot is beside its node — a collision never detaches the dashed line
+  or leaves it pointing at the slot the placeholder did not take.
 
 The phantoms are **presentation only**, and that is enforced, not promised:
 
@@ -657,9 +712,15 @@ leftover.
 
 The axis comes from the host, because the canvas cannot read
 `graph.layout.direction`: it passes `GraphCanvas.layoutDirection` (or
-`NoderaEditor.layoutDirection`), which defaults to `"horizontal"`. The step is
-`PHANTOM_NODE_OFFSET` (240 flow units), the adapter's documented default — it
-cannot see `graph.layout.spacing` either.
+`NoderaEditor.layoutDirection`), which defaults to `"horizontal"`. The step does
+too: `GraphCanvas.layoutRankSpacing` / `NoderaEditor.layoutRankSpacing` is the
+rank pitch of the arrangement and `layoutNodeSpacing` is the gap between
+neighbouring boxes of one rank, so the phantom of a leaf lands on the **rank line
+the real nodes of its sibling branch occupy** instead of a fixed default step
+above it, and a sideways lane lands where the next column would. Both default to
+the adapter's documented `PHANTOM_NODE_OFFSET` (240 flow units); the lane pitch
+always carries the box's own cross extent, so the default lane is the box plus a
+240-unit gap. Both are presentation geometry only: they write no document state.
 
 ### `builder.graphLayout`
 
@@ -683,8 +744,9 @@ while the selection stays where it was.
 `examples/layout-switch-demo` is the reference host. It composes one builder over
 `@nodera/sdk` + `@nodera/react-flow` + `@nodera/ui-react`, seeds a five-node
 pipeline **without positions** with `graph.layout` declaring `mode: "auto"`,
-`direction: "horizontal"`, `spacing: 240` and `rankSpacing: 280`, and then puts
-every layout action in its own toolbar **above** the canvas:
+`direction: "horizontal"`, `spacing: 240`, `rankSpacing: 280` and its real node
+box as `nodeSize: { width: 158, height: 34 }`, and then puts every layout action
+in its own toolbar **above** the canvas:
 
 - a strategy select calling `builder.graphLayout.setDefault(id)`, which also
   applies the surface that strategy implies: with `nodera.graph-layout.layered`
@@ -712,8 +774,10 @@ every layout action in its own toolbar **above** the canvas:
   `pendingAppendAnchorId` and the same host handler appends with
   `builder.graph.addNode({ type, after })` and then connects, which is **two**
   history units — documented, not hidden. The demo passes its own `direction` as
-  `NoderaEditor.layoutDirection`, so a vertical arrangement steps the
-  placeholders downwards;
+  `NoderaEditor.layoutDirection` and its own `rankSpacing` / `spacing` as
+  `layoutRankSpacing` / `layoutNodeSpacing`, so switching to a vertical
+  arrangement steps the placeholders downwards and a phantom sits on the rank
+  line of the real node of the sibling branch that shares its rank;
 - the "+" the canvas paints on every edge, because the demo declares
   `features: { edgeInsertion: true }`: the dialog opens on that edge and the same
   host handler inserts with `builder.graph.insertNode`, so the node lands between
@@ -760,11 +824,21 @@ Stated, not hidden:
   which removes the sibling crossings a plain id order produced. It **reduces**
   crossings; it does not guarantee a crossing-free drawing, because minimising
   crossings is NP-hard. There are no edge bend points and no edge routing either:
-  the layered strategy produces a ranked, evenly spaced grid, and each rank is
-  centred on its cross axis over the widest rank, so a node several branches
-  depart from sits over the centre of those branches.
-- No node-size awareness: positions are computed from ids, edges and the declared
-  spacings, so the result does not adapt to wide or tall node renderers.
+  the layered strategy produces a ranked, evenly spaced grid. On the cross axis
+  that grid is **aligned with the neighbours** rather than centred on the widest
+  rank — a node with several children sits over the mean of those children, and a
+  node with one parent sits in that parent's column — so a branch's last node
+  stays under the branch instead of drifting toward the other one.
+- **Boxes, not measured boxes.** The cross axis reserves the room a node's box
+  takes — the size a strategy is handed, `graph.layout.nodeSize`, or the
+  strategy's `140 × 40` default — so two neighbouring boxes of a rank never
+  overlap and the nodes of one rank are separated by exactly `spacing`. What it
+  does **not** do is
+  measure the rendered node: a renderer that paints taller or wider than the box
+  it declared can still paint over its neighbours, and closing that gap needs the
+  canvas adapter to hand the strategy real measurements. The flow axis is still
+  `rank * rankSpacing` from box origin to box origin, so a declared box taller
+  than the rank distance overlaps the next rank; the host picks both numbers.
 - `Arrange` always **computes** the whole graph (`scope: "all"` from the SDK);
   `arrange({ from })` only narrows which positions are written. There is no
   incremental ranker and none is planned — the port itself can express
@@ -782,12 +856,15 @@ Stated, not hidden:
   **two** history units (create, then connect) instead of one. Only the edge "+",
   which has an application use case, guarantees all-or-nothing; a single-unit
   append-and-connect is a pending use case, not implemented here.
-- Placeholders sit a fixed distance (`PHANTOM_NODE_OFFSET`, 240 flow units) past
-  their node, and the axis is whatever the host passes as `layoutDirection`
-  (`"horizontal"` by default), because the canvas adapter can see neither
-  `graph.layout.spacing` nor `graph.layout.direction`. A collision with a real
+- Placeholders step by the rank pitch the host declares
+  (`layoutRankSpacing`, `PHANTOM_NODE_OFFSET` = 240 flow units when it declares
+  nothing), along the axis it declares (`layoutDirection`, `"horizontal"` by
+  default), because the canvas adapter can see neither `graph.layout.spacing`,
+  `graph.layout.rankSpacing` nor `graph.layout.direction`. A collision with a real
   node or another placeholder pushes the placeholder forward by whole steps
   along that axis — the distance is no longer always one step, the **slot** is
-  always the first free one.
+  always the first free one. The sideways lane a blocked column falls back to is
+  the box's own cross extent plus `layoutNodeSpacing`, i.e. the next column of
+  that rank.
 - A successor placeholder marks a leaf, not a possible position: it stays one
   placeholder per leaf, never one per branch.

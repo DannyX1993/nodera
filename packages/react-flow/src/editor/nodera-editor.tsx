@@ -97,6 +97,25 @@ export interface NoderaEditorProps {
    * the graph does. Defaults to `"horizontal"`. It reaches no document state.
    */
   readonly layoutDirection?: PlaceholderAxis;
+  /**
+   * Rank pitch the phantom placeholders step by (S7, S21).
+   *
+   * `graph.layout.rankSpacing` is SDK configuration too, so the host that knows
+   * the pitch its arrangement uses passes it here: the phantom of a leaf then
+   * lands on the rank line the real nodes of its sibling branch occupy, instead
+   * of a fixed default step above it. Defaults to the adapter's documented 240
+   * flow units. Presentation geometry only.
+   */
+  readonly layoutRankSpacing?: number | undefined;
+  /**
+   * Gap between neighbouring boxes of one rank, for the phantom placeholders
+   * (S7, S21).
+   *
+   * It is what puts a sideways lane exactly where the layout places the next
+   * column of the same rank: one box of that rank plus this gap. Defaults to the
+   * adapter's documented 240 flow units. Presentation geometry only.
+   */
+  readonly layoutNodeSpacing?: number | undefined;
   readonly className?: string;
 }
 
@@ -173,6 +192,8 @@ function DefaultCanvasRegion(props: {
   readonly renderEdgeInsert?: (edgeId: string) => ReactNode;
   readonly renderPlaceholder?: (placeholder: PhantomPlaceholder) => ReactNode;
   readonly layoutDirection?: PlaceholderAxis;
+  readonly layoutRankSpacing?: number | undefined;
+  readonly layoutNodeSpacing?: number | undefined;
 }): ReactNode {
   const builder = props.builder;
   const ui = useUiState();
@@ -205,9 +226,20 @@ function DefaultCanvasRegion(props: {
           showControls={builder.adapter?.capabilities.controls ?? true}
           edgeInsertion={ui.edgeInsertion}
           edgeWaypointEditing={waypointEditing}
+          // The camera framing is host configuration (`viewport`), read live
+          // like `removalPolicy`: the canvas reads it when it frames instead of
+          // re-rendering on it, and an absent configuration keeps today's plain
+          // `fitView`.
+          viewportFit={() => builder.viewport()}
           {...(props.layoutDirection === undefined
             ? {}
             : { layoutDirection: props.layoutDirection })}
+          {...(props.layoutRankSpacing === undefined
+            ? {}
+            : { layoutRankSpacing: props.layoutRankSpacing })}
+          {...(props.layoutNodeSpacing === undefined
+            ? {}
+            : { layoutNodeSpacing: props.layoutNodeSpacing })}
           {...(props.renderEdgeInsert === undefined
             ? {}
             : { renderEdgeInsert: props.renderEdgeInsert })}
@@ -274,6 +306,12 @@ function EditorSurface(props: NoderaEditorProps): ReactNode {
           {...(props.layoutDirection === undefined
             ? {}
             : { layoutDirection: props.layoutDirection })}
+          {...(props.layoutRankSpacing === undefined
+            ? {}
+            : { layoutRankSpacing: props.layoutRankSpacing })}
+          {...(props.layoutNodeSpacing === undefined
+            ? {}
+            : { layoutNodeSpacing: props.layoutNodeSpacing })}
           {...(props.renderEdgeInsert === undefined
             ? {}
             : { renderEdgeInsert: props.renderEdgeInsert })}

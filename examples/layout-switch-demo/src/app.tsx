@@ -20,6 +20,11 @@
  * | Surface | Connections           | `builder.graphLayout.setConnectionsPolicy(policy)`             |
  * | Surface | Ports                 | `builder.graphLayout.setPortsPolicy(policy)`                   |
  * | Surface | Edge "+"              | `builder.features.setEdgeInsertion(enabled)` — runtime toggle  |
+ * | Camera  | Start framing         | `builder.setViewport({ start })` — remounts the canvas        |
+ * | Camera  | Start zoom ceiling    | `builder.setViewport({ start: { maxZoom } })` — remounts       |
+ * | Camera  | Follow selection      | `builder.setViewport({ selection })` — next selection change   |
+ * | Camera  | Selection zoom ceiling | `builder.setViewport({ selection: { maxZoom } })`               |
+ * | Camera  | Camera duration       | `builder.setViewport({ start, selection })` — ms, `0` instant   |
  * | Edge style | Geometry, width, arrows, line style, color, animation | `registries.edges.unregister(type)` + `builder.registerEdge` — an explicit replace of the demo edge definition, which all edges of that type re-render from |
  * | Actions | Arrange               | `builder.graph.arrange({ … })` — one explicit history unit     |
  * | Actions | Arrange from a node   | `builder.graph.arrange({ from, … })` — the scoped call         |
@@ -48,7 +53,7 @@
 
 import { useState, type ReactNode } from "react";
 
-import type { Builder, EdgeStyleInput, SdkIssues } from "@nodera/sdk";
+import type { Builder, EdgeStyleInput, SdkIssues, ViewportConfiguration } from "@nodera/sdk";
 import { NoderaEditor } from "@nodera/react-flow";
 import {
   CreateNodeButton,
@@ -58,7 +63,14 @@ import {
   useUiState,
 } from "@nodera/ui-react";
 
-import { DEMO_EDGE_LABEL, DEMO_EDGE_STYLE, DEMO_EDGE_TYPE, DEMO_LAYOUT, resetDemoGraph } from "./builder.js";
+import {
+  DEMO_EDGE_LABEL,
+  DEMO_EDGE_STYLE,
+  DEMO_EDGE_TYPE,
+  DEMO_LAYOUT,
+  DEMO_START_NODE_ID,
+  resetDemoGraph,
+} from "./builder.js";
 
 /** Props accepted by {@link LayoutSwitchDemo}. */
 export interface LayoutSwitchDemoProps {
@@ -164,6 +176,28 @@ const REMOVAL_POLICY_LABEL: Readonly<Record<RemovalPolicy, string>> = {
   splice: "a removed node joins each predecessor to each successor, in the same history unit",
 };
 
+/** What the camera frames when the canvas mounts, in the order the host offers it. */
+const START_FRAMINGS = ["graph", "node"] as const;
+
+/** One start framing rule. */
+type StartFraming = (typeof START_FRAMINGS)[number];
+
+/**
+ * The raw text the camera controls hold.
+ *
+ * The three numbers are kept as text on purpose, exactly like the spacing fields:
+ * an emptied field means "not configured", while a value the SDK cannot hold
+ * (`-1`, `abc`) reaches `setViewport` and is refused there with a diagnostic
+ * instead of being swallowed by the host.
+ */
+interface CameraControls {
+  readonly framing: StartFraming;
+  readonly startMaxZoom: string;
+  readonly selectionMaxZoom: string;
+  readonly duration: string;
+  readonly followSelection: boolean;
+}
+
 /** Values the "Edge style" controls hold: the visual of one edge definition. */
 interface DemoEdgeStyle {
   readonly geometry: EdgeStyleInput["geometry"];
@@ -234,6 +268,20 @@ function issueSummary(issues: SdkIssues): string {
     .join(" | ");
 }
 
+/**
+ * One spacing value as the canvas placeholder geometry receives it.
+ *
+ * The spacing fields are text on purpose (an emptied one means "not
+ * configured"), so the placeholders get a number only when the text really
+ * parses. An emptied field therefore declares nothing and the phantom keeps its
+ * own default pitch, instead of painting a `NaN` transform — the refusal the SDK
+ * reports for the arrangement is the behaviour to see, not a broken overlay.
+ */
+function declaredSpacing(text: string): number | undefined {
+  const value = Number.parseFloat(text);
+  return Number.isFinite(value) ? value : undefined;
+}
+
 /** Number of nodes an arrange moved, in words. */
 function movedLabel(count: number): string {
   return `${String(count)} node${count === 1 ? "" : "s"}`;
@@ -248,6 +296,53 @@ function positionLabel(position: { readonly x: number; readonly y: number } | un
 function shortStrategy(strategyId: string): string {
   const parts = strategyId.split(".");
   return parts[parts.length - 1] ?? strategyId;
+}
+
+/**
+ * Parses one optional camera number.
+ *
+ * An emptied field is `undefined` — "not configured", so the documented default
+ * applies — and anything else is passed through as the number it says, so a
+ * negative or unparsable value is refused by the SDK with its own diagnostic.
+ */
+function optionalNumber(raw: string): number | undefined {
+  return raw.trim() === "" ? undefined : Number(raw);
+}
+
+/** The camera configuration the controls describe. */
+function cameraConfiguration(values: CameraControls): ViewportConfiguration {
+  const duration = optionalNumber(values.duration);
+  const startMaxZoom = optionalNumber(values.startMaxZoom);
+  const selectionMaxZoom = optionalNumber(values.selectionMaxZoom);
+  return {
+    start: {
+      ...(values.framing === "node" ? { node: DEMO_START_NODE_ID } : {}),
+      ...(startMaxZoom === undefined ? {} : { maxZoom: startMaxZoom }),
+      ...(duration === undefined ? {} : { duration }),
+    },
+    ...(values.followSelection
+      ? {
+          selection: {
+            ...(selectionMaxZoom === undefined ? {} : { maxZoom: selectionMaxZoom }),
+            ...(duration === undefined ? {} : { duration }),
+          },
+        }
+      : {}),
+  };
+}
+
+/** The status line one applied camera configuration produces. */
+function cameraStatus(configuration: ViewportConfiguration): string {
+  const start = configuration.start;
+  const framing = start?.node === undefined ? "the whole graph" : `node "${start.node}"`;
+  const followed =
+    configuration.selection === undefined
+      ? "the selection does not move the camera"
+      : `the selection is followed up to ${String(configuration.selection.maxZoom)}x`;
+  return (
+    `Camera applied: start frames ${framing} at up to ${String(start?.maxZoom)}x ` +
+    `in ${String(start?.duration)} ms; ${followed}.`
+  );
 }
 
 export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
@@ -299,7 +394,29 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   // counter that remounts the canvas — the host's own workaround for a
   // framework gap, reported rather than hidden.
   const [edgeStyle, setEdgeStyle] = useState<DemoEdgeStyle>(() => ({ ...DEMO_EDGE_STYLE }));
-  const [edgeStyleRevision, setEdgeStyleRevision] = useState(0);
+  // The same counter also covers the camera: the `start` framing is resolved
+  // once at mount, so a runtime `setViewport` that changes it only lands on a new
+  // mount. One counter, one remount mechanism, for both gaps.
+  const [remountRevision, setRemountRevision] = useState(0);
+  // The camera is configuration too, so the controls seed from the stored value
+  // (`DEMO_VIEWPORT`, resolved) and every change goes through `setViewport`.
+  const [camera, setCamera] = useState<CameraControls>(() => {
+    const declared = builder.viewport();
+    return {
+      framing: declared?.start?.node === undefined ? "graph" : "node",
+      startMaxZoom:
+        declared?.start?.maxZoom === undefined ? "" : String(declared.start.maxZoom),
+      followSelection: declared?.selection !== undefined,
+      selectionMaxZoom:
+        declared?.selection?.maxZoom === undefined ? "" : String(declared.selection.maxZoom),
+      duration: declared?.start?.duration === undefined ? "" : String(declared.start.duration),
+    };
+  });
+
+  /** Remounts the canvas: the host's way of re-applying what it resolves on mount. */
+  const remountCanvas = (): void => {
+    setRemountRevision((revision) => revision + 1);
+  };
 
   /** The per-call overrides the control values describe, parsed on purpose. */
   const overrides = (values: Arrangement): ArrangeOverrides => ({
@@ -515,6 +632,61 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
   };
 
   /**
+   * Applies the camera configuration the controls describe.
+   *
+   * The SDK validates it exactly as it validates the creation-time group, so a
+   * refused value — a negative ceiling, an unparsable field — is reported in the
+   * status line and the previous camera stays in force, which is what the canvas
+   * keeps reading.
+   *
+   * `selection` is read live on every selection change, so it needs no remount.
+   * `start` is resolved once at mount, so a change to it remounts the canvas
+   * through the same revision counter the edge style uses.
+   */
+  const applyCameraChange = (next: CameraControls, reapplyStart: boolean): void => {
+    setCamera(next);
+    const changed = builder.setViewport(cameraConfiguration(next));
+    if (!changed.ok) {
+      setStatus(`Camera was not applied — ${issueSummary(changed.error)}`);
+      return;
+    }
+    if (reapplyStart) {
+      remountCanvas();
+    }
+    const applied = changed.value;
+    setStatus(applied === undefined ? "Camera cleared." : cameraStatus(applied));
+  };
+
+  /** Changes what the camera frames when the canvas mounts. */
+  const selectStartFraming = (reported: string): void => {
+    const framing = offered(START_FRAMINGS, reported);
+    if (framing === undefined) {
+      return;
+    }
+    applyCameraChange({ ...camera, framing }, true);
+  };
+
+  /** Changes the zoom ceiling the start framing fits under; empty = no ceiling. */
+  const changeStartZoom = (reported: string): void => {
+    applyCameraChange({ ...camera, startMaxZoom: reported }, true);
+  };
+
+  /** Turns the follow-the-selection rule on or off; it applies on the next selection change. */
+  const toggleFollowSelection = (enabled: boolean): void => {
+    applyCameraChange({ ...camera, followSelection: enabled }, false);
+  };
+
+  /** Changes the zoom ceiling a followed selection fits under; empty = no ceiling. */
+  const changeSelectionZoom = (reported: string): void => {
+    applyCameraChange({ ...camera, selectionMaxZoom: reported }, false);
+  };
+
+  /** Changes the animation length both rules use; `0` is instant. */
+  const changeCameraDuration = (reported: string): void => {
+    applyCameraChange({ ...camera, duration: reported }, true);
+  };
+
+  /**
    * Rewrites the visual of the demo's one edge definition.
    *
    * The style of an edge type is renderer configuration on its definition, so
@@ -540,7 +712,7 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
       return;
     }
     setEdgeStyle(next);
-    setEdgeStyleRevision((revision) => revision + 1);
+    remountCanvas();
     setStatus(
       `Edge style applied: ${next.geometry}, ${next.lineStyle}, ` +
         `arrows ${next.arrowStart ? "start" : "–"}/${next.arrowEnd ? "end" : "–"}, ` +
@@ -726,6 +898,7 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
     `drag ${drag}`,
     `connections ${connections}`,
     `ports ${ports}`,
+    `camera ${camera.framing}${camera.followSelection ? " + follow" : ""}`,
     `arrange on ${arrangeOnChange}`,
     `remove ${removal}`,
     `edge "+" ${edgeInsertion ? "on" : "off"}`,
@@ -1011,6 +1184,96 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
           </fieldset>
 
           <fieldset className="demo-group">
+            <legend>Camera</legend>
+            <div className="demo-group-body">
+              <label className="demo-control">
+                Start framing
+                <select
+                  className="demo-select"
+                  data-demo-control="start-framing"
+                  value={camera.framing}
+                  onChange={(event) => {
+                    selectStartFraming(event.target.value);
+                  }}
+                >
+                  {START_FRAMINGS.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="demo-control">
+                Start zoom ceiling
+                <input
+                  className="demo-number"
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  data-demo-control="start-zoom"
+                  value={camera.startMaxZoom}
+                  onChange={(event) => {
+                    changeStartZoom(event.target.value);
+                  }}
+                />
+              </label>
+
+              <label className="demo-control">
+                Follow selection
+                <input
+                  type="checkbox"
+                  className="demo-checkbox"
+                  data-demo-control="follow-selection"
+                  checked={camera.followSelection}
+                  onChange={(event) => {
+                    toggleFollowSelection(event.target.checked);
+                  }}
+                />
+              </label>
+
+              <label className="demo-control">
+                Selection zoom ceiling
+                <input
+                  className="demo-number"
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  data-demo-control="selection-zoom"
+                  value={camera.selectionMaxZoom}
+                  onChange={(event) => {
+                    changeSelectionZoom(event.target.value);
+                  }}
+                />
+              </label>
+
+              <label className="demo-control">
+                Camera duration (ms)
+                <input
+                  className="demo-number"
+                  type="number"
+                  min={0}
+                  step={50}
+                  data-demo-control="camera-duration"
+                  value={camera.duration}
+                  onChange={(event) => {
+                    changeCameraDuration(event.target.value);
+                  }}
+                />
+              </label>
+
+              <p className="demo-note">
+                {"Every control calls "}
+                <code>{"builder.setViewport(...)"}</code>
+                {"; a refused value keeps the previous camera and is reported above. "}
+                {"An emptied number means not configured, so the documented default applies. "}
+                {"The selection rule takes effect on the next selection change; a start "}
+                {"change re-applies the start framing at once by remounting the canvas."}
+              </p>
+            </div>
+          </fieldset>
+
+          <fieldset className="demo-group">
             <legend>Edge style</legend>
             <div className="demo-group-body">
               <label className="demo-control">
@@ -1217,7 +1480,13 @@ export function LayoutSwitchDemo(props: LayoutSwitchDemoProps): ReactNode {
         <NoderaEditor
           builder={builder}
           layoutDirection={direction}
-          key={`edge-style-${String(edgeStyleRevision)}`}
+          // The placeholder geometry follows the host's own controls: the phantom
+          // of a leaf steps by the rank pitch and lane gap the controls hold, so
+          // it lands on the rank line of the sibling branch's real node instead
+          // of a fixed default step above it.
+          layoutRankSpacing={declaredSpacing(rankSpacing)}
+          layoutNodeSpacing={declaredSpacing(spacing)}
+          key={`canvas-${String(remountRevision)}`}
         />
       </div>
 

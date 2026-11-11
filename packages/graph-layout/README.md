@@ -8,10 +8,13 @@ It never imports React, React Flow or a canvas, never reads or writes a graph
 instance, and never applies anything: the application layer decides when a
 placement becomes a document change. Nothing here is applied automatically.
 
-The package declares **no defaults of its own**. Every option is required in
-`GraphLayoutOptions`, so the values a graph is arranged with are the host's
-declaration or the SDK's documented resolution of it (see
-[Defaults](#defaults) and `docs/GRAPH-LAYOUT.md`).
+The package declares **one default of its own** and nothing else: the fallback
+node box `{ width: 140, height: 40 }` (`DEFAULT_LAYOUT_NODE_SIZE`) that the layered
+strategy reserves for a node nobody measured. `direction`, `nodeSpacing`,
+`rankSpacing` and `scope` are required in `GraphLayoutOptions`, and `nodeSize` is
+the optional fallback box that overrides the one above. Everything else a graph is
+arranged with is the host's declaration or the SDK's documented resolution of it
+(see [Defaults](#defaults) and `docs/GRAPH-LAYOUT.md`).
 
 ## Exports
 
@@ -21,9 +24,10 @@ Everything below is re-exported from the package root (`src/index.ts`).
 | --- | --- | --- |
 | `GraphLayoutStrategy` | interface | The port: a qualified `id` and `place(input)` |
 | `GraphLayoutInput` | interface | `nodes`, `edges` and `options` — the whole input |
-| `GraphLayoutNodeInput` | interface | `id` plus the `position` the document already carries, when it has one |
+| `GraphLayoutNodeInput` | interface | `id`, the `position` the document already carries (when it has one) and the `width`/`height` box hints |
 | `GraphLayoutEdgeInput` | interface | `source` and `target` node ids |
-| `GraphLayoutOptions` | interface | `direction`, `nodeSpacing`, `rankSpacing` and `scope` |
+| `GraphLayoutOptions` | interface | `direction`, `nodeSpacing`, `rankSpacing`, `scope` and the optional `nodeSize` fallback box |
+| `GraphLayoutNodeSize` | interface | `width` and `height` of a box, in flow units |
 | `GraphLayoutDirection` | type | `"horizontal"` or `"vertical"` |
 | `GraphLayoutScope` | type | `"all"` or `"unpositioned"` |
 | `GraphLayoutPlacedNode` | interface | `nodeId` plus the computed `position` |
@@ -32,6 +36,7 @@ Everything below is re-exported from the package root (`src/index.ts`).
 | `GraphLayoutDiagnosticCode` | type | The three stable codes below |
 | `createFreeStrategy` / `FREE_STRATEGY_ID` | factory / constant | The no-op strategy, id `nodera.graph-layout.free` |
 | `createLayeredStrategy` / `LAYERED_STRATEGY_ID` | factory / constant | The in-house layered strategy, id `nodera.graph-layout.layered` |
+| `DEFAULT_LAYOUT_NODE_SIZE` | constant | The `{ width: 140, height: 40 }` box the layered strategy reserves for a node nobody measured |
 | `LayoutStrategyRegistry` | class | The composition point: holds strategies, names a default |
 | `LayoutStrategyRegistryOptions` | interface | `strategies` and `defaultStrategyId` |
 | `BUILT_IN_STRATEGIES` | constant | One instance each of `free` and `layered` |
@@ -56,7 +61,12 @@ const result = strategy.place({
     { id: createNodeId("work"), position: { x: 40, y: 0 } },
   ],
   edges: [{ source: createNodeId("start"), target: createNodeId("work") }],
-  options: { direction: "horizontal", nodeSpacing: 40, rankSpacing: 120, scope: "unpositioned" },
+  options: {
+    direction: "horizontal",
+    nodeSpacing: 40,                    // the GAP between two boxes of a rank
+    rankSpacing: 120,
+    scope: "unpositioned",
+  },
 });
 
 if (result.ok) {
@@ -117,15 +127,49 @@ at all.
      all, so it is not a source either; without this rule it would keep rank `0`
      and any recalculation would drop it at the origin (the hole the demo
      reported when a node added from the palette landed top-left).
-6. **Orders each rank by a barycenter sweep** and then applies the axes:
-   `horizontal` puts the rank on `x` (`rank × rankSpacing`) and the cross offset
-   on `y`; `vertical` swaps them. The cross offset of the node at in-rank index
-   `i` of a rank of `n` nodes is `(maxWidth - n) / 2 × nodeSpacing + i ×
-   nodeSpacing`, where `maxWidth` is the length of the widest rank in the graph
-   (the cycle-locked bucket included), so every rank is **centred** on the cross
-   axis over the widest one: a node several branches depart from sits over the
-   centre of those branches, and the widest rank itself keeps the cross
-   coordinate `0`. The sweep visits the ranks in ascending order and orders each
+6. **Orders each rank by a barycenter sweep**, **aligns the cross axis with the
+   neighbours**, and then applies the axes: `horizontal` puts the rank on `x`
+   (`rank × rankSpacing`) and the cross offset on `y`; `vertical` swaps them. The
+   cross axis is measured in **boxes**: the pitch of a rank is its widest box plus
+   `nodeSpacing`, so `nodeSpacing` is the gap between two neighbouring boxes, not
+   the distance between their origins. The box of a node is its own
+   `width`/`height`, else `options.nodeSize`, else `{ width: 140, height: 40 }`
+   (`DEFAULT_LAYOUT_NODE_SIZE`), and the rank's pitch reads `width` under
+   `vertical` (the boxes sit side by side) and `height` under `horizontal` (they
+   stack). The emitted position is the box's top-left corner, so the grid starts
+   at `0` on both axes.
+
+   The cross coordinate is **not** derived from the length of the rank. In each
+   rank, in the order the barycenter sweep produced, the node at in-rank index `i`
+   starts at `i × pitch`; the placement then runs **two pairs** of passes over the
+   ranks, and each pass restores the in-rank order and the `pitch` separation
+   before the next one starts:
+
+   - **downward** (ranks ascending): a node with at least one parent in an earlier
+     rank takes the **mean of those parents**; a node without one keeps its
+     coordinate;
+   - **upward** (ranks descending): a node with at least one child in a later rank
+     takes the **mean of those children**; a leaf keeps its coordinate, and the
+     rank is shifted so its mean stays the one the children asked for, which is
+     what stops a rank from drifting to one side.
+
+   Two pairs are the budget, not a convergence loop: the first puts every node on
+   its neighbours, the second lets a parent the upward pass moved pull its
+   children along. The answer is normalised at the end, so the graph starts at
+   cross coordinate `0`. What that buys:
+
+   - a node with **several children** sits over the mean of them, so a fork has
+     its parent in the middle of the fork;
+   - a node with **one parent** sits in that parent's column, so the last node of a
+     short branch stays under the branch instead of drifting to the midpoint of
+     the graph (the defect the earlier "centre every rank over the widest one"
+     rule produced);
+   - a **chain** is one straight column, and a **diamond** is symmetric around its
+     fork and its join;
+   - no two boxes of one rank overlap, whatever their sizes, because the `pitch`
+     separation is restored after every desired-coordinate write.
+
+   The sweep visits the ranks in ascending order and orders each
    one by the **mean** in-rank index of
    a node's distinct parents in the previous rank (median was the alternative;
    the mean is what puts a node under the centre of its parents); equal keys fall
@@ -140,9 +184,9 @@ at all.
    rank-permutation heuristic can promise that. The ranking itself is never
    touched: the sweep only chooses in-rank indices.
 7. **Filters by `scope`** last: `all` answers for every node, `unpositioned` drops
-   the nodes the document positions but keeps their in-rank index — and the
-   centring offset of the rank is computed from the **full** rank length, never
-   from the emitted subset — so the slots of the answered nodes do not move.
+   the nodes the document positions but keeps their slot — the alignment is
+   computed over the **full** ranks, never from the emitted subset — so the slots
+   of the answered nodes do not move.
 
 The answer is a ranked, evenly spaced grid, which is what an explicit `Arrange`
 action needs. There is no edge routing and no edge bend point (see
@@ -150,9 +194,12 @@ action needs. There is no edge routing and no edge bend point (see
 
 ## Defaults
 
-The strategy has no defaults: `direction`, `nodeSpacing`, `rankSpacing` and
-`scope` are required members. The defaults a host actually sees are resolved
-above this package, and these are the exact values:
+The strategy has one default of its own: `options.nodeSize ?? { width: 140,
+height: 40 }` (`DEFAULT_LAYOUT_NODE_SIZE`), the box it reserves for a node nobody
+measured — the `--ndr-node-min-width` / `--ndr-node-min-height` token defaults of
+the default node renderer. `direction`, `nodeSpacing`, `rankSpacing` and `scope`
+are required members. The defaults a host actually sees are resolved above this
+package, and these are the exact values:
 
 | Setting | Declared by the host | Default | Resolved in |
 | --- | --- | --- | --- |
@@ -160,6 +207,7 @@ above this package, and these are the exact values:
 | `graph.layout.direction` | `@nodera/sdk` | `"horizontal"` | same |
 | `graph.layout.spacing` | `@nodera/sdk` | `240` (`DEFAULT_GRAPH_LAYOUT_SPACING`), the `nodeSpacing` of `arrange()` | same |
 | `graph.layout.rankSpacing` | `@nodera/sdk` | the declared `spacing` | `packages/sdk/src/builder/builder.ts` |
+| `graph.layout.nodeSize` | `@nodera/sdk` | absent, so this package's `140 × 40` applies | `packages/sdk/src/builder/builder.ts` (`resolveNodeSize`) |
 | `graph.layout.strategy` | `@nodera/sdk` | `DEFAULT_STRATEGY_ID`, which is `nodera.graph-layout.layered` | `LayoutStrategyRegistry` |
 | `scope` of `arrange()` | not configurable | `"all"` | `packages/sdk/src/graph/graph-api.ts` |
 
@@ -173,21 +221,25 @@ Codes are stable and closed:
 
 | Code | Meaning | `nodeId` |
 | --- | --- | --- |
-| `graph-layout.invalid-options` | `nodeSpacing` or `rankSpacing` is not a positive finite number, or `direction`/`scope` is outside its union | absent |
+| `graph-layout.invalid-options` | `nodeSpacing` or `rankSpacing` is not a positive finite number, `nodeSize` is not an object with a positive finite `width` and `height` (the message names the field), or `direction`/`scope` is outside its union | absent |
 | `graph-layout.duplicate-node` | the input declares the same node id twice | the repeated id |
 | `graph-layout.unknown-edge-node` | an edge endpoint is not in `nodes` | the unknown endpoint |
 
 `message` is human-readable and must not be used to branch. The option checks run
-first and in this order: `nodeSpacing`, `rankSpacing`, `direction`, `scope`.
+first and in this order: `nodeSpacing`, `rankSpacing`, `nodeSize`, `direction`,
+`scope`.
 
 ## Who calls this
 
 `@nodera/sdk` is the only caller today, and it calls one strategy per explicit
 `builder.graph.arrange()` call: it reads the graph as plain data, asks the
 strategy selected by `graph.layout.strategy` with the host's `direction`,
-`spacing`, `rankSpacing` and `scope: "all"`, and applies the answer through
-`@nodera/application` (`arrangeGraph`) as one history unit. A diagnostic becomes
-an `sdk.invalid-input` issue and nothing is applied.
+`spacing`, `rankSpacing`, `scope: "all"` and — when the host declared one — its
+`nodeSize`, and applies the answer through `@nodera/application` (`arrangeGraph`)
+as one history unit. It passes no per-node `width`/`height`, because a node in
+`@nodera/graph-model` carries no box: measuring a rendered node belongs to the
+canvas adapter, and the SDK may not depend on one. A diagnostic becomes an
+`sdk.invalid-input` issue and nothing is applied.
 
 Nothing in this package knows about that: there is no planner, no scheduler and no
 observer. It computes positions and writes nothing — no document, no history, no
@@ -270,7 +322,10 @@ What the adapter itself must guarantee — the port cannot check any of it:
   diagnostics.
 - **The declared semantics.** Honour `options.direction`, both spacings and
   `options.scope` (`unpositioned` means: answer only for the nodes the document
-  does not position yet, and leave the others untouched).
+  does not position yet, and leave the others untouched). `nodeSpacing` is a gap
+  between boxes and `nodeSize` a fallback box, so an adapter that reserves room
+  reads `node.width`/`node.height` first and `options.nodeSize` second; one that
+  places points may ignore both, and must say so in its own documentation.
 
 ```ts
 // Host-side sketch, NOT shipped by Nodera and not imported by this package.

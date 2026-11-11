@@ -96,10 +96,30 @@ export interface GraphLayoutConfiguration {
   /** Direction the automatic placement grows in, and the axis `Arrange` advances the ranks along. Defaults to `"horizontal"`. */
   readonly direction?: "horizontal" | "vertical";
   /**
-   * Distance between adjacent automatic slots, in document units, and the
-   * `Arrange` in-rank spacing. Defaults to 240.
+   * Gap between two neighbouring node boxes of one `Arrange` rank, in document
+   * units, and the step between adjacent automatic slots of `mode: "auto"`.
+   * Defaults to 240.
+   *
+   * For `Arrange` it is the **gap between boxes**, not the distance between two
+   * positions: a rank steps by the widest box it holds plus this value, so two
+   * nodes are this far apart whatever their renderer paints them. See
+   * `nodeSize` for the box the strategy assumes when a node carries none.
    */
   readonly spacing?: number;
+  /**
+   * The host's default node box, in document units, for the nodes that carry no
+   * size of their own.
+   *
+   * A placement hint, never document data: nothing here reaches the portable
+   * document, the history or an event. `Arrange` uses it to reserve the room a
+   * box takes on the cross axis, so a lone rank can never be centred into a
+   * neighbouring column. Absent, the strategy's own default applies
+   * (`{ width: 140, height: 40 }`, the `--ndr-node-min-width` /
+   * `--ndr-node-min-height` token defaults). A width or height that is not a
+   * positive finite number refuses the builder at `graph.layout.nodeSize.width`
+   * or `.height`.
+   */
+  readonly nodeSize?: { readonly width: number; readonly height: number };
   /**
    * Globally qualified id of the strategy `Arrange` runs, e.g.
    * `nodera.graph-layout.layered` (the default) or an adapter the host
@@ -215,6 +235,46 @@ export interface BuilderGraphConfiguration {
   readonly layout?: GraphLayoutConfiguration;
 }
 
+/**
+ * What the camera frames, and how.
+ *
+ * Presentation only (AGENTS.md §5.3): nothing here reaches the portable
+ * document, the UI state, node data or the history, and moving the camera emits
+ * no application event. Both groups are absent by default, which is exactly
+ * today's behaviour: React Flow's plain `fitView` on init and no camera movement
+ * on selection.
+ */
+export interface ViewportConfiguration {
+  /** Camera placement when the canvas mounts. Absent: today's plain `fitView`. */
+  readonly start?: {
+    /** Node id to frame instead of the whole graph. */
+    readonly node?: string;
+    /** Absolute zoom level; absent fits with `padding` under `maxZoom`. */
+    readonly zoom?: number;
+    /** Ceiling when `zoom` is absent. Defaults to 1.5. */
+    readonly maxZoom?: number;
+    /** React Flow padding. Defaults to 0.1. */
+    readonly padding?: number;
+    /** Animation length in milliseconds; `0` is instant. Defaults to 200. */
+    readonly duration?: number;
+  };
+  /**
+   * Camera follows the selection with its own zoom rule.
+   *
+   * Absent: no camera movement on selection, today's behaviour. With it, the
+   * camera frames the selected nodes — and the selected edges when `edges` is
+   * on — and returns to the `start` framing when the selection is cleared.
+   */
+  readonly selection?: {
+    readonly zoom?: number;
+    readonly maxZoom?: number;
+    readonly padding?: number;
+    readonly duration?: number;
+    /** Frame a selected edge too. Default false: framing one edge zooms hard. */
+    readonly edges?: boolean;
+  };
+}
+
 /** Everything a host may configure on the builder. */
 export interface BuilderConfiguration {
   /** Globally qualified builder id. Defaults to `nodera.builder`. */
@@ -225,6 +285,14 @@ export interface BuilderConfiguration {
   readonly document?: BuilderDocumentConfiguration;
   readonly ui?: BuilderUiConfiguration;
   readonly graph?: BuilderGraphConfiguration;
+  /**
+   * Camera framing of the canvas that renders this builder.
+   *
+   * Read live by the presentation binding (`GraphCanvas.viewportFit`), so it is
+   * plain configuration, not a toggle: no runtime setter, no UI state and no
+   * document data.
+   */
+  readonly viewport?: ViewportConfiguration;
   /** Plugins installed while composing the builder, after the declarative registries. */
   readonly plugins?: readonly BuilderPlugin[];
 }

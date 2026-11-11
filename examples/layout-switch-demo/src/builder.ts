@@ -22,6 +22,7 @@ import type {
   GraphLayoutConfiguration,
   SdkIssue,
   SdkIssues,
+  ViewportConfiguration,
 } from "@nodera/sdk";
 import { createReactFlowAdapter } from "@nodera/react-flow";
 
@@ -69,18 +70,51 @@ export const DEMO_EDGE_STYLE = {
 } as const satisfies EdgeStyleInput;
 
 /**
+ * Camera the host declares at boot.
+ *
+ * `start` frames the whole graph under a ceiling instead of React Flow's own
+ * fit, so the graph never lands at a jarring magnification; `selection` makes
+ * the camera follow the selected node up to 2x and animate back to the graph
+ * view when the selection is cleared. Edges are left off on purpose: framing a
+ * single edge zooms violently, and this demo selects edges to edit waypoints.
+ *
+ * Neither value is document data — nothing here reaches the portable document,
+ * the history or an event.
+ */
+export const DEMO_VIEWPORT = {
+  start: { maxZoom: 1.2, duration: 200 },
+  selection: { maxZoom: 2, duration: 200 },
+} as const satisfies ViewportConfiguration;
+
+/**
  * Placement the host declares at boot.
  *
  * It is configuration, not a behaviour: `mode: "auto"` places an added node that
  * carries no position, and the direction and spacings are what `arrange()` reads
  * when the host's toolbar does not override them for one call. The host's own
  * controls start from these values, which is the only reason they are exported.
+ *
+ * `nodeSize` is the box the default node renderer paints: `--ndr-node-min-width`
+ * (140) plus `--ndr-node-padding` (8) on each side and a 1px border gives 158
+ * wide, and one 13px line in the same box gives 34 tall. It is a placement hint,
+ * never document data, and it is what makes the arrangement faithful: `arrange()`
+ * reserves that box, so a rank alone between two columns is centred with a gap
+ * on each side instead of being pushed into its neighbours.
+ *
+ * The two numbers keep their boot values for two different reasons. `spacing`
+ * still has to clear a 158-wide box along the flow axis at add time (`mode:
+ * "auto"` steps by it), so it stays at 240; its `arrange()` meaning is now the
+ * **gap between boxes**, which makes the cross axis 34 + 240 = 274 apart instead
+ * of the 240 it used to be — a slightly airier grid, and the reason a lone rank
+ * can no longer be centred into a neighbouring column. `rankSpacing` is
+ * untouched: it still means "distance between two rank lines".
  */
 export const DEMO_LAYOUT = {
   mode: "auto",
   direction: "horizontal",
   spacing: 240,
   rankSpacing: 280,
+  nodeSize: { width: 158, height: 34 },
   // The demo boots on the ranked strategy, so the surface it implies is declared
   // here too: fixed connections and no port handles, exactly what the strategy
   // control applies when the host switches back to `layered`.
@@ -92,9 +126,19 @@ export const DEMO_LAYOUT = {
   nodeTransition: "animated",
 } as const satisfies GraphLayoutConfiguration;
 
+/**
+ * First node of the seed graph, and the node the "Start framing: node" control
+ * frames.
+ *
+ * The camera has to name one node, and the seed's entry point is the only choice
+ * that does not depend on what a person adds later. It is exported instead of
+ * repeated in `app.tsx`, so the seed and the control cannot drift apart.
+ */
+export const DEMO_START_NODE_ID = "ingest";
+
 /** Nodes of the seed graph, added without a position. */
 const SEED_NODES: readonly { readonly nodeId: string; readonly type: string }[] = [
-  { nodeId: "ingest", type: INGEST_NODE_TYPE },
+  { nodeId: DEMO_START_NODE_ID, type: INGEST_NODE_TYPE },
   { nodeId: "parse", type: TRANSFORM_NODE_TYPE },
   { nodeId: "enrich", type: TRANSFORM_NODE_TYPE },
   { nodeId: "score", type: TRANSFORM_NODE_TYPE },
@@ -164,6 +208,7 @@ export function createDemoBuilder(): Builder {
       features: { edgeInsertion: true },
       document: { format: "ggd", version: "1.0.0" },
       graph: { graphId: "demo-layout-switch", layout: DEMO_LAYOUT },
+      viewport: DEMO_VIEWPORT,
     }),
   );
 

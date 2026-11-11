@@ -44,7 +44,7 @@ import {
 } from "@xyflow/react";
 
 import type { EditorEngine } from "@nodera/application";
-import type { RemovalPolicy } from "@nodera/sdk";
+import type { RemovalPolicy, ViewportConfiguration } from "@nodera/sdk";
 import type {
   ConnectionsPolicy,
   DragPolicy,
@@ -102,6 +102,12 @@ import type {
   NoderaPortRendererProps,
 } from "../renderers/node-renderer-props.js";
 import { canvasInteractionSettings, type CanvasInteractionMode } from "./interaction-mode.js";
+import {
+  selectionViewportPlan,
+  startViewportPlan,
+  viewportFitOptions,
+  type ViewportFitPlan,
+} from "./viewport-fit.js";
 
 /* ------------------------------------------------------------------ */
 /*  Canvas background (token contract)                                 */
@@ -428,13 +434,33 @@ function withEdgeInsert(
 export type PlaceholderAxis = "horizontal" | "vertical";
 
 /**
- * Distance between a node and the placeholder that follows it, in flow units.
+ * Default distance between consecutive ranks — and default gap between the
+ * neighbouring boxes of one rank — in flow units.
  *
- * The canvas cannot see `graph.layout.spacing` (the placement rule lives in the
- * SDK, the geometry in `@nodera/graph-layout`), so the adapter owns this
- * documented numeric default: the **first** step of the walk that looks for a
- * free slot past the node. That one step is all a placeholder needs; when
- * something already occupies it, {@link firstFreeSlot} moves on by whole steps.
+ * The canvas cannot see `graph.layout.rankSpacing` / `graph.layout.spacing`
+ * (that is SDK configuration, and the placement rule lives in
+ * `@nodera/graph-layout`), so the adapter owns this documented numeric default
+ * for both pitches. A host that knows what its layout uses declares it through
+ * `GraphCanvasProps.layoutRankSpacing` / `layoutNodeSpacing`, which is what makes
+ * the phantom of one branch land on the rank line the sibling branch's real node
+ * occupies instead of a default step above or below it.
+ *
+ * It is **both** pitches the search uses:
+ *
+ * - the **flow** pitch: the first step past the node, and then every whole step
+ *   the walk keeps moving along the axis while the rank band is blocked;
+ * - the **cross** pitch: the gap between neighbouring boxes of one rank, added
+ *   to the box's own cross extent, which is how far the placeholder slides to
+ *   the next lane of the same rank band — the column the layout itself would
+ *   place beside it.
+ *
+ * The flow step may grow past this offset ({@link PHANTOM_CONNECTOR_MIN_LENGTH})
+ * so that a node larger than one step never loses its connector.
+ *
+ * A slot is judged on both axes: a box that shares the candidate's cross band
+ * keeps it out of reach until {@link PHANTOM_SLOT_CLEARANCE} separates them,
+ * because this step and the layout's rank pitch are two different grids and a
+ * step alone can leave the ghost flush against a node of the next rank.
  */
 const PHANTOM_NODE_OFFSET = 240;
 
@@ -447,6 +473,22 @@ const PHANTOM_NODE_OFFSET = 240;
  * joining them, so the step grows instead of the connector shrinking away.
  */
 const PHANTOM_CONNECTOR_MIN_LENGTH = 24;
+
+/**
+ * Smallest gap between a placeholder and any box sharing its cross band, in flow
+ * units.
+ *
+ * A slot is the space a **real node** takes, not the pixels its outline covers
+ * (user report: the ghost of one branch clashes with the last node of another),
+ * so a candidate has to keep the smallest distance that still reads as a gap —
+ * the shortest connector the overlay can draw, which is why this reuses
+ * {@link PHANTOM_CONNECTOR_MIN_LENGTH} instead of inventing a second number. Two
+ * boxes nearer than that look like one collision even when their areas never
+ * overlap: the default step is 240 while a layered rank may sit 280 away, so the
+ * first candidate can stop flush against, or a few units above, a node of the
+ * next rank that intrudes into the placeholder's column.
+ */
+const PHANTOM_SLOT_CLEARANCE = PHANTOM_CONNECTOR_MIN_LENGTH;
 
 /**
  * Box of a node React Flow has not measured yet, in flow units.
@@ -524,12 +566,21 @@ export interface PlaceholderBox {
   readonly height: number;
 }
 
-/** The dashed connector from a node to the placeholder that follows it. */
+/**
+ * One straight run of the connector from a node to the placeholder that follows
+ * it.
+ *
+ * A run is axis-aligned and 1 px thick across its axis, which is why a sideways
+ * slot needs two of them ({@link PhantomPlaceholder.connectors}) instead of a
+ * diagonal: the overlay paints a run as a dashed CSS border, and the geometry
+ * that reaches a box beside the anchor is one run along the flow axis plus one
+ * along the cross axis.
+ */
 export interface PlaceholderConnector {
-  /** Flow coordinate the connector starts at (the node's far edge). */
+  /** Flow coordinate the run starts at (the node's far edge, or the lane edge). */
   readonly x: number;
   readonly y: number;
-  /** Length along the axis; the connector is 1 px thick across it. */
+  /** Length along the axis; the run is 1 px thick across it. */
   readonly length: number;
   readonly axis: PlaceholderAxis;
 }
@@ -549,8 +600,17 @@ export interface PhantomPlaceholder {
   readonly anchorId: string | undefined;
   readonly kind: PlaceholderKind;
   readonly box: PlaceholderBox;
-  /** Absent for the empty graph: there is no node to connect from. */
-  readonly connector: PlaceholderConnector | undefined;
+  /**
+   * The dashed run(s) that join the anchor to the box, in drawing order.
+   *
+   * A slot in the anchor's own column is one run along the declared axis, which
+   * is the straight connector this contract has always described. A slot that
+   * slid to a neighbouring lane adds a second run along the cross axis at the
+   * placeholder's flow line, so the line actually reaches the box instead of
+   * stopping short of a box it no longer points at. Empty for the empty graph:
+   * there is no node to connect from.
+   */
+  readonly connectors: readonly PlaceholderConnector[];
 }
 
 /** One node as the placeholder derivation reads it (presentation data only). */
@@ -571,9 +631,41 @@ export interface CanvasPlaceholderInput {
   readonly enabled: boolean;
   /** Axis the host declares; defaults to `"horizontal"`. */
   readonly axis?: PlaceholderAxis | undefined;
+  /**
+   * Flow step between consecutive ranks, in flow units; the value the host
+   * declares as `GraphCanvas.layoutRankSpacing`.
+   *
+   * Defaults to {@link PHANTOM_NODE_OFFSET} (240) when absent, which is the step
+   * a host that declares nothing has always seen.
+   */
+  readonly rankSpacing?: number | undefined;
+  /**
+   * Gap between neighbouring boxes of one rank, in flow units; the value the host
+   * declares as `GraphCanvas.layoutNodeSpacing`.
+   *
+   * A lane sits one cross pitch away — the box's own cross extent plus this gap —
+   * so it lands where the layout would place the next column of that rank.
+   * Defaults to {@link PHANTOM_NODE_OFFSET} (240) when absent.
+   */
+  readonly nodeSpacing?: number | undefined;
   readonly nodes: readonly PlaceholderNodeInput[];
   /** Edges of the document, read to tell a leaf from a node with a successor. */
   readonly edges: ReadonlyArray<{ readonly source: string; readonly target: string }>;
+}
+
+/**
+ * The two pitches the placeholder walk steps by, in flow units.
+ *
+ * Both are host-declared presentation geometry (see
+ * {@link CanvasPlaceholderInput.rankSpacing} / `nodeSpacing`), already resolved
+ * against {@link PHANTOM_NODE_OFFSET}: neither has an axis of its own, so one
+ * rule serves a vertical and a horizontal graph.
+ */
+interface PlaceholderPitch {
+  /** Flow step between consecutive ranks. */
+  readonly rank: number;
+  /** Gap between neighbouring boxes of one rank. */
+  readonly node: number;
 }
 
 /**
@@ -589,14 +681,14 @@ function sourceCapable(node: PlaceholderNodeInput): boolean {
   );
 }
 
-/** One placeholder in the first free slot past `node` along `axis`.
+/** One placeholder in the first free slot of its anchor's rank band.
  *
- * The placeholder occupies a slot like a node does (user report: the ghost
- * nodes of the layered mode must not cover other nodes), so the walk starts at
- * the documented step and moves forward by whole steps while the candidate box
- * intersects anything already there. Only the axis moves: the cross-axis
- * coordinate stays on the node's row, because a placeholder belongs next to its
- * own node and not somewhere else on the canvas.
+ * The placeholder occupies a slot like a node does (user report: the ghost takes
+ * the same space as a normal node), so it is not enough to avoid overlapping a
+ * node: the slot itself is the space a node needs, which is what
+ * {@link slotTaken} decides on both axes. The search order is
+ * {@link firstFreeSlot}; the connector is built by {@link connectorRuns} so it
+ * reaches the box wherever the slot was found.
  */
 function placeholderAfter(
   anchorId: string,
@@ -604,37 +696,135 @@ function placeholderAfter(
   node: PlaceholderNodeInput,
   axis: PlaceholderAxis,
   occupied: readonly PlaceholderBox[],
+  pitch: PlaceholderPitch,
 ): PhantomPlaceholder {
   const width = node.width ?? PLACEHOLDER_NODE_SIZE.width;
   const height = node.height ?? PLACEHOLDER_NODE_SIZE.height;
-  const { x, y } = node.position;
-  // One step past the node, but never so short that the connector disappears.
-  const step = Math.max(
-    PHANTOM_NODE_OFFSET,
-    (axis === "vertical" ? height : width) + PHANTOM_CONNECTOR_MIN_LENGTH,
-  );
-  const box = firstFreeSlot(node, axis, step, occupied);
-  const distance = axis === "vertical" ? box.y - (y + height) : box.x - (x + width);
+  const vertical = axis === "vertical";
+  const flowExtent = vertical ? height : width;
+  const crossExtent = vertical ? width : height;
+  // One rank step past the node, but never so short that the connector
+  // disappears: a box larger than the pitch grows the step instead.
+  const flowStep = Math.max(pitch.rank, flowExtent + PHANTOM_CONNECTOR_MIN_LENGTH);
+  // One lane is one column away: the box's own cross extent plus the gap the
+  // layout leaves between neighbouring boxes of a rank.
+  const laneStep = crossExtent + pitch.node;
+  const box = firstFreeSlot(node, axis, flowStep, laneStep, occupied);
 
-  return {
-    anchorId,
-    kind,
-    box,
-    connector:
-      axis === "vertical"
-        ? { x: x + width / 2, y: y + height, length: distance, axis }
-        : { x: x + width, y: y + height / 2, length: distance, axis },
-  };
+  return { anchorId, kind, box, connectors: connectorRuns(node, axis, box) };
 }
 
-/** Whether two boxes share any area at all. */
-function intersects(a: PlaceholderBox, b: PlaceholderBox): boolean {
-  return (
-    a.x < b.x + b.width &&
-    b.x < a.x + a.width &&
-    a.y < b.y + b.height &&
-    b.y < a.y + a.height
-  );
+/**
+ * The dashed run(s) that join a node to the placeholder placed after it.
+ *
+ * Always one run along the flow axis, from the node's far edge to the flow line
+ * the placeholder starts on. A slot that slid to a lane beside the node adds one
+ * run along the cross axis, at that same flow line, from the node's centre to the
+ * **near edge** of the box — an L rather than a diagonal, because a run is what
+ * the overlay paints (a dashed CSS border) and an L needs no new primitive. A
+ * slot in the node's own column has no lane offset, so the answer is exactly the
+ * single straight connector this contract has always described.
+ */
+function connectorRuns(
+  node: PlaceholderNodeInput,
+  axis: PlaceholderAxis,
+  box: PlaceholderBox,
+): readonly PlaceholderConnector[] {
+  const width = node.width ?? PLACEHOLDER_NODE_SIZE.width;
+  const height = node.height ?? PLACEHOLDER_NODE_SIZE.height;
+  const vertical = axis === "vertical";
+  const nodeFarEdge = vertical ? node.position.y + height : node.position.x + width;
+  const nodeCentre = vertical ? node.position.x + width / 2 : node.position.y + height / 2;
+  const boxFlowStart = vertical ? box.y : box.x;
+  const boxCentre = vertical ? box.x + box.width / 2 : box.y + box.height / 2;
+  const runs: PlaceholderConnector[] = [
+    vertical
+      ? { x: nodeCentre, y: nodeFarEdge, length: boxFlowStart - nodeFarEdge, axis }
+      : { x: nodeFarEdge, y: nodeCentre, length: boxFlowStart - nodeFarEdge, axis },
+  ];
+
+  const laneOffset = boxCentre - nodeCentre;
+  if (laneOffset !== 0) {
+    // The near edge of the box, never its centre: the run has to reach the box
+    // without drawing over it, and the box is a dashed outline of the same
+    // colour, so a run along its border would read as a doubled line.
+    const nearEdge =
+      laneOffset > 0
+        ? vertical
+          ? box.x
+          : box.y
+        : vertical
+          ? box.x + box.width
+          : box.y + box.height;
+    runs.push(
+      vertical
+        ? {
+            x: Math.min(nearEdge, nodeCentre),
+            y: boxFlowStart,
+            length: Math.abs(nearEdge - nodeCentre),
+            axis: "horizontal",
+          }
+        : {
+            x: boxFlowStart,
+            y: Math.min(nearEdge, nodeCentre),
+            length: Math.abs(nearEdge - nodeCentre),
+            axis: "vertical",
+          },
+    );
+  }
+
+  return runs;
+}
+
+/**
+ * Whether `candidate` is too close to `box` to be a free slot.
+ *
+ * Two boxes only compete when their **cross bands** overlap: a node in a
+ * neighbouring column cannot be hit by a placeholder that never enters its lane.
+ * Along the flow axis the candidate needs {@link PHANTOM_SLOT_CLEARANCE}, so this
+ * reports an overlap (a negative gap) and a near miss alike — the near miss is
+ * the reported defect, where a 140-wide node centred at a half step sits 20 units
+ * inside the placeholder's column and the two boxes end up touching.
+ */
+function slotTaken(
+  candidate: PlaceholderBox,
+  box: PlaceholderBox,
+  axis: PlaceholderAxis,
+): boolean {
+  const vertical = axis === "vertical";
+  const crossBandsOverlap = vertical
+    ? candidate.x < box.x + box.width && box.x < candidate.x + candidate.width
+    : candidate.y < box.y + box.height && box.y < candidate.y + candidate.height;
+  if (!crossBandsOverlap) {
+    return false;
+  }
+  const gap = vertical
+    ? Math.max(box.y - (candidate.y + candidate.height), candidate.y - (box.y + box.height))
+    : Math.max(box.x - (candidate.x + candidate.width), candidate.x - (box.x + box.width));
+  return gap < PHANTOM_SLOT_CLEARANCE;
+}
+
+/** Whether the slot `candidate` is free of every occupied box. */
+function slotFree(
+  candidate: PlaceholderBox,
+  axis: PlaceholderAxis,
+  occupied: readonly PlaceholderBox[],
+): boolean {
+  return !occupied.some((box) => slotTaken(candidate, box, axis));
+}
+
+/** The box a candidate slot would take, in flow coordinates. */
+function slotBox(
+  node: PlaceholderNodeInput,
+  axis: PlaceholderAxis,
+  flow: number,
+  cross: number,
+): PlaceholderBox {
+  const width = node.width ?? PLACEHOLDER_NODE_SIZE.width;
+  const height = node.height ?? PLACEHOLDER_NODE_SIZE.height;
+  return axis === "vertical"
+    ? { x: cross, y: flow, width, height }
+    : { x: flow, y: cross, width, height };
 }
 
 /** The box the node occupies, so the walk can treat it like any other. */
@@ -648,42 +838,94 @@ function nodeBox(node: PlaceholderNodeInput): PlaceholderBox {
 }
 
 /**
- * First free slot for `node` along `axis`, walking forward from its first step.
+ * The forward walk: the first free slot in `node`'s own column, from its first
+ * step on.
  *
- * The walk is bounded instead of open-ended: every occupied box ends at or
- * before `farEdge` along the axis, so a candidate that starts past it cannot
- * intersect anything. That ceiling makes the loop terminate on a free slot for
- * any input — including boxes wider than one step or boxes belonging to other
- * placeholders — with no retry, no randomness and no second scan.
+ * This is phase 3 of {@link firstFreeSlot} and the behaviour the placeholder had
+ * before lanes existed. The walk is bounded instead of open-ended: a candidate
+ * that starts {@link PHANTOM_SLOT_CLEARANCE} past every occupied box's flow far
+ * edge clears that box whatever the cross bands are, so the ceiling makes the
+ * loop terminate on a free slot for any input — including boxes larger than one
+ * step or boxes belonging to other placeholders — with no retry, no randomness
+ * and no second scan.
  */
-function firstFreeSlot(
+function forwardSlot(
   node: PlaceholderNodeInput,
   axis: PlaceholderAxis,
   step: number,
   occupied: readonly PlaceholderBox[],
 ): PlaceholderBox {
-  const width = node.width ?? PLACEHOLDER_NODE_SIZE.width;
-  const height = node.height ?? PLACEHOLDER_NODE_SIZE.height;
   const start = axis === "vertical" ? node.position.y : node.position.x;
+  const cross = axis === "vertical" ? node.position.x : node.position.y;
   const farEdge = occupied.reduce(
     (far, box) => Math.max(far, axis === "vertical" ? box.y + box.height : box.x + box.width),
     start,
   );
   const candidateAt = (slot: number): PlaceholderBox =>
-    axis === "vertical"
-      ? { x: node.position.x, y: start + slot * step, width, height }
-      : { x: start + slot * step, y: node.position.y, width, height };
+    slotBox(node, axis, start + slot * step, cross);
 
-  // The first slot past every occupied far edge is free by construction.
-  const limit = Math.max(1, Math.ceil((farEdge - start) / step)) + 1;
+  // The first slot past every occupied far edge, plus the clearance, is free by
+  // construction.
+  const limit =
+    Math.max(1, Math.ceil((farEdge + PHANTOM_SLOT_CLEARANCE - start) / step)) + 1;
   for (let slot = 1; slot <= limit; slot += 1) {
     const candidate = candidateAt(slot);
-    if (!occupied.some((box) => intersects(candidate, box))) {
+    if (slotFree(candidate, axis, occupied)) {
       return candidate;
     }
   }
-  // Unreachable: the loop's last slot already starts past every occupied edge.
+  // Unreachable: the loop's last slot already starts clear of every occupied edge.
   return candidateAt(limit);
+}
+
+/**
+ * The slot a placeholder takes, in three steps, nearest placement first.
+ *
+ * 1. **The anchor's own column, one flow step past it** — where a real successor
+ *    would land, and the placement the ghost has always used when nothing is in
+ *    the way.
+ * 2. **One cross step to either side of that slot, on the same flow line** — the
+ *    placeholder stays in the rank band and takes the neighbouring lane instead
+ *    of walking away from the node it belongs to (user report: the ghost takes
+ *    the space of a normal node, so it belongs in the next rank, not 400 units
+ *    below its anchor with a connector long enough to read as an edge). The
+ *    lower cross coordinate is tried first, so the choice is deterministic and
+ *    independent of the order the document reported its nodes in.
+ * 3. **{@link forwardSlot}**, the forward walk down the anchor's own column,
+ *    for a rank band whose whole flow line is blocked.
+ *
+ * Only one lane each side is offered by step 2 on purpose: a scan that ran
+ * outward until it found a free lane would always succeed — the first lane clear
+ * of every occupied cross band is free by construction — which would make step 3
+ * dead code and would let a placeholder drift off the graph instead of taking the
+ * next rank. One slot aside is the distance the layout itself uses between the
+ * columns of a rank (`crossExtent + nodeSpacing`), and past it the rank is
+ * genuinely full.
+ */
+function firstFreeSlot(
+  node: PlaceholderNodeInput,
+  axis: PlaceholderAxis,
+  step: number,
+  laneStep: number,
+  occupied: readonly PlaceholderBox[],
+): PlaceholderBox {
+  const vertical = axis === "vertical";
+  const flow = (vertical ? node.position.y : node.position.x) + step;
+  const cross = vertical ? node.position.x : node.position.y;
+
+  const ownSlot = slotBox(node, axis, flow, cross);
+  if (slotFree(ownSlot, axis, occupied)) {
+    return ownSlot;
+  }
+
+  for (const lane of [cross - laneStep, cross + laneStep]) {
+    const candidate = slotBox(node, axis, flow, lane);
+    if (slotFree(candidate, axis, occupied)) {
+      return candidate;
+    }
+  }
+
+  return forwardSlot(node, axis, step, occupied);
 }
 
 /**
@@ -700,17 +942,26 @@ function firstFreeSlot(
  *   hierarchy ends, so a successor is unambiguous there. A leaf with no output
  *   port gets nothing.
  *
- * Every placeholder takes the first slot along the axis that intersects no
- * occupied box, and each accepted one joins the occupied set, so a placeholder
- * behaves like a node for the ones derived after it: leaves are walked in node
- * id order, which makes the result independent of the order the document (or a
- * React Flow measurement) reported them in.
+ * Every placeholder takes the first free slot of its anchor's rank band — its own
+ * column, a lane beside it, or (only when the whole flow line is blocked) the
+ * next free step down the column, always at least
+ * {@link PHANTOM_SLOT_CLEARANCE} away from every box in the same band — and each
+ * accepted one joins the occupied set, so a placeholder behaves like a node for
+ * the ones derived after it: leaves are walked in node id order, which makes the
+ * result independent of the order the document (or a React Flow measurement)
+ * reported them in.
  *
  * The result is geometry, not graph elements: the canvas paints it through
  * `ViewportPortal`, so nothing here can reach the React Flow `nodes` / `edges`
  * arrays, the document, an event or a history entry. The set is derived from the
  * edges on every render, so a placeholder disappears in the same commit that
  * gives its node a successor and nothing has to be cleaned up.
+ *
+ * The two pitches the walk steps by come from the host
+ * ({@link CanvasPlaceholderInput.rankSpacing} / `nodeSpacing`) and default to
+ * {@link PHANTOM_NODE_OFFSET}, so a host that declares its own rank pitch gets a
+ * phantom on the rank line its siblings occupy and a host that declares none
+ * keeps the step it had.
  */
 export function canvasPlaceholders(
   input: CanvasPlaceholderInput,
@@ -720,16 +971,27 @@ export function canvasPlaceholders(
   }
 
   const axis = input.axis ?? "horizontal";
+  const pitch: PlaceholderPitch = {
+    rank: input.rankSpacing ?? PHANTOM_NODE_OFFSET,
+    node: input.nodeSpacing ?? PHANTOM_NODE_OFFSET,
+  };
   const anchor = input.nodes[0];
 
   if (input.nodes.length === 0) {
     const { width, height } = PLACEHOLDER_NODE_SIZE;
-    return [{ anchorId: undefined, kind: "empty-state", box: { x: 0, y: 0, width, height }, connector: undefined }];
+    return [
+      {
+        anchorId: undefined,
+        kind: "empty-state",
+        box: { x: 0, y: 0, width, height },
+        connectors: [],
+      },
+    ];
   }
 
   if (input.nodes.length === 1 && anchor !== undefined) {
     return [
-      placeholderAfter(anchor.id, "empty-state", anchor, axis, [nodeBox(anchor)]),
+      placeholderAfter(anchor.id, "empty-state", anchor, axis, [nodeBox(anchor)], pitch),
     ];
   }
 
@@ -741,7 +1003,7 @@ export function canvasPlaceholders(
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   return leaves.map((node) => {
-    const placeholder = placeholderAfter(node.id, "successor", node, axis, occupied);
+    const placeholder = placeholderAfter(node.id, "successor", node, axis, occupied, pitch);
     occupied.push(placeholder.box);
     return placeholder;
   });
@@ -784,7 +1046,7 @@ function PhantomInsertButton(props: { readonly anchorId: string | undefined }): 
   );
 }
 
-/** The dashed connector from a node to the placeholder that follows it. */
+/** The dashed run from a node to the placeholder that follows it. */
 function PlaceholderConnectorView(props: {
   readonly connector: PlaceholderConnector;
 }): ReactNode {
@@ -909,9 +1171,12 @@ export const CanvasPlaceholderOverlay: FC<{
     <ViewportPortal>
       {placeholders.map((placeholder) => (
         <Fragment key={placeholder.anchorId ?? EMPTY_GRAPH_KEY}>
-          {placeholder.connector === undefined ? null : (
-            <PlaceholderConnectorView connector={placeholder.connector} />
-          )}
+          {placeholder.connectors.map((connector, index) => (
+            <PlaceholderConnectorView
+              key={`${connector.axis}-${String(index)}`}
+              connector={connector}
+            />
+          ))}
           {render === undefined ? (
             <DefaultPlaceholderBox placeholder={placeholder} />
           ) : (
@@ -1145,6 +1410,22 @@ export function portRenderersForPolicy(
 }
 
 /* ------------------------------------------------------------------ */
+/*  Camera framing                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Applies one camera framing through the captured React Flow instance.
+ *
+ * The camera is moved through `fitView` on the engine, never through component
+ * state: the viewport belongs to React Flow (canvas state), so the canvas keeps
+ * no copy of it and a framing writes nothing anywhere else — no document
+ * position, no UI state, no history unit and no application event.
+ */
+function applyViewportPlan(instance: ReactFlowInstance, plan: ViewportFitPlan): void {
+  void instance.fitView(viewportFitOptions(plan));
+}
+
+/* ------------------------------------------------------------------ */
 /*  GraphCanvas                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -1192,6 +1473,25 @@ export interface GraphCanvasProps {
    * deletion time is what keeps a changed policy from arriving stale.
    */
   readonly removalPolicy?: () => RemovalPolicy;
+  /**
+   * Reads the camera framing the host configured, when the canvas mounts and
+   * whenever the selection changes.
+   *
+   * A reader, exactly like {@link GraphCanvasProps.removalPolicy}: the framing is
+   * host configuration (the SDK's `viewport` group), not UI state, so the canvas
+   * never re-renders when it changes and reads it at the one moment that matters.
+   * `undefined` — no reader, or a reader that returns nothing — keeps today's
+   * behaviour byte for byte: React Flow's plain `fitView` on init and no camera
+   * movement on selection.
+   *
+   * Two framings are possible, decided by the pure rules in `viewport-fit.ts`:
+   * the mount framing (`start`: the whole graph, or one named node, at an
+   * absolute zoom or under a ceiling) and the selection framing (the selected
+   * nodes, plus the selected edges when `edges` is on, and a return to the mount
+   * framing once the selection is cleared). It writes nothing, pushes no history
+   * and emits no event: the viewport is canvas state (AGENTS.md §5.3).
+   */
+  readonly viewportFit?: () => ViewportConfiguration | undefined;
   /**
    * Whether a person may draw a new connection on this canvas.
    *
@@ -1262,14 +1562,41 @@ export interface GraphCanvasProps {
    * Axis the phantom placeholders step along (S21).
    *
    * The host declares it, because the canvas adapter can read neither
-   * `graph.layout.direction` nor `graph.layout.spacing`: one step is the
-   * adapter's documented `PHANTOM_NODE_OFFSET` (240 flow units), and a
-   * collision with a real node or another placeholder pushes the box forward by
-   * whole steps along this axis. Defaults to `"horizontal"`. It changes no
-   * document state; a host composing `<NoderaEditor>` passes the same value as
-   * `NoderaEditor.layoutDirection`.
+   * `graph.layout.direction` nor `graph.layout.spacing` / `rankSpacing`: both are
+   * SDK configuration. The flow step is the rank pitch declared in
+   * {@link GraphCanvasProps.layoutRankSpacing} (the adapter's documented 240 flow
+   * units when the host declares nothing), and the lane pitch is one column away
+   * (see {@link GraphCanvasProps.layoutNodeSpacing}). Defaults to
+   * `"horizontal"`. It changes no document state; a host composing
+   * `<NoderaEditor>` passes the same value as `NoderaEditor.layoutDirection`.
    */
   readonly layoutDirection?: PlaceholderAxis;
+  /**
+   * Flow step between consecutive ranks, in flow units (S21).
+   *
+   * The host declares it for the same reason it declares
+   * {@link GraphCanvasProps.layoutDirection}: `graph.layout.rankSpacing` is SDK
+   * configuration the canvas adapter cannot read. With it the phantom of a leaf
+   * steps by the layout's own rank pitch, so it lands on the **same rank line**
+   * the real nodes of the sibling branch occupy — without it the ghost stepped a
+   * fixed 240 while the layout's rank sat 280 away, and floated above the rank it
+   * belongs to. Defaults to `PHANTOM_NODE_OFFSET` (240), so a host that declares
+   * nothing keeps the flow step it always had. Presentation geometry only: it
+   * writes no document state.
+   */
+  readonly layoutRankSpacing?: number | undefined;
+  /**
+   * Gap between neighbouring boxes of one rank, in flow units (S21).
+   *
+   * The lane the placeholder slides to when a real node took the anchor's own
+   * column sits one **cross pitch** away: the box's own cross extent plus this
+   * gap, which is where the layout places the next column of that rank. Defaults
+   * to `PHANTOM_NODE_OFFSET` (240), like
+   * {@link GraphCanvasProps.layoutRankSpacing}; because the pitch always carries
+   * the box's cross extent, the default lane is the box plus a 240-unit gap, not
+   * a bare 240 offset.
+   */
+  readonly layoutNodeSpacing?: number | undefined;
   /**
    * Host renderer for the "+" affordance, replacing the framework's button.
    *
@@ -1285,7 +1612,7 @@ export interface GraphCanvasProps {
    *
    * The host receives the whole {@link PhantomPlaceholder} — `kind`
    * (`"empty-state"` or `"successor"`), `anchorId`, `box` in flow coordinates
-   * and the `connector` that joins it to its node — so one component covers both
+   * and the `connectors` that join it to its node — so one component covers both
    * kinds. The canvas keeps the geometry: the box goes exactly where the
    * derivation put it and the dashed connector is still painted, because the
    * line is the placeholder's shape, not its control.
@@ -1354,12 +1681,15 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   interactionMode = "select",
   dragPolicy = "free",
   removalPolicy,
+  viewportFit,
   connectionsPolicy = "editable",
   portsPolicy = "visible",
   edgeInsertion = false,
   edgeWaypointEditing = false,
   nodeTransition = "instant",
   layoutDirection = "horizontal",
+  layoutRankSpacing,
+  layoutNodeSpacing,
   renderEdgeInsert,
   renderPlaceholder,
   className,
@@ -1456,6 +1786,8 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
       canvasPlaceholders({
         enabled: edgeInsertion,
         axis: layoutDirection,
+        rankSpacing: layoutRankSpacing,
+        nodeSpacing: layoutNodeSpacing,
         nodes: nodesWithTypes.map((node) => ({
           id: node.id,
           position: node.position,
@@ -1465,7 +1797,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         })),
         edges,
       }),
-    [edgeInsertion, layoutDirection, nodesWithTypes, edges],
+    [edgeInsertion, layoutDirection, layoutRankSpacing, layoutNodeSpacing, nodesWithTypes, edges],
   );
 
   // Interaction mode → React Flow drag props (pure mapping, see
@@ -1482,9 +1814,71 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   // the drop handler without re-rendering the whole canvas.
   const flowInstance = useRef<ReactFlowInstance | null>(null);
 
-  const handleInit = useCallback((instance: ReactFlowInstance) => {
-    flowInstance.current = instance;
-  }, []);
+  // What the camera frames when the canvas mounts. Read from the live reader on
+  // every render (the reader is configuration, not state), so a host that swaps
+  // it gets the new framing on the next mount. `undefined` — no reader, or a
+  // reader that declares nothing — is today's plain React Flow `fitView`, which
+  // is why the boolean prop below stays exactly as it was in that case.
+  const startPlan = useMemo(() => startViewportPlan(viewportFit?.()), [viewportFit]);
+
+  const handleInit = useCallback(
+    (instance: ReactFlowInstance) => {
+      flowInstance.current = instance;
+      if (startPlan !== undefined) {
+        applyViewportPlan(instance, startPlan);
+      }
+    },
+    [startPlan],
+  );
+
+  // Latest reader, so the selection subscription below is installed once per
+  // editor instead of re-subscribing on every render of a host that passes an
+  // inline arrow (the default composition in `<NoderaEditor>` does exactly
+  // that).
+  const viewportFitRef = useRef<(() => ViewportConfiguration | undefined) | undefined>(
+    viewportFit,
+  );
+  useEffect(() => {
+    viewportFitRef.current = viewportFit;
+  }, [viewportFit]);
+
+  // Camera follows the selection.
+  //
+  // `selection.changed` is the one engine event that knows both "the selection
+  // changed" and "the selection is now empty", so the restore path lives here.
+  // It is deliberately not in `useEditorGraph`, which skips this event to avoid
+  // re-entering React Flow's own selection emission: this subscription moves the
+  // camera and never re-derives the nodes.
+  //
+  // A selection reaches this subscription more than once when React Flow reports
+  // its own selection back through `commitSelectionFromReactFlow` (the canvas's
+  // `onSelectionChange`), and each call would restart the same animation. The
+  // last applied framing is remembered as data — never as component state — so a
+  // repeated identical framing is a no-op while a different one always applies.
+  const appliedSelectionPlan = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    return editor.events.subscribe("selection.changed", (event) => {
+      const reader = viewportFitRef.current;
+      const instance = flowInstance.current;
+      if (reader === undefined || instance === null) {
+        return;
+      }
+      const plan = selectionViewportPlan(reader(), {
+        nodes: event.payload.selectedNodes,
+        edges: event.payload.selectedEdges,
+      });
+      if (plan === undefined) {
+        appliedSelectionPlan.current = undefined;
+        return;
+      }
+      const framing = JSON.stringify(plan);
+      if (framing === appliedSelectionPlan.current) {
+        return;
+      }
+      appliedSelectionPlan.current = framing;
+      applyViewportPlan(instance, plan);
+    });
+  }, [editor]);
 
   // Drag over: accept the drag only when a drop handler exists AND the
   // payload announces the node definition MIME type (D7).
@@ -1773,7 +2167,10 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
           panOnDrag={interaction.panOnDrag}
           selectionOnDrag={interaction.selectionOnDrag}
           colorMode={colorMode}
-          fitView
+          // The plain boolean is the fallback, never removed: React Flow's own
+          // init fit runs only when no framing plan exists, so a configured
+          // camera is not overwritten by the generic one a moment later.
+          fitView={startPlan === undefined}
           nodesDraggable={dragPolicy !== "locked"}
           nodesConnectable={connectionsPolicy === "editable"}
         >

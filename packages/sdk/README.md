@@ -578,8 +578,13 @@ createBuilder({
 Members: `mode` (`"free" | "auto"`, default `"free"`), `direction`
 (`"horizontal" | "vertical"`, default `"horizontal"`; horizontal fills
 row-major and arranges the ranks along `x`, vertical fills column-major and
-arranges them along `y`), `spacing` (distance between adjacent slots, and the
-in-rank distance of an arrangement, in document units, default `240`),
+arranges them along `y`), `spacing` (distance between adjacent add-time slots, and
+the **gap between two neighbouring node boxes** of an arrangement — not the
+distance between their origins — in document units, default `240`),
+`nodeSize` (`{ width, height }`, the fallback box an arrangement reserves for a
+node that carries no size of its own, default: the strategy's `{ width: 140,
+height: 40 }`; a width or height that is not a positive finite number is refused
+at `graph.layout.nodeSize.width` / `.height`),
 `strategy` (globally qualified id of the strategy [`arrange()`](#graph-layout-strategies--buildergraphlayout)
 runs, default `nodera.graph-layout.layered`), `rankSpacing` (distance between
 consecutive ranks of an arrangement, default: the declared `spacing`) and `drag`
@@ -899,7 +904,18 @@ arrange**, and persists nothing: the next call without a request reads
 `graph.layout` again, so a host can switch without rebuilding the builder. The
 rules are the configuration's own — an unknown direction or a spacing that is not
 a positive finite number is `sdk.invalid-input` at the field path (`direction`,
-`spacing`, `rankSpacing`) and nothing moves.
+`spacing`, `rankSpacing`) and nothing moves. `nodeSize` is not part of the request:
+it belongs to `graph.layout`, because it describes the host's nodes rather than one
+call's grid.
+
+The cross axis is reserved in **boxes**, so `spacing` is the gap between two
+neighbouring boxes of a rank rather than the distance between their origins: a
+rank steps by its widest box plus `spacing`, and the box is the node's own size
+when the strategy receives one, else `graph.layout.nodeSize`, else `{ width: 140,
+height: 40 }`. That is what keeps a lone rank centred between two columns instead
+of overlapping them, and why a host whose renderer paints `158`-wide nodes should
+declare `nodeSize: { width: 158, height: 34 }` to get exactly the gaps it asked
+for.
 
 ```ts
 assertOk(builder.graph.arrange({ direction: "vertical", spacing: 160, rankSpacing: 320 }));
@@ -954,6 +970,81 @@ a user. A host that wants a control of its own passes per-call overrides to
 `arrange()`, selects the strategy with `builder.graphLayout.setDefault`, and
 changes the drag, connections and ports policies with `setDragPolicy`,
 `setConnectionsPolicy` and `setPortsPolicy`; see `examples/layout-switch-demo`.
+
+### Camera framing — `viewport`
+
+`viewport` decides what the canvas **camera** frames: what it frames when the
+canvas mounts, and whether it follows the selection. It is presentation only
+(AGENTS.md §5.3): nothing in it reaches the portable document, the UI state, a
+node's `data` or the history, and moving the camera emits no application event
+and pushes no history unit. It can be replaced at runtime with
+`builder.setViewport` — a framework setter, never a framework toggle: a control
+in front of a person is the host's to write (see `examples/layout-switch-demo`).
+
+```ts
+createBuilder({
+  viewport: {
+    // On mount: frame one node, at an exact level, instantly.
+    start: { node: "node-http", zoom: 1.25, duration: 0 },
+    // On selection: follow it, never past 1.2, and return to `start` when it empties.
+    selection: { maxZoom: 1.2, padding: 0.15, duration: 200, edges: false },
+  },
+});
+
+builder.viewport(); // the resolved, frozen configuration; `undefined` when none is declared
+
+// Replace it at runtime, e.g. from a control of the host's own.
+builder.setViewport({ start: { maxZoom: 2 }, selection: { maxZoom: 3 } });
+// Back to today's behaviour: React Flow's own `fitView`, no movement on selection.
+builder.setViewport(undefined);
+```
+
+`setViewport` returns a `Result`: on success it carries the resolved, frozen
+configuration (defaults applied) and `builder.viewport()` returns it
+immediately; on refusal it carries every `sdk.invalid-input` issue and the
+**previous configuration stays in force**. A disposed builder refuses with
+`sdk.disposed`, like every other setter. The canvas reads the value through its
+live reader, so a `selection` change applies on the next selection change;
+`start` is resolved once when the canvas mounts, so a host that changes it
+applies it by remounting the canvas.
+
+| Group | Absent means | What it frames |
+| --- | --- | --- |
+| `start` | today's plain React Flow `fitView` | the whole graph, or the single node `start.node` names |
+| `selection` | no camera movement on selection, ever | the selected nodes, plus the selected edges when `edges` is on |
+
+**An absolute zoom wins; otherwise the framing fits.** `zoom` pins the level
+exactly (React Flow's own clamp, `minZoom === maxZoom === zoom`, no coordinate
+maths). Without `zoom` the camera fits what it frames with `padding` and never
+passes `maxZoom`.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `zoom` | absent | Absolute level; when present it decides the zoom on its own |
+| `maxZoom` | `1.5` | Ceiling used only while `zoom` is absent |
+| `padding` | `0.1` | React Flow padding around what is framed |
+| `duration` | `200` | Animation length in ms; `0` is instant |
+| `selection.edges` | `false` | Whether a selected edge is framed too |
+
+Three rules follow from those defaults:
+
+- **Edges are off by default.** Framing one edge zooms violently, so a selection
+  that contains only edges leaves the camera alone. With `edges: true` a selected
+  edge is framed with the graph-fit rule — never the absolute `zoom` — and a
+  framed set that mixes nodes and edges does the same.
+- **Clearing the selection restores the `start` framing**, including its absolute
+  zoom. With no `start` group the camera restores the whole graph under the
+  `selection` rule's own ceiling, padding and duration.
+- **A selection of nodes is framed with the `selection` zoom rule**, which is
+  independent of `start`'s: the two groups can use different levels.
+
+A value the declared shape cannot hold is refused where it sits, and no builder
+is created: a group that is not an object, a `start.node` that is not a
+non-empty string, a `zoom`/`maxZoom`/`padding` that is not a positive finite
+number, a `duration` that is negative or not finite, and a `selection.edges` that
+is not a boolean are all `sdk.invalid-input` at `["viewport", ...]`. The same
+issues come back from `builder.setViewport`, and there they refuse the change
+instead of the creation.
 
 ### Document — `builder.document`
 

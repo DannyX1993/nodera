@@ -22,10 +22,11 @@ a native button with `aria-expanded` and `aria-controls` — that opens one pane
 above the canvas. The panel is the host's own HTML: nothing about it reaches the
 framework, which still ships no runtime toggle for placement (S20).
 
-The panel holds four labelled groups (`fieldset` / `legend`), and every control
+The panel holds five labelled groups (`fieldset` / `legend`), and every control
 is a native element named by its own visible label. Each policy control reads its
 value from the builder — `graphLayout.active()`, `dragPolicy()`,
-`connectionsPolicy()`, `portsPolicy()`, `arrangeOnChange()`, `removalPolicy()` —
+`connectionsPolicy()`, `portsPolicy()`, `arrangeOnChange()`, `removalPolicy()`,
+`viewport()` —
 and writes it back through the documented SDK call, so no control can drift from
 the policy the canvas is really applying. A refused value leaves both the control
 and the canvas on the previous one, and the diagnostic is printed in the status
@@ -38,7 +39,7 @@ line. Direction and the two spacings are per-call overrides: they start from the
 | ----------------- | ---------------------------------------- | ----------- |
 | Strategy          | `nodera.graph-layout.layered` / `…free`  | `builder.graphLayout.setDefault(id)` — and then one `arrange`, plus the surface that strategy implies |
 | Direction         | `horizontal` / `vertical`                | `builder.graph.arrange({ direction, … })` |
-| Spacing           | number, document units                   | `builder.graph.arrange({ spacing, … })` |
+| Spacing           | number, document units                   | `builder.graph.arrange({ spacing, … })` — the **gap** between two neighbouring boxes |
 | Rank spacing      | number, document units                   | `builder.graph.arrange({ rankSpacing, … })` |
 | Arrange on change | `never` / `downstream`                   | `builder.graphLayout.setArrangeOnChange(policy)` |
 | On remove         | `detach` / `splice`                      | `builder.graphLayout.setRemovalPolicy(policy)` |
@@ -77,6 +78,25 @@ document holds keep their endpoints and type, and only how the canvas draws them
 changes. New edges created after a change pick the definition's current visual
 up on their own.
 
+### Camera
+
+| Control | Values | SDK surface |
+| --- | --- | --- |
+| Start framing | `graph` / `node` | `builder.setViewport({ …viewport, start })` |
+| Start zoom ceiling | number (empty = no ceiling) | same call, `start.maxZoom` |
+| Follow selection | `off` / `on` | same call, presence of `selection` |
+| Selection zoom ceiling | number (empty = no ceiling) | same call, `selection.maxZoom` |
+| Camera duration | milliseconds, `0` = instant | same call, `start.duration` and `selection.duration` |
+
+The camera is canvas state, never document state: no control here writes the
+document, emits an application event or pushes a history unit, and an emptied
+number field means "not configured" rather than `0`.
+
+The two selection controls take effect on the **next** selection change, because
+the canvas reads the configuration at the moment it frames. The two start
+controls need a mount, so changing them remounts the canvas — the same revision
+key the edge-style controls already use, not a second mechanism.
+
 ### Actions
 
 | Action                       | Enabled when              | SDK surface |
@@ -92,7 +112,11 @@ up on their own.
 The graph is a five-node pipeline (`ingest → parse, enrich → score → publish`)
 seeded through `builder.graph.addNode` **without positions**. The builder
 declares `graph.layout: { mode: "auto", direction: "horizontal", spacing: 240,
-rankSpacing: 280 }`, so the seed nodes are first placed on a deterministic grid.
+rankSpacing: 280, nodeSize: { width: 158, height: 34 } }`, so the seed nodes are
+first placed on a deterministic grid. `nodeSize` is the box the ranked layout
+reserves for a node (`140 x 40` when a host declares none); this demo declares
+the size its themed nodes really measure, which is what keeps a rank centred
+between two columns from intruding into either of them.
 
 Pressing **Arrange** is the only thing that re-places the whole graph. It is one
 explicit action and one history unit: `builder.graph.undo()` puts every previous
@@ -152,9 +176,14 @@ Clicking any of those "`+`" opens the same dialog and the host sees
 `builder.graph.connect`. That is **two history units** — create, then connect —
 which the status line says out loud, because one undo removes the edge and a
 second removes the node; a single-unit append needs an application use case the
-framework does not have yet. The demo passes its own `direction` as
-`NoderaEditor.layoutDirection`, so switching to a vertical arrangement steps the
-placeholders downwards. The placeholders themselves are presentation only: they
+framework does not have yet. The demo passes its own control values to the
+placeholder geometry too — `direction` as `NoderaEditor.layoutDirection`,
+`rankSpacing` as `layoutRankSpacing` and `spacing` as `layoutNodeSpacing` — so
+switching to a vertical arrangement steps the placeholders downwards and a
+phantom lands on the **rank line of the real node** the sibling branch has in that
+same rank, instead of a fixed default step above it (an emptied spacing field
+declares nothing, so the phantom keeps its own default pitch rather than painting
+a `NaN`). The placeholders themselves are presentation only: they
 are drawn as an overlay in flow coordinates, they never reach
 `builder.graph.nodes()` or `builder.graph.edges()`, the history, the minimap or
 the `nodes`/`edges` arrays the canvas hands to React Flow, and each one disappears

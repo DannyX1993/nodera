@@ -3,7 +3,7 @@ import { render, screen, fireEvent, createEvent, act, waitFor, cleanup } from "@
 import { ReactFlow, ReactFlowProvider, useEdges, useNodes, useStoreApi } from "@xyflow/react";
 import type { NodeChange } from "@xyflow/react";
 import type { FC, ReactNode } from "react";
-import { createElement } from "react";
+import { createElement, useEffect } from "react";
 import {
   EditorEngine,
   addNode,
@@ -11,6 +11,7 @@ import {
   selectNode,
   removeNode,
   undo,
+  clearSelection,
 } from "@nodera/application";
 import type { NodeDefinition } from "@nodera/node-registry";
 import type { EdgeDefinition } from "@nodera/edge-registry";
@@ -18,6 +19,7 @@ import { EdgeRendererRegistry, NodeRendererRegistry } from "../registries/render
 import { DEFAULT_EDGE_RENDERER_ID } from "../registries/renderer-registries.js";
 import { DefaultEdgeRenderer } from "../renderers/default-edge-renderer.js";
 import { createNodeId } from "@nodera/contracts";
+import type { ViewportConfiguration } from "@nodera/sdk";
 import {
   CREATE_NODE_DIALOG,
   DialogRegistry,
@@ -1151,7 +1153,7 @@ describe("GraphCanvas phantom placeholders", () => {
       anchorId: "n1",
       kind: "successor",
       box: { x: 240, y: 0, width: 120, height: 27 },
-      connector: { x: 120, y: 13, length: 120, axis: "horizontal" },
+      connectors: [{ x: 120, y: 13, length: 120, axis: "horizontal" }],
     };
 
     const store = new UiStateStore({
@@ -1194,7 +1196,7 @@ describe("GraphCanvas phantom placeholders", () => {
     expect(placeholders[0]?.anchorId).toBeUndefined();
     expect(placeholders[0]?.box).toEqual({ x: 0, y: 0, width: 140, height: 40 });
     // There is no node to connect from, so there is nothing to join.
-    expect(placeholders[0]?.connector).toBeUndefined();
+    expect(placeholders[0]?.connectors).toEqual([]);
   });
 
   it("derives the empty-state placeholder one step past the single node", () => {
@@ -1208,12 +1210,14 @@ describe("GraphCanvas phantom placeholders", () => {
     expect(placeholders[0]?.anchorId).toBe("n1");
     // One step (240 flow units) past the node's box, on the declared axis.
     expect(placeholders[0]?.box).toEqual({ x: 280, y: 80, width: 140, height: 40 });
-    expect(placeholders[0]?.connector).toEqual({
-      x: 180,
-      y: 100,
-      length: 100,
-      axis: "horizontal",
-    });
+    expect(placeholders[0]?.connectors).toEqual([
+      {
+        x: 180,
+        y: 100,
+        length: 100,
+        axis: "horizontal",
+      },
+    ]);
   });
 
   it("derives one placeholder per leaf and none for a node with a successor", () => {
@@ -1272,21 +1276,27 @@ describe("GraphCanvas phantom placeholders", () => {
     });
 
     expect(placeholders[0]?.box).toEqual({ x: 40, y: 320, width: 140, height: 40 });
-    expect(placeholders[0]?.connector).toEqual({
-      x: 110,
-      y: 120,
-      length: 200,
-      axis: "vertical",
-    });
+    expect(placeholders[0]?.connectors).toEqual([
+      {
+        x: 110,
+        y: 120,
+        length: 200,
+        axis: "vertical",
+      },
+    ]);
   });
 
   /*
    * A placeholder occupies a slot like a node does: it never overlaps a real
    * node or another placeholder (user report: "los nodos fantasma del modo
    * layered no deben taparse con otros nodos. Son nodos como tal asi que no
-   * deben solaparse"). The rule is a forward walk along the layout axis, so
-   * every assertion below reads the chosen boxes by x/y/width/height instead of
-   * trusting a rendering.
+   * deben solaparse"), and it **takes a slot in its anchor's rank band** instead
+   * of walking away from the node it belongs to (user report: the ghost takes
+   * the space of a normal node, "lo digo para el cálculo de posición"). The search
+   * is therefore: the anchor's own column, then one lane either side of it on
+   * the same flow line, and only when the whole flow line is blocked the forward
+   * walk down the column. Every assertion below reads the chosen boxes by
+   * x/y/width/height instead of trusting a rendering.
    */
 
   /** Box in flow coordinates, as the derivation reports it. */
@@ -1326,7 +1336,7 @@ describe("GraphCanvas phantom placeholders", () => {
     return box;
   }
 
-  it("pushes a placeholder past the real node its first step would land on", () => {
+  it("slides the placeholder one lane aside from the node its first step would land on", () => {
     const placeholders = canvasPlaceholders({
       enabled: true,
       nodes: [
@@ -1338,11 +1348,17 @@ describe("GraphCanvas phantom placeholders", () => {
       edges: [],
     });
 
-    // One whole step further than the candidate that was occupied.
-    expect(boxesOf(placeholders)).toEqual([{ x: 480, y: 0, width: 140, height: 40 }]);
-    const pushed = boxAt(placeholders, 0);
-    expect(intersects(pushed, { x: 240, y: 0, width: 140, height: 40 })).toBe(false);
-    expect(intersects(pushed, { x: 0, y: 0, width: 140, height: 40 })).toBe(false);
+    // The same flow line, one cross step below: the ghost stays in the rank band
+    // instead of continuing past the node that took its column.
+    expect(boxesOf(placeholders)).toEqual([{ x: 240, y: -280, width: 140, height: 40 }]);
+    const slid = boxAt(placeholders, 0);
+    expect(intersects(slid, { x: 240, y: 0, width: 140, height: 40 })).toBe(false);
+    expect(intersects(slid, { x: 0, y: 0, width: 140, height: 40 })).toBe(false);
+    // The line reaches the box: one run along the axis, then one along the lane.
+    expect(placeholders[0]?.connectors).toEqual([
+      { x: 140, y: 20, length: 100, axis: "horizontal" },
+      { x: 240, y: -240, length: 260, axis: "vertical" },
+    ]);
   });
 
   it("gives two leaves whose first-step placeholders would collide distinct free slots", () => {
@@ -1353,9 +1369,11 @@ describe("GraphCanvas phantom placeholders", () => {
       edges: [],
     });
 
+    // The first leaf takes the lane its walk reaches first (below); the second
+    // one still has its own column free.
     expect(boxesOf(placeholders)).toEqual([
+      { x: 240, y: -280, width: 140, height: 40 },
       { x: 480, y: 0, width: 140, height: 40 },
-      { x: 720, y: 0, width: 140, height: 40 },
     ]);
     // Neither placeholder sits on a node or on the other placeholder.
     const first = boxAt(placeholders, 0);
@@ -1366,7 +1384,7 @@ describe("GraphCanvas phantom placeholders", () => {
     expect(intersects(second, occupiedNode)).toBe(false);
   });
 
-  it("spans the connector over the real distance to the chosen slot", () => {
+  it("spans the connector from the node's far edge to the box that was chosen", () => {
     const placeholders = canvasPlaceholders({
       enabled: true,
       nodes: [leaf("n1", 0, 0), { id: "n2", position: { x: 240, y: 0 } }],
@@ -1374,11 +1392,12 @@ describe("GraphCanvas phantom placeholders", () => {
     });
 
     const box = boxAt(placeholders, 0);
-    const connector = placeholders[0]?.connector;
-    // The dashed line starts where the node ends and stops where the pushed
-    // box begins: 340, not the 100 of the first (occupied) candidate.
-    expect(connector).toEqual({ x: 140, y: 20, length: 340, axis: "horizontal" });
-    expect((connector?.x ?? 0) + (connector?.length ?? 0)).toBe(box.x);
+    const [flow] = placeholders[0]?.connectors ?? [];
+    // The dashed line starts where the node ends (140, 20) and stops where the
+    // box's flow band begins, so it never draws over the node that blocked the
+    // first candidate.
+    expect(flow).toEqual({ x: 140, y: 20, length: 100, axis: "horizontal" });
+    expect((flow?.x ?? 0) + (flow?.length ?? 0)).toBe(box.x);
   });
 
   it("derives the same slots whatever order the nodes arrive in", () => {
@@ -1404,12 +1423,450 @@ describe("GraphCanvas phantom placeholders", () => {
     ]);
   });
 
+  /*
+   * The reported defect (user report: "el último nodo de la rama izquierda choca
+   * con el fantasma de la derecha … el fantasma ocupa el mismo espacio que un
+   * nodo normal — lo digo para el cálculo de posición"): in the layered demo the
+   * last node of one branch is alone in its rank, so the centring rule parks its
+   * box at the midpoint between the two columns — 120, i.e. 20 flow units inside
+   * the column of the other branch's leaf. The placeholder must not overlap it,
+   * and it must not walk away from its anchor either: it takes the lane beside
+   * it, in the same rank band.
+   */
+  it("takes the lane beside a lone node centred between the columns", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      nodes: [
+        // Right column's leaf: its first step lands on `y: 240`.
+        leaf("n2", 240, 0),
+        // Alone in the next rank, centred between the columns at `x: 120`.
+        { id: "n3", position: { x: 120, y: 280 } },
+      ],
+      edges: [],
+    });
+
+    // The lane lands one cross pitch (140 + 240) away, where the previous column
+    // ends, which keeps it clear of n3 (120..260) — and on the flow line of the
+    // first step, not one step below.
+    expect(boxesOf(placeholders)).toEqual([{ x: -140, y: 240, width: 140, height: 40 }]);
+    const loneNode = { x: 120, y: 280, width: 140, height: 40 };
+    expect(intersects(boxAt(placeholders, 0), loneNode)).toBe(false);
+    // The line spans the real distance to the chosen slot: down, then aside.
+    expect(placeholders[0]?.connectors).toEqual([
+      { x: 310, y: 40, length: 200, axis: "vertical" },
+      { x: 0, y: 240, length: 310, axis: "horizontal" },
+    ]);
+  });
+
+  /**
+   * The demo's graph, with the sizes and pitches its controls hold: boxes 158
+   * wide and 34 tall (`min-width: 140px`, `padding: 8px` and a 1px border),
+   * `spacing: 240`, `rankSpacing: 280`, `direction: "vertical"`. The cross
+   * positions are a pitched grid (`0`, `120`, `240`, …) from an arrangement
+   * derived before the layered strategy became box-based
+   * (`docs/GRAPH-LAYOUT.md`): the derivation reads positions only, and the
+   * placeholders must stay out of every box a host positioned, whatever produced
+   * it. `audit` is the only leaf that can still grow, and `publish` is alone in
+   * the rank of the other branch, centred at `x: 120`.
+   */
+  function demoBranchNodes() {
+    return [
+      { id: "ingest", position: { x: 120, y: 0 }, width: 158, height: 34 },
+      { id: "enrich", position: { x: 0, y: 280 }, width: 158, height: 34 },
+      { id: "parse", position: { x: 240, y: 280 }, width: 158, height: 34 },
+      { id: "score", position: { x: 0, y: 560 }, width: 158, height: 34 },
+      {
+        id: "audit",
+        position: { x: 240, y: 560 },
+        width: 158,
+        height: 34,
+        ports: [{ direction: "output" as const }],
+      },
+      { id: "publish", position: { x: 120, y: 840 }, width: 158, height: 34 },
+    ];
+  }
+
+  /**
+   * The edges of {@link demoBranchNodes}: two branches from `ingest`, joined at
+   * `score`, with `publish` downstream of both and `audit` its own leaf.
+   */
+  function demoBranchEdges() {
+    return [
+      { source: "ingest", target: "parse" },
+      { source: "ingest", target: "enrich" },
+      { source: "parse", target: "score" },
+      { source: "enrich", target: "score" },
+      { source: "score", target: "publish" },
+      { source: "parse", target: "audit" },
+    ];
+  }
+
+  /*
+   * The placeholder takes the lane beside `audit`'s column in the next rank
+   * band, instead of the `y: 1040` a forward-only walk would have had to reach,
+   * and that lane is one cross pitch from the column: the box (158) plus the
+   * gap (240).
+   */
+  it("keeps the demo's branch placeholder in the next rank band", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      nodes: demoBranchNodes(),
+      edges: demoBranchEdges(),
+    });
+
+    expect(placeholders.map((placeholder) => placeholder.anchorId)).toEqual(["audit"]);
+    // `y: 800` is the default 240 step past `audit` (its next rank band); the
+    // lane lands where the previous column ends, clear of `publish`.
+    expect(boxesOf(placeholders)).toEqual([{ x: -158, y: 800, width: 158, height: 34 }]);
+    const loneNode = { x: 120, y: 840, width: 158, height: 34 };
+    expect(intersects(boxAt(placeholders, 0), loneNode)).toBe(false);
+    expect(placeholders[0]?.connectors).toEqual([
+      { x: 319, y: 594, length: 206, axis: "vertical" },
+      { x: 0, y: 800, length: 319, axis: "horizontal" },
+    ]);
+  });
+
+  /*
+   * The defect this unit exists for: the phantom of one branch and the real
+   * node of the sibling branch standing in the same rank used to sit on two
+   * grids — the phantom stepped a hardcoded 240 while the rank line is the
+   * host's `rankSpacing` (280 in the demo) — so it floated 40 units too high.
+   * The host knows both numbers, so it declares them and the phantom lands on
+   * the rank line its siblings form.
+   */
+  it("lands the phantom on the rank line of the real node in that rank", () => {
+    const nodes = demoBranchNodes();
+    const publish = nodes.find((node) => node.id === "publish");
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      rankSpacing: 280,
+      nodeSpacing: 240,
+      nodes,
+      edges: demoBranchEdges(),
+    });
+
+    // Same flow coordinate as `publish` (840), differing only on the cross axis:
+    // the lane left of `audit`'s column, one cross pitch (158 + 240) away.
+    expect(boxesOf(placeholders)).toEqual([{ x: -158, y: 840, width: 158, height: 34 }]);
+    expect(boxAt(placeholders, 0).y).toBe(publish?.position.y);
+    expect(boxAt(placeholders, 0).x).not.toBe(publish?.position.x);
+    expect(placeholders[0]?.connectors).toEqual([
+      { x: 319, y: 594, length: 246, axis: "vertical" },
+      { x: 0, y: 840, length: 319, axis: "horizontal" },
+    ]);
+  });
+
+  it("keeps the legacy 240 step when the host declares no rank spacing", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      nodeSpacing: 240,
+      nodes: demoBranchNodes(),
+      edges: demoBranchEdges(),
+    });
+
+    // 800 = `audit`'s 560 + the adapter's documented 240, i.e. 40 units above the
+    // rank line `publish` occupies: the preserve pin for a host that declares no
+    // rank pitch.
+    expect(boxesOf(placeholders)).toEqual([{ x: -158, y: 800, width: 158, height: 34 }]);
+    expect(boxAt(placeholders, 0).y).not.toBe(840);
+  });
+
+  /*
+   * The lane step is the cross pitch of the layout itself: one box of the same
+   * rank plus the gap the host declares between its neighbours (`nodeSpacing`),
+   * so a lane lands exactly where the next column would. One test per axis, so
+   * the axis swap is pinned by the same rule rather than by a literal.
+   */
+  it("puts a sideways lane one cross pitch from the anchor's column on the vertical axis", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      rankSpacing: 280,
+      nodeSpacing: 240,
+      nodes: [
+        {
+          id: "n1",
+          position: { x: 240, y: 0 },
+          width: 158,
+          height: 34,
+          ports: [{ direction: "output" as const }],
+        },
+        // A real node in the anchor's own column, so the walk has to take a lane.
+        { id: "b0", position: { x: 240, y: 280 }, width: 158, height: 34 },
+      ],
+      edges: [],
+    });
+
+    expect(boxesOf(placeholders)).toEqual([{ x: -158, y: 280, width: 158, height: 34 }]);
+    // 240 - (158 + 240): the lane's column starts where the cross pitch ends.
+    expect(240 - boxAt(placeholders, 0).x).toBe(158 + 240);
+  });
+
+  it("puts a sideways lane one cross pitch from the anchor's column on the horizontal axis", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "horizontal",
+      rankSpacing: 280,
+      nodeSpacing: 240,
+      nodes: [
+        {
+          id: "n1",
+          position: { x: 0, y: 240 },
+          width: 158,
+          height: 34,
+          ports: [{ direction: "output" as const }],
+        },
+        { id: "b0", position: { x: 280, y: 240 }, width: 158, height: 34 },
+      ],
+      edges: [],
+    });
+
+    // 240 - (34 + 240): the cross extent is the height here, from the same rule.
+    expect(boxesOf(placeholders)).toEqual([{ x: 280, y: -34, width: 158, height: 34 }]);
+    expect(240 - boxAt(placeholders, 0).y).toBe(34 + 240);
+  });
+
+  it("grows a rank pitch too short for the box and the connector", () => {
+    const vertical = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      rankSpacing: 20,
+      nodes: [{ id: "n1", position: { x: 0, y: 0 }, width: 158, height: 40 }],
+      edges: [],
+    });
+
+    // 20 < 40 + 24, so the step is the box plus the shortest connector: the
+    // connector keeps its minimum length instead of collapsing to zero.
+    expect(boxesOf(vertical)).toEqual([{ x: 0, y: 64, width: 158, height: 40 }]);
+    expect(vertical[0]?.connectors).toEqual([
+      { x: 79, y: 40, length: 24, axis: "vertical" },
+    ]);
+
+    const horizontal = canvasPlaceholders({
+      enabled: true,
+      axis: "horizontal",
+      rankSpacing: 20,
+      nodes: [{ id: "n1", position: { x: 0, y: 0 }, width: 140, height: 40 }],
+      edges: [],
+    });
+
+    expect(boxesOf(horizontal)).toEqual([{ x: 164, y: 0, width: 140, height: 40 }]);
+    expect(horizontal[0]?.connectors).toEqual([
+      { x: 140, y: 20, length: 24, axis: "horizontal" },
+    ]);
+  });
+
+  /*
+   * The host-facing seam: `GraphCanvas` passes the two declared pitches through
+   * to the derivation, so the painted box moves with them — and a host that
+   * declares none keeps the documented 240.
+   */
+  it("steps the painted placeholder by the rank pitch the host declares", () => {
+    const declaredEngine = makeEngine();
+    addNode(declaredEngine, {
+      definitionId: "test.app-node",
+      nodeId: "n1",
+      position: { x: 0, y: 0 },
+    });
+    const declared = placeholdersOf(
+      renderPlaceholders(declaredEngine, placeholderStore(), {
+        layoutDirection: "vertical",
+        layoutRankSpacing: 280,
+      }).container,
+    )[0];
+
+    const legacyEngine = makeEngine();
+    addNode(legacyEngine, {
+      definitionId: "test.app-node",
+      nodeId: "n1",
+      position: { x: 0, y: 0 },
+    });
+    const legacy = placeholdersOf(
+      renderPlaceholders(legacyEngine, placeholderStore(), {
+        layoutDirection: "vertical",
+      }).container,
+    )[0];
+
+    expect(declared?.style.transform).toBe("translate(0px, 280px)");
+    expect(legacy?.style.transform).toBe("translate(0px, 240px)");
+  });
+
+  /*
+   * The lane search is symmetric and deterministic: the lower cross coordinate is
+   * tried first, so a blocked side sends the placeholder to the other one, a tie
+   * always resolves the same way, and the input order never moves the slot.
+   */
+  it("uses the free lane on either side of a blocked column", () => {
+    /** One leaf whose own column is blocked, plus the lanes the case blocks. */
+    function withLanes(lanes: ReadonlyArray<number>) {
+      return canvasPlaceholders({
+        enabled: true,
+        axis: "vertical",
+        nodes: [
+          leaf("n1", 240, 0),
+          // Own column: the first step lands flush against this node.
+          { id: "b0", position: { x: 240, y: 280 } },
+          ...lanes.map((x, index) => ({
+            id: `b${String(index + 1)}`,
+            position: { x, y: 280 },
+          })),
+        ],
+        edges: [],
+      });
+    }
+
+    // The right lane (one cross pitch, 140 + 240, away) is taken, so the left
+    // one is used.
+    expect(boxesOf(withLanes([620]))).toEqual([{ x: -140, y: 240, width: 140, height: 40 }]);
+    // The left lane is taken, so the right one is used instead.
+    expect(boxesOf(withLanes([-140]))).toEqual([{ x: 620, y: 240, width: 140, height: 40 }]);
+    // Both free: the tie goes to the lower cross coordinate.
+    expect(boxesOf(withLanes([]))).toEqual([{ x: -140, y: 240, width: 140, height: 40 }]);
+
+    const reversed = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      nodes: [
+        { id: "b1", position: { x: -140, y: 280 } },
+        { id: "b0", position: { x: 240, y: 280 } },
+        leaf("n1", 240, 0),
+      ],
+      edges: [],
+    });
+    expect(boxesOf(reversed)).toEqual(boxesOf(withLanes([-140])));
+  });
+
+  /*
+   * When every lane of the flow line is blocked, the search falls back to the
+   * forward walk down the anchor's own column, one whole step at a time.
+   */
+  it("walks forward down the column when the whole flow line is blocked", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      nodes: [
+        leaf("n1", 240, 0),
+        { id: "b0", position: { x: 240, y: 280 } },
+        // Both lanes of the rank band, one cross pitch (140 + 240) either side.
+        { id: "b1", position: { x: -140, y: 280 } },
+        { id: "b2", position: { x: 620, y: 280 } },
+        // One more step of the same column, so the walk has to skip it too.
+        { id: "b3", position: { x: 240, y: 520 } },
+      ],
+      edges: [],
+    });
+
+    expect(boxesOf(placeholders)).toEqual([{ x: 240, y: 720, width: 140, height: 40 }]);
+    // Back in the column, so the connector is the single straight run again.
+    expect(placeholders[0]?.connectors).toEqual([
+      { x: 310, y: 40, length: 680, axis: "vertical" },
+    ]);
+  });
+
+  /*
+   * The same geometry on the horizontal axis: the flow axis is `x` and the lane
+   * axis is `y`, and the search order does not change.
+   */
+  it("slides to the free lane on the horizontal axis too", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "horizontal",
+      nodes: [
+        leaf("n1", 0, 240),
+        // The next rank and the lower lane are taken; the upper lane is free.
+        { id: "b0", position: { x: 280, y: 240 } },
+        { id: "b1", position: { x: 280, y: 0 } },
+      ],
+      edges: [],
+    });
+
+    expect(boxesOf(placeholders)).toEqual([{ x: 240, y: -40, width: 140, height: 40 }]);
+    expect(placeholders[0]?.connectors).toEqual([
+      { x: 140, y: 260, length: 100, axis: "horizontal" },
+      { x: 240, y: 0, length: 260, axis: "vertical" },
+    ]);
+  });
+
+  /*
+   * An accepted placeholder joins the occupied set, so the next leaf sees it as a
+   * full node box: neither a lane nor a step is taken twice.
+   */
+  it("counts a placed placeholder as occupied for the next one", () => {
+    const placeholders = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      nodes: [
+        leaf("n1", 0, 0),
+        // A leaf whose own column is exactly the lane n1's placeholder takes.
+        leaf("n2", 380, 0),
+        // n1's first step and the lane left of it, both taken by real nodes...
+        { id: "b0", position: { x: 0, y: 240 } },
+        { id: "b1", position: { x: -380, y: 240 } },
+      ],
+      edges: [],
+    });
+
+    // ...so n1's placeholder takes the right lane, and n2's first step is n1's
+    // placeholder itself, which pushes n2 one lane further right (its other lane
+    // is b0's column).
+    expect(placeholders.map((placeholder) => placeholder.anchorId)).toEqual(["n1", "n2"]);
+    expect(boxesOf(placeholders)).toEqual([
+      { x: 380, y: 240, width: 140, height: 40 },
+      { x: 760, y: 240, width: 140, height: 40 },
+    ]);
+    expect(intersects(boxAt(placeholders, 0), boxAt(placeholders, 1))).toBe(false);
+    expect(intersects(boxAt(placeholders, 1), { x: 380, y: 0, width: 140, height: 40 })).toBe(
+      false,
+    );
+  });
+
+  /*
+   * Two leaves of one column keep their placeholders apart — one step apart or
+   * two — and the lane a placeholder took stays free of both.
+   */
+  it("keeps two placeholders of one column apart", () => {
+    const twoSteps = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      // Two leaves two steps apart (480 = 2 x 240), so both first steps are free.
+      nodes: [leaf("n1", 0, 0), leaf("n2", 0, 480)],
+      edges: [],
+    });
+
+    expect(boxesOf(twoSteps)).toEqual([
+      { x: 0, y: 240, width: 140, height: 40 },
+      { x: 0, y: 720, width: 140, height: 40 },
+    ]);
+    expect(intersects(boxAt(twoSteps, 0), boxAt(twoSteps, 1))).toBe(false);
+
+    const oneRank = canvasPlaceholders({
+      enabled: true,
+      axis: "vertical",
+      // One rank pitch apart (280): n1's first step lands flush against n2, so it
+      // takes the lane beside it instead of moving down the column.
+      nodes: [leaf("n1", 0, 0), leaf("n2", 0, 280)],
+      edges: [],
+    });
+
+    expect(boxesOf(oneRank)).toEqual([
+      { x: -380, y: 240, width: 140, height: 40 },
+      { x: 0, y: 520, width: 140, height: 40 },
+    ]);
+    expect(intersects(boxAt(oneRank, 0), boxAt(oneRank, 1))).toBe(false);
+    expect(intersects(boxAt(oneRank, 0), { x: 0, y: 280, width: 140, height: 40 })).toBe(false);
+    expect(intersects(boxAt(oneRank, 1), { x: 0, y: 0, width: 140, height: 40 })).toBe(false);
+  });
+
   it("keeps the empty-graph placeholder at the origin", () => {
     const placeholders = canvasPlaceholders({ enabled: true, nodes: [], edges: [] });
 
     expect(boxesOf(placeholders)).toEqual([{ x: 0, y: 0, width: 140, height: 40 }]);
     expect(placeholders[0]?.kind).toBe("empty-state");
-    expect(placeholders[0]?.connector).toBeUndefined();
+    expect(placeholders[0]?.connectors).toEqual([]);
   });
 
   it("draws the empty-state placeholder in an empty graph", () => {
@@ -1489,8 +1946,8 @@ describe("GraphCanvas phantom placeholders", () => {
     });
 
     // The step grows instead of the connector shrinking to nothing.
-    expect(placeholder?.connector?.length).toBeGreaterThan(0);
-    expect(placeholder?.box.x).toBe(400 + (placeholder?.connector?.length ?? 0));
+    expect(placeholder?.connectors[0]?.length).toBeGreaterThan(0);
+    expect(placeholder?.box.x).toBe(400 + (placeholder?.connectors[0]?.length ?? 0));
   });
 
   it("puts the \"+\" at the centre of the dashed box, not on the connector", () => {
@@ -1780,7 +2237,7 @@ describe("GraphCanvas phantom placeholders", () => {
     // n2 sits at x=240, so its placeholder is one free slot further along.
     expect(placeholder?.box.x).toBeGreaterThan(240);
     expect(placeholder?.box.y).toBe(0);
-    expect(placeholder?.connector?.axis).toBe("horizontal");
+    expect(placeholder?.connectors[0]?.axis).toBe("horizontal");
   });
 
   it("keeps the default placeholder box and its + when the host supplies no renderer", () => {
@@ -1994,3 +2451,230 @@ describe("GraphCanvas connections and ports policy", () => {
   });
 });
 
+
+/* ------------------------------------------------------------------ */
+/*  Camera framing (viewport)                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The camera is React Flow's (canvas state), and jsdom measures a 0×0 canvas, so
+ * the resulting transform cannot be asserted here — React Flow refuses to fit a
+ * viewport it cannot measure. What *can* be asserted is that the canvas hands
+ * React Flow the framing it decided on: `fitView` schedules its options on the
+ * live store (`fitViewQueued` / `fitViewOptions`), which is the same store a real
+ * drag writes to, so a probe inside the provider observes exactly what a browser
+ * would. The pure rules themselves are covered exhaustively in
+ * `viewport-fit.test.ts`.
+ */
+describe("GraphCanvas camera framing", () => {
+  type FlowStore = ReturnType<typeof useStoreApi>;
+
+  /** Every distinct `fitView` options object React Flow was handed, in order. */
+  interface FitViewLog {
+    readonly options: unknown[];
+  }
+
+  /**
+   * Records the `fitView` options React Flow is handed.
+   *
+   * React Flow's viewport helper schedules a fit by setting `fitViewOptions` on
+   * the store; one options object per call, so a change of reference is one
+   * camera movement (and a repeated notification with the same object is not).
+   */
+  function FitViewProbe(props: { readonly log: FitViewLog }): null {
+    const store = useStoreApi();
+    useEffect(
+      () =>
+        store.subscribe((state, previous) => {
+          const options = state.fitViewOptions;
+          if (options !== undefined && options !== previous.fitViewOptions) {
+            (props.log.options as unknown[]).push(options);
+          }
+        }),
+      [store, props.log],
+    );
+    return null;
+  }
+
+  function seededEngine(): EditorEngine {
+    const engine = makeEngine();
+    addNode(engine, {
+      definitionId: "test.app-node",
+      nodeId: "n1",
+      position: { x: 0, y: 0 },
+    });
+    addNode(engine, {
+      definitionId: "test.app-node",
+      nodeId: "n2",
+      position: { x: 300, y: 0 },
+    });
+    engine.domain.edges.register({
+      id: "test.app-edge",
+      name: "App Edge",
+      version: "1.0.0",
+      category: "test",
+    } as unknown as EdgeDefinition);
+    createEdge(engine, {
+      edgeId: "e1",
+      source: { nodeId: "n1", portId: "out-1" },
+      target: { nodeId: "n2", portId: "in-1" },
+    });
+    return engine;
+  }
+
+  function renderWithProbe(engine: EditorEngine, props?: Partial<GraphCanvasProps>) {
+    const log: FitViewLog = { options: [] };
+    const rendered = render(
+      createElement(
+        "div",
+        { style: { width: 800, height: 600 } },
+        createElement(
+          ReactFlowProvider,
+          null,
+          createElement(GraphCanvas, { editor: engine, ...props }),
+          createElement(FitViewProbe, { log }),
+        ),
+      ),
+    );
+    return { ...rendered, log };
+  }
+
+  it("renders a canvas without a viewport reader, today's behaviour", () => {
+    const engine = seededEngine();
+
+    const { container, log } = renderWithProbe(engine);
+
+    expect(screen.getAllByText("App Node")).toHaveLength(2);
+    // No framing plan: the canvas keeps React Flow's own boolean `fitView`, so
+    // the canvas itself schedules nothing.
+    expect(log.options).toHaveLength(0);
+    expect(container.querySelector("[data-testid='rf__node-n1']")).not.toBeNull();
+  });
+
+  it("frames the node the host configured, with the defaults", async () => {
+    const engine = seededEngine();
+
+    const { log } = renderWithProbe(engine, {
+      viewportFit: () => ({ start: { node: "n1" } }),
+    });
+
+    await waitFor(() => expect(log.options).toHaveLength(1));
+    expect(log.options[0]).toEqual({
+      nodes: [{ id: "n1" }],
+      maxZoom: 1.5,
+      padding: 0.1,
+      duration: 200,
+    });
+  });
+
+  it("frames the graph at the absolute zoom the host configured", async () => {
+    const engine = seededEngine();
+
+    const { log } = renderWithProbe(engine, {
+      viewportFit: () => ({ start: { zoom: 1.25 } }),
+    });
+
+    await waitFor(() => expect(log.options).toHaveLength(1));
+    expect(log.options[0]).toEqual({
+      minZoom: 1.25,
+      maxZoom: 1.25,
+      padding: 0.1,
+      duration: 200,
+    });
+  });
+
+  it("does not move the camera on selection while no selection rule is declared", async () => {
+    const engine = seededEngine();
+    const { log } = renderWithProbe(engine, { viewportFit: () => ({ start: {} }) });
+    await waitFor(() => expect(log.options).toHaveLength(1));
+
+    act(() => {
+      selectNode(engine, { nodeId: "n2" });
+    });
+
+    expect(log.options).toHaveLength(1);
+  });
+
+  it("follows the selection and restores the start framing when it is cleared", async () => {
+    const engine = seededEngine();
+    const { log } = renderWithProbe(engine, {
+      viewportFit: () => ({ start: { node: "n1" }, selection: {} }),
+    });
+    await waitFor(() => expect(log.options).toHaveLength(1));
+
+    act(() => {
+      selectNode(engine, { nodeId: "n2" });
+    });
+    await waitFor(() => expect(log.options).toHaveLength(2));
+    expect(log.options[1]).toEqual({
+      nodes: [{ id: "n2" }],
+      maxZoom: 1.5,
+      padding: 0.1,
+      duration: 200,
+    });
+
+    act(() => {
+      clearSelection(engine);
+    });
+    await waitFor(() => expect(log.options).toHaveLength(3));
+    expect(log.options[2]).toEqual({
+      nodes: [{ id: "n1" }],
+      maxZoom: 1.5,
+      padding: 0.1,
+      duration: 200,
+    });
+  });
+
+  it("picks up a runtime camera change on the next selection change, with no remount", async () => {
+    const engine = seededEngine();
+    // The host's live reader: the same function identity throughout, so the
+    // canvas never re-subscribes and never remounts — only the value it returns
+    // changes, exactly what `builder.setViewport(...)` does behind
+    // `() => builder.viewport()`.
+    let declared: ViewportConfiguration | undefined = { selection: { maxZoom: 2 } };
+    const { container, log } = renderWithProbe(engine, {
+      viewportFit: () => declared,
+    });
+    await waitFor(() => expect(log.options).toHaveLength(1));
+    const nodeBefore = container.querySelector("[data-testid='rf__node-n1']");
+
+    act(() => {
+      selectNode(engine, { nodeId: "n1" });
+    });
+    await waitFor(() => expect(log.options).toHaveLength(2));
+    expect(log.options[1]).toEqual({
+      nodes: [{ id: "n1" }],
+      maxZoom: 2,
+      padding: 0.1,
+      duration: 200,
+    });
+
+    declared = { selection: { maxZoom: 4, padding: 0.25, duration: 0 } };
+
+    act(() => {
+      selectNode(engine, { nodeId: "n2" });
+    });
+    await waitFor(() => expect(log.options).toHaveLength(3));
+    expect(log.options[2]).toEqual({
+      nodes: [{ id: "n2" }],
+      maxZoom: 4,
+      padding: 0.25,
+      duration: 0,
+    });
+    // The same canvas and the same node element survived the change: the new
+    // rule came from the reader, not from a remount with a new `key`.
+    expect(container.querySelector("[data-testid='rf__node-n1']")).toBe(nodeBefore);
+  });
+
+  it("does not throw on a selection change without a viewport reader", () => {
+    const engine = seededEngine();
+    const { container } = renderCanvas(engine);
+
+    act(() => {
+      selectNode(engine, { nodeId: "n2" });
+      clearSelection(engine);
+    });
+
+    expect(container.querySelector("[data-testid='rf__node-n1']")).not.toBeNull();
+  });
+});

@@ -21,7 +21,7 @@ import { ok, err, RegistryStore, type RegistryError, type Result } from "@nodera
 import { DEFAULT_FORMAT_VERSION, GGD_FORMAT } from "@nodera/document";
 import { EditorEngine, type EditorEngineOptions } from "@nodera/application";
 import { NoderaDomain } from "@nodera/domain";
-import { LayoutStrategyRegistry, type GraphLayoutStrategy } from "@nodera/graph-layout";
+import { LayoutStrategyRegistry, type GraphLayoutNodeSize, type GraphLayoutStrategy } from "@nodera/graph-layout";
 import { NodeRegistry, type NodeDefinition } from "@nodera/node-registry";
 import { EdgeRegistry, type EdgeDefinition } from "@nodera/edge-registry";
 import { ValidatorRegistry } from "@nodera/validation";
@@ -106,6 +106,7 @@ import type {
   BuilderDocumentFormat,
   GraphLayoutConfiguration,
   RemovalPolicy,
+  ViewportConfiguration,
 } from "./configuration.js";
 import {
   createFeaturesApi,
@@ -143,6 +144,22 @@ export type { NodeTransition } from "@nodera/ui-core";
 
 /** Id of a builder the host did not name. */
 export const DEFAULT_BUILDER_ID = "nodera.builder";
+
+/**
+ * React Flow padding a camera framing uses when the host declares none.
+ *
+ * The presentation binding applies the same default (`canvas/viewport-fit.ts`),
+ * restated here because the SDK cannot import a presentation package: the host
+ * reads the resolved value from `builder.viewport()` and the canvas falls back to
+ * the same number when it receives a raw configuration.
+ */
+const DEFAULT_VIEWPORT_PADDING = 0.1;
+
+/** Animation length, in milliseconds, a camera framing uses by default. */
+const DEFAULT_VIEWPORT_DURATION = 200;
+
+/** Zoom ceiling a camera framing fits under when the host declares none. */
+const DEFAULT_VIEWPORT_MAX_ZOOM = 1.5;
 
 /** Shape of a semver document version, matching the document package. */
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -433,6 +450,38 @@ export interface Builder {
    * without any other layer changing.
    */
   readonly graphLayout: BuilderGraphLayoutApi;
+  /**
+   * Camera framing the host declared, with the documented defaults applied.
+   *
+   * A reader, not a toggle: the framing is host configuration, so there is no
+   * UI state behind it. `undefined` means the host declared no camera
+   * configuration at all, which is what keeps a canvas on today's plain React
+   * Flow `fitView` with no movement on selection. The value can be replaced at
+   * runtime with {@link Builder.setViewport}.
+   *
+   * It is presentation data only (AGENTS.md §5.3): nothing here reaches the
+   * document, the UI state, a node's data or the history, and applying a framing
+   * emits no application event. The presentation binding reads it through a live
+   * reader (`GraphCanvas.viewportFit`).
+   */
+  viewport(): ViewportConfiguration | undefined;
+  /**
+   * Replaces the camera configuration at runtime.
+   *
+   * `undefined` restores today's behaviour (no start framing beyond React Flow's
+   * own `fitView`, no camera movement on selection). The value is validated with
+   * the same rules as creation; an invalid one is refused and the previous
+   * configuration stays in force.
+   *
+   * The same document discipline holds as for the creation-time group: no
+   * document write, no UI state, no history unit and no application event — the
+   * canvas picks the new framing up through its live reader, so a `selection`
+   * change applies on the next selection change and a `start` change needs a new
+   * canvas mount.
+   */
+  setViewport(
+    viewport: ViewportConfiguration | undefined,
+  ): Result<ViewportConfiguration | undefined, SdkIssues>;
   /** Registers one node definition and returns it in the public vocabulary. */
   registerNode(input: NodeDefinitionInput): Result<NodeDefinitionView, SdkIssues>;
   /** Registers one edge definition and returns it in the public vocabulary. */
@@ -575,8 +624,9 @@ function registerTheme(
  *
  * The host declares who owns placement and which strategy an explicit
  * `Arrange` runs; a value outside the declared unions, a spacing that is not a
- * positive finite number or a strategy id no registry entry matches is a
- * configuration problem the builder reports instead of guessing a geometry.
+ * positive finite number, a fallback node box with an extent that is not one, or
+ * a strategy id no registry entry matches is a configuration problem the builder
+ * reports instead of guessing a geometry.
  */
 function graphLayoutIssues(
   layout: unknown,
@@ -655,6 +705,7 @@ function graphLayoutIssues(
       ),
     );
   }
+  issues.push(...nodeSizeIssues(Reflect.get(layout, "nodeSize"), [...path, "nodeSize"]));
   const drag: unknown = Reflect.get(layout, "drag");
   if (drag !== undefined && drag !== "locked" && drag !== "snap-back") {
     issues.push(
@@ -724,6 +775,216 @@ function graphLayoutIssues(
     );
   }
   return issues;
+}
+
+/**
+ * Structural checks of the default node box `Arrange` reserves room for.
+ *
+ * The strategy validates the same box again — it is the layer that builds the
+ * geometry, and a host that bypasses these types reaches it directly — but the
+ * builder refuses it at the composition boundary, with the offending field
+ * named, so a host learns it from its own configuration instead of from a
+ * refused `arrange()` call later on.
+ */
+function nodeSizeIssues(nodeSize: unknown, path: readonly string[]): SdkIssue[] {
+  if (nodeSize === undefined) {
+    return [];
+  }
+  if (!isPlainObject(nodeSize)) {
+    return [
+      shapeIssue(
+        "Builder graph layout nodeSize must be an object declaring a width and a height",
+        nodeSize,
+        path,
+      ),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  for (const field of ["width", "height"] as const) {
+    const extent: unknown = Reflect.get(nodeSize, field);
+    if (!isPositiveFiniteNumber(extent)) {
+      issues.push(
+        shapeIssue(
+          `Builder graph layout nodeSize ${field} must be a positive finite number`,
+          extent,
+          [...path, field],
+        ),
+      );
+    }
+  }
+  return issues;
+}
+
+/**
+ * Whether a declared camera value is a positive finite number.
+ *
+ * Zero is refused along with the negatives: a zoom of `0` frames nothing and a
+ * padding of `0` asks for no margin at all, so neither can be told apart from a
+ * malformed value at the boundary that validates the configuration.
+ */
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * Structural checks of the zoom rule both viewport groups carry: `zoom`,
+ * `maxZoom`, `padding` and `duration`.
+ *
+ * `owner` names the group in the message (`Builder viewport start`, …) so the
+ * host reads which of the two rules is wrong, not only where.
+ */
+function viewportZoomIssues(
+  group: object,
+  path: readonly string[],
+  owner: string,
+): SdkIssue[] {
+  const issues: SdkIssue[] = [];
+  for (const field of ["zoom", "maxZoom", "padding"] as const) {
+    const value: unknown = Reflect.get(group, field);
+    if (value !== undefined && !isPositiveFiniteNumber(value)) {
+      issues.push(
+        shapeIssue(`${owner} ${field} must be a positive finite number`, value, [
+          ...path,
+          field,
+        ]),
+      );
+    }
+  }
+  const duration: unknown = Reflect.get(group, "duration");
+  if (
+    duration !== undefined &&
+    !(typeof duration === "number" && Number.isFinite(duration) && duration >= 0)
+  ) {
+    issues.push(
+      shapeIssue(`${owner} duration must be a non-negative finite number`, duration, [
+        ...path,
+        "duration",
+      ]),
+    );
+  }
+  return issues;
+}
+
+/**
+ * Structural checks of the camera framing configuration.
+ *
+ * Modelled on {@link graphLayoutIssues}: the host declares what the canvas frames
+ * and at which zoom, and a value the declared shape cannot hold — a group that
+ * is not an object, an empty node id, a zoom, ceiling or padding that is not a
+ * positive finite number, an animation length that is negative or not finite, a
+ * `selection.edges` that is not a boolean — is reported where it sits rather
+ * than dropped, so nothing is silently half-applied.
+ */
+function viewportIssues(viewport: unknown, path: readonly string[]): SdkIssue[] {
+  if (!isPlainObject(viewport)) {
+    return [
+      shapeIssue(
+        "Builder viewport must be an object declaring start and selection",
+        viewport,
+        path,
+      ),
+    ];
+  }
+
+  const issues: SdkIssue[] = [];
+  const start: unknown = Reflect.get(viewport, "start");
+  if (start !== undefined) {
+    if (!isPlainObject(start)) {
+      issues.push(
+        shapeIssue(
+          "Builder viewport start must be an object declaring the node and leading zoom",
+          start,
+          [...path, "start"],
+        ),
+      );
+    } else {
+      const node: unknown = Reflect.get(start, "node");
+      if (node !== undefined && !(typeof node === "string" && node.trim().length > 0)) {
+        issues.push(
+          shapeIssue("Builder viewport start node must be a non-empty node id", node, [
+            ...path,
+            "start",
+            "node",
+          ]),
+        );
+      }
+      issues.push(...viewportZoomIssues(start, [...path, "start"], "Builder viewport start"));
+    }
+  }
+
+  const selection: unknown = Reflect.get(viewport, "selection");
+  if (selection !== undefined) {
+    if (!isPlainObject(selection)) {
+      issues.push(
+        shapeIssue(
+          "Builder viewport selection must be an object declaring the zoom rule of a selection",
+          selection,
+          [...path, "selection"],
+        ),
+      );
+    } else {
+      issues.push(
+        ...viewportZoomIssues(selection, [...path, "selection"], "Builder viewport selection"),
+      );
+      const edges: unknown = Reflect.get(selection, "edges");
+      if (edges !== undefined && typeof edges !== "boolean") {
+        issues.push(
+          shapeIssue("Builder viewport selection edges must be a boolean", edges, [
+            ...path,
+            "selection",
+            "edges",
+          ]),
+        );
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * Resolves the camera framing a validated configuration declares.
+ *
+ * The defaults are applied here once — React Flow padding `0.1`, animation
+ * length `200` ms and zoom ceiling `1.5`, the same values the presentation
+ * binding falls back to — so the host reads one frozen object instead of
+ * repeating the same fallbacks. A group the host did not declare stays absent,
+ * which is what keeps a canvas with no camera configuration on today's plain
+ * `fitView`, and a field the host did not declare stays absent too (the node id,
+ * the absolute zoom), because `undefined` is not a value here: it is the absence
+ * of a rule.
+ */
+function resolveViewport(
+  configuration: ViewportConfiguration | undefined,
+): ViewportConfiguration | undefined {
+  if (configuration === undefined) {
+    return undefined;
+  }
+  const start = configuration.start;
+  const selection = configuration.selection;
+  return Object.freeze({
+    ...(start === undefined
+      ? {}
+      : {
+          start: Object.freeze({
+            ...(start.node === undefined ? {} : { node: start.node }),
+            ...(start.zoom === undefined ? {} : { zoom: start.zoom }),
+            maxZoom: start.maxZoom ?? DEFAULT_VIEWPORT_MAX_ZOOM,
+            padding: start.padding ?? DEFAULT_VIEWPORT_PADDING,
+            duration: start.duration ?? DEFAULT_VIEWPORT_DURATION,
+          }),
+        }),
+    ...(selection === undefined
+      ? {}
+      : {
+          selection: Object.freeze({
+            ...(selection.zoom === undefined ? {} : { zoom: selection.zoom }),
+            maxZoom: selection.maxZoom ?? DEFAULT_VIEWPORT_MAX_ZOOM,
+            padding: selection.padding ?? DEFAULT_VIEWPORT_PADDING,
+            duration: selection.duration ?? DEFAULT_VIEWPORT_DURATION,
+            edges: selection.edges ?? false,
+          }),
+        }),
+  });
 }
 
 /**
@@ -815,6 +1076,27 @@ function resolveRemovalPolicy(
   configuration: GraphLayoutConfiguration | undefined,
 ): RemovalPolicy {
   return configuration?.onRemove === "splice" ? "splice" : "detach";
+}
+
+/**
+ * Resolves the default node box a validated configuration declares.
+ *
+ * Absent or unusable, nothing is passed to the strategy, which is what keeps one
+ * default in one place: the strategy falls back to its own box. A declared value
+ * is the host's, so it wins as it is.
+ */
+function resolveNodeSize(
+  configuration: GraphLayoutConfiguration | undefined,
+): GraphLayoutNodeSize | undefined {
+  const nodeSize = configuration?.nodeSize;
+  if (
+    nodeSize === undefined ||
+    !isPositiveFiniteNumber(nodeSize.width) ||
+    !isPositiveFiniteNumber(nodeSize.height)
+  ) {
+    return undefined;
+  }
+  return { width: nodeSize.width, height: nodeSize.height };
 }
 
 /**
@@ -1307,10 +1589,14 @@ interface BuilderAssemblerOptions {
   readonly strategies: LayoutStrategyRegistry;
   /** Distance between consecutive `Arrange` ranks, resolved from configuration. */
   readonly rankSpacing: number;
+  /** Fallback node box `Arrange` reserves room for, when the host declared one. */
+  readonly nodeSize: GraphLayoutNodeSize | undefined;
   /** What a structural change arranges automatically, resolved from configuration. */
   readonly arrangeOnChange: ArrangeOnChange;
   /** What removing a node does with the relations it carried. */
   readonly onRemove: RemovalPolicy;
+  /** Camera framing the host declared, resolved and frozen. */
+  readonly viewport: ViewportConfiguration | undefined;
 }
 /** Concrete builder. Hosts only ever see the {@link Builder} contract. */
 class SdkBuilder implements Builder {
@@ -1354,6 +1640,16 @@ class SdkBuilder implements Builder {
    * removal with no re-composition.
    */
   private onRemovePolicy: RemovalPolicy;
+  /**
+   * Camera framing the host declared, resolved and frozen.
+   *
+   * Configuration, never UI state (AGENTS.md §5.3): it is frozen, it carries no
+   * document data, and the presentation binding reads it through a function.
+   * Replaced at runtime by {@link SdkBuilder.setViewport}, which is why it is the
+   * one mutable field of its kind here: a refused replacement leaves the previous
+   * value in place.
+   */
+  private viewportConfiguration: ViewportConfiguration | undefined;
 
   constructor(options: BuilderAssemblerOptions) {
     this.id = options.id;
@@ -1386,6 +1682,7 @@ class SdkBuilder implements Builder {
     this.strategyRegistry = options.strategies;
     this.arrangeOnChangePolicy = options.arrangeOnChange;
     this.onRemovePolicy = options.onRemove;
+    this.viewportConfiguration = options.viewport;
     // One adapter object per builder, so a host can hold on to it across reads.
     this.registries = {
       nodes: createNodeDefinitionRegistryView(this.nodeRegistry, () => this.disposedFlag),
@@ -1403,6 +1700,7 @@ class SdkBuilder implements Builder {
       {
         strategies: this.strategyRegistry,
         rankSpacing: options.rankSpacing,
+        nodeSize: options.nodeSize,
         arrangeOnChange: () => this.arrangeOnChangePolicy,
       },
       { onRemove: () => this.onRemovePolicy },
@@ -1447,6 +1745,35 @@ class SdkBuilder implements Builder {
 
   get renderers(): RendererBindings {
     return this.bindings;
+  }
+
+  viewport(): ViewportConfiguration | undefined {
+    return this.viewportConfiguration;
+  }
+
+  /**
+   * Replaces the camera framing at runtime.
+   *
+   * The value runs through the same validation as composition, so a host cannot
+   * reach a stored configuration composition would have refused. The refusal
+   * returns every issue and returns before the assignment, which is what leaves
+   * the previous configuration — and therefore the next framing the canvas reads
+   * — untouched.
+   */
+  setViewport(
+    viewport: ViewportConfiguration | undefined,
+  ): Result<ViewportConfiguration | undefined, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("setViewport")]);
+    }
+    if (viewport !== undefined) {
+      const issues = viewportIssues(viewport, ["viewport"]);
+      if (issues.length > 0) {
+        return err(issues);
+      }
+    }
+    this.viewportConfiguration = resolveViewport(viewport);
+    return ok(this.viewportConfiguration);
   }
 
   registerNode(input: NodeDefinitionInput): Result<NodeDefinitionView, SdkIssues> {
@@ -1924,6 +2251,13 @@ export function createBuilder(
     issues.push(...graphLayoutIssues(declaredGraphLayout, ["graph", "layout"], strategies));
   }
 
+  // The camera framing is configuration, so it is validated here beside the
+  // layout and never applied half-way: one issue and no builder is composed.
+  const declaredViewport = configuration.viewport;
+  if (declaredViewport !== undefined) {
+    issues.push(...viewportIssues(declaredViewport, ["viewport"]));
+  }
+
   if (configuration.plugins !== undefined && !Array.isArray(configuration.plugins)) {
     issues.push(
       shapeIssue("Builder plugins must be an array of plugin definitions", configuration.plugins, [
@@ -2102,8 +2436,10 @@ export function createBuilder(
     graphLayout,
     strategies,
     rankSpacing,
+    nodeSize: resolveNodeSize(declaredGraphLayout),
     arrangeOnChange: resolveArrangeOnChange(declaredGraphLayout),
     onRemove: resolveRemovalPolicy(declaredGraphLayout),
+    viewport: resolveViewport(declaredViewport),
   });
 
   // Configured plugins run last, once every declarative registry is populated,

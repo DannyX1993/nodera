@@ -415,13 +415,16 @@ describe("graph layout: arranging an existing graph", () => {
         `unexpected arrange failure: ${horizontal.error.map((issue) => issue.code).join(", ")}`,
       );
     }
-    // The two isolated nodes share the widest rank, so the one-node ranks of
-    // `start` and `work` are centred on the cross axis at half a node spacing.
+    // Rewritten by the alignment rule (old: `start` and `work` at `y: 40`, half
+    // of a pitch, because the one-node ranks were centred over the two-node
+    // bucket). `work` takes its parent's column `0`, and the isolated bucket,
+    // which has no placed parent, keeps its base slots 0 and 80 — one pitch is
+    // the default 40-tall box plus the 40 gap.
     expect(positions(builder)).toEqual({
-      start: { x: 0, y: 20 },
-      work: { x: 100, y: 20 },
+      start: { x: 0, y: 0 },
+      work: { x: 100, y: 0 },
       alpha: { x: 200, y: 0 },
-      zeta: { x: 200, y: 40 },
+      zeta: { x: 200, y: 80 },
     });
 
     const vertical = builder.graph.arrange({
@@ -434,11 +437,15 @@ describe("graph layout: arranging an existing graph", () => {
         `unexpected arrange failure: ${vertical.error.map((issue) => issue.code).join(", ")}`,
       );
     }
+    // Vertically the cross axis reads the box **width**, so the pitch is the
+    // default 140-wide box plus the 40 gap: 180. The chain keeps the column `0`
+    // and the isolated bucket keeps the slots 0 and 180 (old: the chain at 90,
+    // half of the applied pitch, from the centring rule).
     expect(positions(builder)).toEqual({
-      start: { x: 20, y: 0 },
-      work: { x: 20, y: 100 },
+      start: { x: 0, y: 0 },
+      work: { x: 0, y: 100 },
       alpha: { x: 0, y: 200 },
-      zeta: { x: 40, y: 200 },
+      zeta: { x: 180, y: 200 },
     });
   });
 });
