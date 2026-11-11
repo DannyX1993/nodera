@@ -37,8 +37,8 @@ export interface PluginContext<TApi = unknown> {
  */
 export interface PluginDefinition<TApi = unknown> {
   readonly manifest: PluginManifest;
-  /** Registers the plugin's contributions and marks it active. */
-  activate(ctx: PluginContext<TApi>): void | Promise<void>;
-  /** Optional cleanup the plugin performs when it is deactivated. */
-  deactivate?(ctx: PluginContext<TApi>): void | Promise<void>;
+  /** Registers the plugin's contributions and marks it active. Synchronous. */
+  activate(ctx: PluginContext<TApi>): void;
+  /** Optional cleanup the plugin performs when it is deactivated. Synchronous. */
+  deactivate?(ctx: PluginContext<TApi>): void;
 }
