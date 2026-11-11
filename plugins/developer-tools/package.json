@@ -2,5 +2,22 @@
   "name": "@nodera/developer-tools",
   "version": "0.0.0",
   "private": true,
-  "description": "plugins/developer-tools"
+  "type": "module",
+  "description": "Example Nodera plugin: declarative interface actions — tools, panels and a dialog — contributed through the public plugin API.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/plugin-api": "workspace:*",
+    "@nodera/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@nodera/plugin-manager": "workspace:*",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }

@@ -2,5 +2,22 @@
   "name": "@nodera/data-nodes",
   "version": "0.0.0",
   "private": true,
-  "description": "plugins/data-nodes"
+  "type": "module",
+  "description": "Example Nodera plugin: property definitions, a graph validator and a newline-delimited JSON importer contributed through the public plugin API.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/plugin-api": "workspace:*",
+    "@nodera/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@nodera/plugin-manager": "workspace:*",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }
