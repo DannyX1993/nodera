@@ -1,21 +1,24 @@
 /**
- * `example.ai-nodes` — the plugin facet of presentation contributions.
+ * `example.ai-nodes` — a framework-agnostic plugin of node definitions.
  *
- * It contributes two node definitions and, next to them, one *renderer binding*
- * per node: the opaque value a presentation adapter resolves when it paints that
- * node. The binding crosses into the SDK as data — this package imports neither
- * React nor React Flow — so the same plugin works with any host that can turn
- * the descriptor into a component (AGENTS.md §7, D8).
+ * It contributes two node definitions and nothing else. Presentation stays on
+ * the host side: a node type *is* its renderer id, so a definition already
+ * declares which renderer the UI must resolve for it, and the host binds the
+ * component itself with `builder.bindRenderer("nodes", "example.ai.classify", C)`.
  *
- * Two rules are visible here:
+ * That split is what keeps the plugin portable (AGENTS.md §7, §9, D8):
  *
- * - a binding is not a contribution. `api.renderers.bind` attaches an opaque
- *   value to an existing slot, so it never appears in the installation's
- *   `contributionIds` and uninstall never withdraws it (D13). The manifest still
- *   declares it, because a declaration is what a host reads before running the
- *   plugin's code (D2);
- * - the manifest declares exactly the node definitions and renderer ids the
- *   activation registers.
+ * - this package imports neither React nor React Flow, so it can be loaded by a
+ *   non-React host;
+ * - the plugin binds no renderer at all. `api.renderers.bind` is the
+ *   *host/framework-aware* channel — a value bound there must be something the
+ *   presentation adapter can paint (for `@nodera/react-flow`, a React
+ *   component). A plain-data descriptor bound into `nodes` makes
+ *   `createRendererSet` reject the whole builder with
+ *   `InvalidRendererBindingError`, which is exactly why a framework-agnostic
+ *   plugin must not use that channel;
+ * - the manifest declares exactly the two node contributions the activation
+ *   registers, so a host can plan, conflict-check and later withdraw them.
  */
 
 import type { PluginDefinition, PluginManifest } from "@nodera/plugin-api";
@@ -32,44 +35,15 @@ import type {
 /** Globally qualified id of the plugin itself. */
 export const AI_NODES_PLUGIN_ID = "example.ai-nodes";
 
-/** Node type that labels the value it receives. */
+/**
+ * Node type that labels the value it receives.
+ *
+ * The type doubles as the renderer id the host binds a component for.
+ */
 export const CLASSIFY_NODE_TYPE = "example.ai.classify";
 
 /** Node type that embeds the value it receives. */
 export const EMBED_NODE_TYPE = "example.ai.embed";
-
-/* ------------------------------------------------------------------ */
-/*  Renderer descriptors                                               */
-/* ------------------------------------------------------------------ */
-
-/**
- * Renderer descriptor a presentation adapter turns into a component.
- *
- * The SDK treats the value as opaque `unknown`; the shape is the plugin's own
- * contract with the hosts that support it. Keeping it plain data — no function,
- * no component — is what lets the same plugin be loaded by a non-React host.
- */
-export interface AiNodeRenderer {
-  readonly kind: "ai-node";
-  /** Accent token the renderer uses to tell the two AI nodes apart. */
-  readonly accent: string;
-  /** Short badge the renderer paints in the node header. */
-  readonly badge: string;
-}
-
-/** Renderer descriptor of the classify node. */
-export const CLASSIFY_RENDERER: AiNodeRenderer = {
-  kind: "ai-node",
-  accent: "violet",
-  badge: "AI",
-};
-
-/** Renderer descriptor of the embed node. */
-export const EMBED_RENDERER: AiNodeRenderer = {
-  kind: "ai-node",
-  accent: "teal",
-  badge: "AI",
-};
 
 /* ------------------------------------------------------------------ */
 /*  Contributions                                                      */
@@ -110,7 +84,7 @@ export const AI_NODES_MANIFEST: PluginManifest = {
   id: AI_NODES_PLUGIN_ID,
   name: "Example AI nodes",
   version: "1.0.0",
-  description: "Two node definitions plus the renderer descriptors a host binds for them.",
+  description: "Two node definitions; the host binds the components that paint them.",
   author: { name: "Nodera examples" },
   compatibility: {
     sdkVersion: "^0.0.0",
@@ -124,8 +98,6 @@ export const AI_NODES_MANIFEST: PluginManifest = {
   contributions: [
     { type: "node", id: CLASSIFY_NODE_TYPE, version: "1.0.0" },
     { type: "node", id: EMBED_NODE_TYPE, version: "1.0.0" },
-    { type: "renderer", id: CLASSIFY_NODE_TYPE },
-    { type: "renderer", id: EMBED_NODE_TYPE },
   ],
 };
 
@@ -157,7 +129,7 @@ function assertRegistered(
   throw new Error(`${pluginId} could not register its ${label}: ${details}`);
 }
 
-/** The plugin: two node definitions and the renderers bound for them. */
+/** The plugin: two node definitions, no presentation binding. */
 export const aiNodesPlugin: PluginDefinition<BuilderPluginApi> = {
   manifest: AI_NODES_MANIFEST,
   activate({ api }) {
@@ -170,16 +142,6 @@ export const aiNodesPlugin: PluginDefinition<BuilderPluginApi> = {
       AI_NODES_PLUGIN_ID,
       "embed node",
       api.nodes.register(EMBED_NODE),
-    );
-    assertRegistered(
-      AI_NODES_PLUGIN_ID,
-      "classify renderer",
-      api.renderers.bind("nodes", CLASSIFY_NODE_TYPE, CLASSIFY_RENDERER),
-    );
-    assertRegistered(
-      AI_NODES_PLUGIN_ID,
-      "embed renderer",
-      api.renderers.bind("nodes", EMBED_NODE_TYPE, EMBED_RENDERER),
     );
   },
 };

@@ -9,16 +9,14 @@
  * demo boots with.
  */
 
-import { aiNodesPlugin } from "@nodera/ai-nodes";
+import { CLASSIFY_NODE_TYPE, EMBED_NODE_TYPE } from "@nodera/ai-nodes";
 import {
   DEVELOPER_TOOLS_PLUGIN_ID,
   ISSUES_PANEL_ID,
   SHORTCUTS_PANEL_ID,
   VALIDATE_TOOL_ID,
 } from "@nodera/developer-tools";
-import { createPluginManager } from "@nodera/plugin-manager";
 import { createRendererSet } from "@nodera/react-flow";
-import { assertValid, createBuilder } from "@nodera/sdk";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -45,6 +43,7 @@ describe("Phase 7 demo composition", () => {
       ["example.data-nodes", "active"],
       ["example.developer-tools", "active"],
       ["example.kitchen-sink", "active"],
+      ["example.ai-nodes", "active"],
     ]);
     expect(manager.list().map((record) => record.manifest.id)).toEqual(DEMO_PLUGIN_IDS);
   });
@@ -54,6 +53,8 @@ describe("Phase 7 demo composition", () => {
 
     expect(builder.registries.nodes.has("example.basic.start")).toBe(true);
     expect(builder.registries.nodes.has("example.basic.transform")).toBe(true);
+    expect(builder.registries.nodes.has(CLASSIFY_NODE_TYPE)).toBe(true);
+    expect(builder.registries.nodes.has(EMBED_NODE_TYPE)).toBe(true);
     expect(builder.registries.edges.has("example.basic.flow")).toBe(true);
     expect(builder.registries.panels.has("example.dev.panel.issues")).toBe(true);
     expect(builder.registries.panels.has("example.dev.panel.shortcuts")).toBe(true);
@@ -72,10 +73,12 @@ describe("Phase 7 demo composition", () => {
     const { builder } = demo();
 
     // A renderer value the React binding can mount is a component, i.e. a
-    // function or a `memo`/`forwardRef` object. The demo binds all four node
+    // function or a `memo`/`forwardRef` object. The demo binds all six node
     // renderers the canvas paints and the two panels it composes.
     expect(typeof builder.renderers.nodes.get("example.basic.start")).toBe("function");
     expect(typeof builder.renderers.nodes.get("example.basic.transform")).toBe("function");
+    expect(typeof builder.renderers.nodes.get(CLASSIFY_NODE_TYPE)).toBe("function");
+    expect(typeof builder.renderers.nodes.get(EMBED_NODE_TYPE)).toBe("function");
     expect(typeof builder.renderers.panels.get("example.dev.panel.issues")).toBe("function");
     expect(typeof builder.renderers.panels.get("example.dev.panel.shortcuts")).toBe("function");
 
@@ -90,9 +93,10 @@ describe("Phase 7 demo composition", () => {
     expect(builder.graph.nodes().map((node) => node.type)).toEqual([
       "example.basic.start",
       "example.basic.transform",
+      CLASSIFY_NODE_TYPE,
     ]);
     expect(builder.graph.edges().map((edge) => edge.type)).toEqual(["example.basic.flow"]);
-    expect(builder.graph.nodeCount()).toBe(2);
+    expect(builder.graph.nodeCount()).toBe(3);
     expect(builder.graph.edgeCount()).toBe(1);
   });
 
@@ -138,30 +142,25 @@ describe("Phase 7 demo composition", () => {
     expect(() => createRendererSet(builder.renderers)).not.toThrow();
   });
 
-  it("keeps the AI plugin's opaque renderer descriptors off the React canvas", () => {
-    // Why the demo does not install `ai-nodes` on the mounted builder: the
-    // plugin binds plain data descriptors into the `nodes` renderer slot, and
-    // the React binding refuses a builder whose bindings are not components
-    // (`createRendererSet` throws `InvalidRendererBindingError` for the whole
-    // set, not just the offending id). Installing it on a fresh builder shows
-    // the descriptor the binding would receive.
-    const inspection = assertValid(createBuilder());
-    const manager = createPluginManager(inspection, { sdkVersion: "0.0.0" });
+  it("mounts the AI plugin through the host's renderer bindings", () => {
+    // `example.ai-nodes` is framework-agnostic: it registers node definitions and
+    // binds nothing. The host is what turns each node type into a component, so
+    // a builder with it installed is mountable — the five plugins all activate
+    // on the same canvas.
+    const { builder, manager } = demo();
 
-    expect(manager.install([aiNodesPlugin]).ok).toBe(true);
     expect(manager.get("example.ai-nodes")?.state).toBe("active");
-    expect(inspection.registries.nodes.has("example.ai.classify")).toBe(true);
-    expect(typeof inspection.renderers.nodes.get("example.ai.classify")).toBe("object");
-    // The React binding refuses that whole snapshot, which is why the demo does
-    // not mount a builder with `ai-nodes` installed.
-    expect(() => createRendererSet(inspection.renderers)).toThrow(
-      /must be React components/,
-    );
+    expect(builder.registries.nodes.get(CLASSIFY_NODE_TYPE)).toMatchObject({ label: "Classify" });
+    expect(builder.registries.nodes.get(EMBED_NODE_TYPE)).toMatchObject({ label: "Embed" });
 
-    // The mounted builder only carries renderer values React can paint.
-    const { builder } = demo();
+    // Both AI node types resolve to a component the host bound, keyed by the
+    // node type itself.
+    expect(typeof builder.renderers.nodes.get(CLASSIFY_NODE_TYPE)).toBe("function");
+    expect(typeof builder.renderers.nodes.get(EMBED_NODE_TYPE)).toBe("function");
+
     for (const [id, value] of builder.renderers.nodes) {
       expect([id, typeof value]).toEqual([id, "function"]);
     }
+    expect(() => createRendererSet(builder.renderers)).not.toThrow();
   });
 });

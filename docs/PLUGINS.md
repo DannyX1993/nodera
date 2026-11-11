@@ -57,10 +57,10 @@ Tres reglas de frontera verifican esto de forma ejecutable con
 ## Qué puede aportar un plugin
 
 Trece clases de contribución, cerradas en `PluginContributionKind`
-(`packages/plugin-api/src/contributions.ts`) y en los slots de
+(`packages/plugin-api/src/contributions.ts`) y en la superficie de plugins
 `BuilderPluginApi` (`packages/sdk/src/plugin/plugin.ts`):
 
-| `type` del manifest | Superficie que la registra | Qué es |
+| `type` del manifest | Superficie / declaración | Qué es |
 | --- | --- | --- |
 | `node` | `api.nodes.register(input)` | definición de nodo (datos) |
 | `edge` | `api.edges.register(input)` | definición de edge (datos) |
@@ -74,12 +74,25 @@ Trece clases de contribución, cerradas en `PluginContributionKind`
 | `exporter` | `api.exporters.register(exporter)` | **código** que escribe un formato |
 | `dialog` | `api.dialogs.register(dialog)` | superficie declarativa que la UI abre por id |
 | `layout-strategy` | `api.layoutStrategies.register(strategy)` | **código** que coloca nodos |
-| `renderer` | `api.renderers.bind(kind, id, value)` | binding opaco de presentación |
+| `renderer` | declaración: el id de renderer de la definición (el `type` del nodo) | id con el que el host pinta la definición |
 
 Toda contribución es dato o código en un registro; **ninguna es un componente**.
-El valor de un renderer cruza como `unknown` y solo un binding de framework
-(`@nodera/react-flow`) decide cómo convertirlo en un componente. Esa es la razón
-por la que el mismo plugin sirve a un host React y a un host sin React.
+Un plugin framework-agnóstico **no liga renderers**: declara con qué id se pinta
+lo que aporta —el `type` de un nodo *es* su id de renderer— y el host decide qué
+componente corresponde a ese id con
+`builder.bindRenderer("nodes", "example.ai.classify", Componente)`. `bindRenderer`
+añade un binding nuevo indexado por id (no exige un slot previo: solo rechaza un
+id ya ligado, con `sdk.duplicate-id`). Esa separación —el plugin aporta
+definiciones, el host aporta píxeles— es lo que permite que el mismo plugin
+sirva a un host React y a un host sin React.
+
+`api.renderers.bind(kind, id, value)` es el canal **del host y del adaptador de
+framework**, no el de un plugin agnóstico: el valor cruza como `unknown` y solo
+un binding de framework (`@nodera/react-flow`) decide cómo pintarlo, así que en
+React tiene que ser un componente (función o `memo`/`forwardRef`). Cualquier otro
+valor —un descriptor de datos, por ejemplo— hace que `createRendererSet` lance
+`InvalidRendererBindingError` para **todo** el builder, y un id ya ligado no se
+puede reemplazar: ese builder deja de poder montarse.
 
 `renderers.bind` no es una contribución a efectos del ciclo de vida: no aparece
 en `contributionIds` y `uninstall` nunca lo retira (ver
@@ -237,13 +250,15 @@ Cuatro reglas de autoría:
   puerto (`GraphValidator`, `Importer`, `Exporter`, `GraphLayoutStrategy`), que
   el host invoca cuando corresponde.
 
-Los cinco ejemplos del repositorio cubren las trece clases:
+Los cinco ejemplos del repositorio cubren doce de las trece clases. La
+decimotercera (`renderer`) no la liga ningún plugin, y no debe hacerlo: es una
+declaración de la definición que el host resuelve con `bindRenderer`.
 
 | Directorio | Id del plugin | Aporta |
 | --- | --- | --- |
 | `plugins/basic-nodes` | `example.basic-nodes` | dos nodos y un edge |
 | `plugins/data-nodes` | `example.data-nodes` | dos propiedades, un validador y un importador NDJSON |
-| `plugins/ai-nodes` | `example.ai-nodes` | dos nodos y sus bindings de renderer |
+| `plugins/ai-nodes` | `example.ai-nodes` | dos nodos (el host liga sus componentes) |
 | `plugins/developer-tools` | `example.developer-tools` | dos tools, dos paneles y un diálogo |
 | `plugins/example-plugin` | `example.kitchen-sink` | un tema, un layout, una estrategia de colocación y un exportador |
 
@@ -492,10 +507,18 @@ Límites reales de la implementación actual, no suposiciones de roadmap.
   registrada: el record de instalación lleva un aviso
   `plugin.invalid-manifest` (severity `warning`) nombrando el id que no podrá
   retirarse. Es un bug de autoría del plugin, no una retirada silenciosa.
-- **Los bindings de renderer nunca se retiran.** `api.renderers.bind` adjunta un
-  valor opaco a un slot existente y no es una contribución: no aparece en
-  `contributionIds` y `uninstall` no lo desregistra. Un host que necesite
-  deshacer un binding lo hace en su propio adaptador de presentación.
+- **Los bindings de renderer nunca se retiran.** Un binding (por
+  `api.renderers.bind` o por `builder.bindRenderer`) no es una contribución: no
+  aparece en `contributionIds` y `uninstall` no lo desregistra. Un host que
+  necesite deshacer un binding lo hace en su propio adaptador de presentación.
+- **Un plugin agnóstico no liga renderers.** `api.renderers.bind` es el canal del
+  host y de su adaptador, y el adaptador de React exige un componente: un
+  descriptor de datos ligado en `nodes` hace que `createRendererSet` lance
+  `InvalidRendererBindingError` para todo el builder, que entonces no se puede
+  montar (y el id ligado no se puede reemplazar). Un plugin declara la
+  definición y el host liga el componente con `builder.bindRenderer`; es el
+  reparto que siguen los cinco `plugins/*` y el que compone
+  `examples/phase7-demo`.
 - **No existe `plugin.uninstall-failed`.** Un fallo al retirar una contribución
   reutiliza `plugin.deactivation-failed` (con `metadata.contributionId`,
   `metadata.type` y, cuando llega, `metadata.sdkCode`), y una contribución

@@ -18,20 +18,23 @@
  * |      | cannot declare, including where its panels sit                  |
  * | 5    | `builder.graph.addNode/connect` — a graph of plugin node types  |
  *
- * ## Why `example.ai-nodes` is not installed on the mounted builder
+ * ## Why every plugin — `example.ai-nodes` included — is installed here
  *
- * `ai-nodes` binds *opaque renderer descriptors* — plain data — into the
- * `nodes` renderer slot. The React binding validates a whole binding snapshot
- * and refuses a builder whose renderer values are not React components
- * (`createRendererSet` throws `InvalidRendererBindingError` naming every
- * offender), so mounting such a builder is impossible. A host cannot override
- * those ids either: `bindRenderer` reports `sdk.duplicate-id` instead of
- * rebinding a live id, and uninstall never withdraws a renderer binding.
+ * A framework-agnostic plugin contributes *declarations*: `example.ai-nodes`
+ * registers two node definitions and binds no renderer at all. A node type *is*
+ * its renderer id, so the definition already says which renderer the UI must
+ * resolve for it, and this host binds the component for each id
+ * ({@link bindRenderers}). That is the whole split: the plugin owns the
+ * definition, the host owns the pixels.
  *
- * The demo therefore installs the four plugins a React host can render, and
- * shows the fifth as declared-but-not-mounted ({@link UNMOUNTED_PLUGINS}) —
- * the honest picture of today's ecosystem, not a hidden failure. See
- * `builder.test.ts` for the executable statement of that limitation.
+ * The opposite — a plugin calling `api.renderers.bind("nodes", id, plainData)`
+ * — is what makes a builder unmountable: `api.renderers.bind` is the
+ * *host/framework-aware* channel, and `@nodera/react-flow`'s `createRendererSet`
+ * throws `InvalidRendererBindingError` for a binding it cannot paint (a
+ * component function or a `memo`/`forwardRef` object). A host also cannot
+ * override such an id, because `bindRenderer` rejects a live id with
+ * `sdk.duplicate-id`. Keeping plugins descriptive is therefore what lets all
+ * five mount on one canvas; `builder.test.ts` pins it.
  */
 
 import {
@@ -42,7 +45,12 @@ import {
   type BuilderDocumentConfiguration,
   type LayoutDefinition,
 } from "@nodera/sdk";
-import { aiNodesPlugin } from "@nodera/ai-nodes";
+import {
+  AI_NODES_PLUGIN_ID,
+  CLASSIFY_NODE_TYPE,
+  EMBED_NODE_TYPE,
+  aiNodesPlugin,
+} from "@nodera/ai-nodes";
 import {
   BASIC_NODES_PLUGIN_ID,
   FLOW_EDGE_TYPE,
@@ -65,7 +73,14 @@ import {
 import { createPluginManager, type PluginManager } from "@nodera/plugin-manager";
 import { createReactFlowAdapter } from "@nodera/react-flow";
 
-import { createIssuesPanel, createShortcutsPanel, StartNode, TransformNode } from "./renderers.js";
+import {
+  ClassifyNode,
+  createIssuesPanel,
+  createShortcutsPanel,
+  EmbedNode,
+  StartNode,
+  TransformNode,
+} from "./renderers.js";
 
 /* ------------------------------------------------------------------ */
 /*  Stable identifiers of the demo composition                         */
@@ -92,6 +107,7 @@ const MOUNTED_PLUGINS = [
   dataNodesPlugin,
   developerToolsPlugin,
   kitchenSinkPlugin,
+  aiNodesPlugin,
 ] as const;
 
 /** Ids of those plugins, in the same order. */
@@ -99,45 +115,22 @@ export const DEMO_PLUGIN_IDS: readonly string[] = MOUNTED_PLUGINS.map(
   (plugin) => plugin.manifest.id,
 );
 
-/** The node and panel ids the four installed plugins contribute. */
+/** The node and panel ids the five installed plugins contribute. */
 export const PLUGIN_IDS = {
   basicNodes: BASIC_NODES_PLUGIN_ID,
   dataNodes: DATA_NODES_PLUGIN_ID,
   developerTools: DEVELOPER_TOOLS_PLUGIN_ID,
   kitchenSink: KITCHEN_SINK_PLUGIN_ID,
+  aiNodes: AI_NODES_PLUGIN_ID,
   startNode: START_NODE_TYPE,
   transformNode: TRANSFORM_NODE_TYPE,
+  classifyNode: CLASSIFY_NODE_TYPE,
+  embedNode: EMBED_NODE_TYPE,
   flowEdge: FLOW_EDGE_TYPE,
   issuesPanel: ISSUES_PANEL_ID,
   shortcutsPanel: SHORTCUTS_PANEL_ID,
   blueprintTheme: BLUEPRINT_THEME_ID,
 } as const;
-
-/**
- * Plugins the host knows about but does not install on this builder.
- *
- * Read from their manifests, which is exactly what a host inspects before it
- * decides to run third-party code (AGENTS.md §9). `reason` names why this
- * particular host cannot mount them.
- */
-export const UNMOUNTED_PLUGINS: readonly {
-  readonly id: string;
-  readonly name: string;
-  readonly version: string;
-  readonly contributions: readonly string[];
-  readonly reason: string;
-}[] = [
-  {
-    id: aiNodesPlugin.manifest.id,
-    name: aiNodesPlugin.manifest.name,
-    version: aiNodesPlugin.manifest.version,
-    contributions: (aiNodesPlugin.manifest.contributions ?? []).map(
-      (entry) => `${entry.type}:${entry.id}`,
-    ),
-    reason:
-      "binds opaque renderer descriptors into the nodes slot; the React binding refuses a builder whose renderer values are not components, and a live renderer id cannot be rebound",
-  },
-];
 
 /* ------------------------------------------------------------------ */
 /*  Layout                                                             */
@@ -217,12 +210,16 @@ function installPlugins(builder: Builder): PluginManager {
 /**
  * Binds the host's components to the renderer ids the plugins declare.
  *
- * A contribution is data; this is where it becomes a React component. Panel ids
+ * A contribution is data; this is where it becomes a React component. A node
+ * type is its own renderer id, so the two `example.ai-nodes` definitions are
+ * bound by the ids they registered — the plugin itself binds nothing. Panel ids
  * are the panel's own id because neither panel declares a separate `renderer`.
  */
 function bindRenderers(builder: Builder): void {
   assertOk(builder.bindRenderer("nodes", START_NODE_TYPE, StartNode));
   assertOk(builder.bindRenderer("nodes", TRANSFORM_NODE_TYPE, TransformNode));
+  assertOk(builder.bindRenderer("nodes", CLASSIFY_NODE_TYPE, ClassifyNode));
+  assertOk(builder.bindRenderer("nodes", EMBED_NODE_TYPE, EmbedNode));
   assertOk(builder.bindRenderer("panels", ISSUES_PANEL_ID, createIssuesPanel(builder)));
   assertOk(builder.bindRenderer("panels", SHORTCUTS_PANEL_ID, createShortcutsPanel(builder)));
 }
@@ -240,9 +237,9 @@ function applyHostLayoutAndTheme(builder: Builder): void {
  * Seeds a graph of plugin node types so the canvas is never empty.
  *
  * Everything is written through `builder.graph`, i.e. the application use
- * cases: the same port, history and event rules apply as for any host. The two
- * `basic-nodes` definitions declare no properties, so the values below are the
- * demo's illustrative data, rendered back by the host's own node renderers.
+ * cases: the same port, history and event rules apply as for any host. The
+ * plugin definitions declare no properties, so the values below are the demo's
+ * illustrative data, rendered back by the host's own node renderers.
  */
 function seedDemoGraph(builder: Builder): void {
   const start = assertValid(
@@ -271,6 +268,17 @@ function seedDemoGraph(builder: Builder): void {
       targetPort: "in",
       type: FLOW_EDGE_TYPE,
       label: "value",
+    }),
+  );
+
+  // A node the framework-agnostic AI plugin contributed: the host paints it
+  // with its own component, keyed by the node type itself.
+  assertValid(
+    builder.graph.addNode({
+      type: CLASSIFY_NODE_TYPE,
+      nodeId: "demo-node-classify",
+      position: { x: 60, y: 300 },
+      properties: { label: "sentiment" },
     }),
   );
 }

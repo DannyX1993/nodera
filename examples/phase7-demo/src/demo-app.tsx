@@ -23,7 +23,7 @@ import type { PluginManager, PluginRecord } from "@nodera/plugin-manager";
 import type { Builder, SdkIssues } from "@nodera/sdk";
 import { NoderaEditor } from "@nodera/react-flow";
 
-import { PLUGIN_IDS, UNMOUNTED_PLUGINS } from "./builder.js";
+import { PLUGIN_IDS } from "./builder.js";
 
 /** Props accepted by {@link DemoApp}. */
 export interface DemoAppProps {
@@ -45,7 +45,7 @@ const MAX_LOG_ENTRIES = 12;
 
 /** Status line the demo boots with. */
 const INITIAL_STATUS =
-  "Four plugins installed and active through createPluginManager(builder).install([...]).";
+  "Five plugins installed and active through createPluginManager(builder).install([...]).";
 
 /** Joins SDK diagnostics into one readable line. */
 function sdkSummary(issues: SdkIssues): string {
@@ -232,15 +232,6 @@ export function DemoApp(props: DemoAppProps): ReactNode {
                 </span>
               </li>
             ))}
-            {UNMOUNTED_PLUGINS.map((plugin) => (
-              <li key={plugin.id} data-plugin-state="not-installed">
-                <span className="demo-plugin-id">{plugin.id}</span>
-                <span className="demo-plugin-state">not installed</span>
-                <span className="demo-plugin-detail" title={plugin.reason}>
-                  {plugin.version} · {plugin.contributions.join(", ")} — {plugin.reason}
-                </span>
-              </li>
-            ))}
           </ul>
           {devToolsInstalled ? null : (
             <p className="demo-note">
@@ -257,7 +248,7 @@ export function DemoApp(props: DemoAppProps): ReactNode {
               <li>
                 <span className="demo-log-detail">
                   Listening to plugin.activated, plugin.deactivated and plugin.unregistered. The
-                  four initial activations happened before this log mounted; uninstall a plugin to
+                  five initial activations happened before this log mounted; uninstall a plugin to
                   see the lifecycle events here.
                 </span>
               </li>

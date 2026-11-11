@@ -9,6 +9,8 @@
  * | ------------------------------ | ----------------------------- | ------------------------- |
  * | `example.basic.start`          | {@link StartNode}             | `example.basic-nodes`     |
  * | `example.basic.transform`      | {@link TransformNode}         | `example.basic-nodes`     |
+ * | `example.ai.classify`          | {@link ClassifyNode}          | `example.ai-nodes`        |
+ * | `example.ai.embed`             | {@link EmbedNode}             | `example.ai-nodes`        |
  * | `example.dev.panel.issues`     | {@link createIssuesPanel}     | `example.developer-tools` |
  * | `example.dev.panel.shortcuts`  | {@link createShortcutsPanel}  | `example.developer-tools` |
  *
@@ -16,10 +18,9 @@
  * without a `renderer` of its own resolves its id. `builder.ts` binds them next
  * to the plugins that declare them.
  *
- * The `ai-nodes` plugin ships no component to bind — it contributes renderer
- * *descriptors*, and the React binding refuses a builder whose renderer values
- * are not components — so this module has no AI renderer: see the header of
- * `builder.ts` for why that plugin is not installed here.
+ * `example.ai-nodes` illustrates the split at its purest: the plugin contributes
+ * two node definitions and binds no renderer, and the two components below are
+ * the host's share of that contract — no plugin ever ships a component.
  *
  * The panel factories close over the builder because a panel renderer receives
  * only its panel definition: what a panel shows is whatever the host decides to
@@ -206,6 +207,20 @@ export function StartNode(props: NoderaNodeRendererProps): ReactNode {
 /** Renderer of `example.basic.transform`. */
 export function TransformNode(props: NoderaNodeRendererProps): ReactNode {
   return <NodeBox kind="transform" badge="FN" node={props} />;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Node renderers of the ai-nodes plugin                              */
+/* ------------------------------------------------------------------ */
+
+/** Renderer of `example.ai.classify`. */
+export function ClassifyNode(props: NoderaNodeRendererProps): ReactNode {
+  return <NodeBox kind="classify" badge="AI" node={props} />;
+}
+
+/** Renderer of `example.ai.embed`. */
+export function EmbedNode(props: NoderaNodeRendererProps): ReactNode {
+  return <NodeBox kind="embed" badge="AI" node={props} />;
 }
 
 /* ------------------------------------------------------------------ */

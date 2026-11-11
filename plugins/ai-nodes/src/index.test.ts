@@ -2,13 +2,15 @@
  * Behaviour of the `example.ai-nodes` example plugin.
  *
  * The suite drives the plugin through the public host surface only: it installs
- * it with the plugin manager, reads the node definitions and the renderer
- * bindings that reached the builder, and uninstalls it to prove the declarations
- * are withdrawn again (D13).
+ * it with the plugin manager, reads the node definitions that reached the
+ * builder, and uninstalls it to prove the declarations are withdrawn again.
  *
- * Renderer bindings are deliberately *not* withdrawn: the SDK records a binding
- * as an opaque value on an existing slot, never as a contribution, so the
- * uninstall case pins that documented asymmetry instead of assuming it.
+ * The plugin is framework-agnostic, so it binds **no** renderer: presentation is
+ * the host's half of the contract (`builder.bindRenderer`). The cases below pin
+ * that split — the plugin registers definitions, the host attaches components —
+ * which is what lets a builder with this plugin installed be mounted by
+ * `@nodera/react-flow` (its `createRendererSet` rejects a binding that is not a
+ * React component).
  *
  * Every case composes a fresh builder on purpose: the SDK remembers the plugin
  * ids installed on a builder forever (Log L7).
@@ -24,18 +26,25 @@ import {
   type PluginUnregisteredEvent,
 } from "@nodera/sdk";
 
-import { aiNodesPlugin } from "./index.js";
+import { aiNodesPlugin, CLASSIFY_NODE_TYPE, EMBED_NODE_TYPE } from "./index.js";
 
 /** What the manifest must declare, and what activation must register. */
 const DECLARED = [
-  { type: "node", id: "example.ai.classify", version: "1.0.0" },
-  { type: "node", id: "example.ai.embed", version: "1.0.0" },
-  { type: "renderer", id: "example.ai.classify" },
-  { type: "renderer", id: "example.ai.embed" },
+  { type: "node", id: CLASSIFY_NODE_TYPE, version: "1.0.0" },
+  { type: "node", id: EMBED_NODE_TYPE, version: "1.0.0" },
 ] as const;
 
 /** Contribution ids, in the order activation registers them. */
-const REGISTERED_IDS = ["example.ai.classify", "example.ai.embed"];
+const REGISTERED_IDS = [CLASSIFY_NODE_TYPE, EMBED_NODE_TYPE];
+
+/** Components a host would bind for the two node types. */
+function ClassifyStub(): null {
+  return null;
+}
+
+function EmbedStub(): null {
+  return null;
+}
 
 /** Composes a real builder, failing loudly when the composition itself breaks. */
 function createTestBuilder(): Builder {
@@ -49,7 +58,7 @@ function createTestBuilder(): Builder {
 }
 
 describe("example.ai-nodes", () => {
-  it("installs, registers its nodes and binds their renderers", () => {
+  it("installs, registers its two nodes and binds no renderer of its own", () => {
     const builder = createTestBuilder();
     const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
     const activated: PluginActivatedEvent[] = [];
@@ -61,34 +70,28 @@ describe("example.ai-nodes", () => {
     if (!installed.ok) return;
     expect(installed.value.map((record) => record.state)).toEqual(["active"]);
     expect(installed.value[0]?.issues).toEqual([]);
-    // A binding is not a contribution, so it never reaches `contributionIds`.
     expect(installed.value[0]?.contributionIds).toEqual(REGISTERED_IDS);
 
-    expect(builder.registries.nodes.get("example.ai.classify")).toMatchObject({
-      type: "example.ai.classify",
+    expect(builder.registries.nodes.get(CLASSIFY_NODE_TYPE)).toMatchObject({
+      type: CLASSIFY_NODE_TYPE,
       label: "Classify",
     });
-    expect(builder.registries.nodes.get("example.ai.embed")).toMatchObject({
-      type: "example.ai.embed",
+    expect(builder.registries.nodes.get(EMBED_NODE_TYPE)).toMatchObject({
+      type: EMBED_NODE_TYPE,
       label: "Embed",
     });
-    expect(builder.renderers.nodes.get("example.ai.classify")).toEqual({
-      kind: "ai-node",
-      accent: "violet",
-      badge: "AI",
-    });
-    expect(builder.renderers.nodes.get("example.ai.embed")).toEqual({
-      kind: "ai-node",
-      accent: "teal",
-      badge: "AI",
-    });
+
+    // Presentation is the host's share: a framework-agnostic plugin leaves every
+    // renderer slot untouched.
+    expect([...builder.renderers.nodes.keys()]).toEqual([]);
+    expect([...builder.renderers.panels.keys()]).toEqual([]);
 
     expect(activated).toEqual([
       { pluginId: "example.ai-nodes", contributionIds: REGISTERED_IDS },
     ]);
   });
 
-  it("declares in its manifest exactly the contributions its activation registers", () => {
+  it("declares in its manifest exactly the two node contributions it registers", () => {
     const validation = validatePluginManifest(aiNodesPlugin.manifest);
 
     expect(validation.ok).toBe(true);
@@ -101,21 +104,35 @@ describe("example.ai-nodes", () => {
     if (!installed.ok) return;
     expect(installed.value[0]?.issues).toEqual([]);
     expect(installed.value[0]?.contributionIds).toEqual(REGISTERED_IDS);
-    // The renderer declarations describe the bindings the plugin performs; they
-    // are not registered ids, so they are checked through the bindings instead.
-    expect([...builder.renderers.nodes.keys()].sort()).toEqual([...REGISTERED_IDS].sort());
+    expect(builder.renderers.nodes.size).toBe(0);
   });
 
-  it("withdraws its node definitions on uninstall and keeps the renderer bindings", () => {
+  it("leaves the two renderer bindings to the host", () => {
+    const builder = createTestBuilder();
+    const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+
+    expect(manager.install([aiNodesPlugin]).ok).toBe(true);
+
+    // The host is what turns a node type into a component, keyed by the very id
+    // the plugin registered; no prior renderer slot has to exist.
+    expect(builder.bindRenderer("nodes", CLASSIFY_NODE_TYPE, ClassifyStub).ok).toBe(true);
+    expect(builder.bindRenderer("nodes", EMBED_NODE_TYPE, EmbedStub).ok).toBe(true);
+
+    expect(builder.renderers.nodes.get(CLASSIFY_NODE_TYPE)).toBe(ClassifyStub);
+    expect(builder.renderers.nodes.get(EMBED_NODE_TYPE)).toBe(EmbedStub);
+    expect([...builder.renderers.nodes.keys()]).toEqual(REGISTERED_IDS);
+  });
+
+  it("withdraws its node definitions on uninstall and keeps the host's bindings", () => {
     const builder = createTestBuilder();
     const manager = createPluginManager(builder);
     const unregistered: PluginUnregisteredEvent[] = [];
     builder.events.on("plugin.unregistered", (payload) => unregistered.push(payload));
 
     expect(manager.install([aiNodesPlugin]).ok).toBe(true);
-    expect(builder.registries.nodes.has("example.ai.classify")).toBe(true);
-    expect(builder.registries.nodes.has("example.ai.embed")).toBe(true);
-    expect(builder.renderers.nodes.has("example.ai.classify")).toBe(true);
+    expect(builder.bindRenderer("nodes", CLASSIFY_NODE_TYPE, ClassifyStub).ok).toBe(true);
+    expect(builder.registries.nodes.has(CLASSIFY_NODE_TYPE)).toBe(true);
+    expect(builder.registries.nodes.has(EMBED_NODE_TYPE)).toBe(true);
 
     const uninstallation = manager.uninstall("example.ai-nodes");
 
@@ -123,10 +140,11 @@ describe("example.ai-nodes", () => {
     if (!uninstallation.ok) return;
     expect(uninstallation.value.state).toBe("unregistered");
     expect(uninstallation.value.issues).toEqual([]);
-    expect(builder.registries.nodes.get("example.ai.classify")).toBeUndefined();
-    expect(builder.registries.nodes.get("example.ai.embed")).toBeUndefined();
-    expect(builder.renderers.nodes.has("example.ai.classify")).toBe(true);
-    expect(builder.renderers.nodes.has("example.ai.embed")).toBe(true);
+    expect(builder.registries.nodes.get(CLASSIFY_NODE_TYPE)).toBeUndefined();
+    expect(builder.registries.nodes.get(EMBED_NODE_TYPE)).toBeUndefined();
+    // The binding belongs to the host, not to the plugin: uninstall never
+    // withdraws one (docs/PLUGINS.md, known limitations).
+    expect(builder.renderers.nodes.get(CLASSIFY_NODE_TYPE)).toBe(ClassifyStub);
     expect(unregistered).toEqual([{ pluginId: "example.ai-nodes" }]);
     expect(manager.list()).toEqual([]);
   });
