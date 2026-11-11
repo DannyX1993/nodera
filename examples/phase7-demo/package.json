@@ -1,0 +1,27 @@
+{
+  "name": "@nodera/phase7-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end smoke demo of the Phase 7 plugin ecosystem: install, activate, deactivate and uninstall the five example plugins through the public surface.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/ai-nodes": "workspace:*",
+    "@nodera/basic-nodes": "workspace:*",
+    "@nodera/data-nodes": "workspace:*",
+    "@nodera/developer-tools": "workspace:*",
+    "@nodera/example-plugin": "workspace:*",
+    "@nodera/plugin-manager": "workspace:*",
+    "@nodera/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
+}

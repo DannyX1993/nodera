@@ -232,6 +232,37 @@ importers:
         specifier: ^7.1.0
         version: 7.3.7(yaml@2.9.1)
 
+  examples/phase7-demo:
+    dependencies:
+      '@nodera/ai-nodes':
+        specifier: workspace:*
+        version: link:../../plugins/ai-nodes
+      '@nodera/basic-nodes':
+        specifier: workspace:*
+        version: link:../../plugins/basic-nodes
+      '@nodera/data-nodes':
+        specifier: workspace:*
+        version: link:../../plugins/data-nodes
+      '@nodera/developer-tools':
+        specifier: workspace:*
+        version: link:../../plugins/developer-tools
+      '@nodera/example-plugin':
+        specifier: workspace:*
+        version: link:../../plugins/example-plugin
+      '@nodera/plugin-manager':
+        specifier: workspace:*
+        version: link:../../packages/plugin-manager
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
+
   packages/adapter-storage-http: {}
 
   packages/adapter-storage-local: {}
