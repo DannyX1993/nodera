@@ -154,3 +154,24 @@ Implementar:
   está terminada cuando un host compone, edita, valida, exporta e instala un
   plugin importando solo `@nodera/sdk` y `@nodera/react-flow`, sin acceder a
   ningún módulo interno.
+- **Fase 7. Plugin Ecosystem** — implementada (`packages/plugin-api`,
+  `packages/plugin-manager`, la superficie de plugins del SDK, los cinco plugins
+  de ejemplo de `plugins/*` y `docs/PLUGINS.md`). `@nodera/plugin-api` publica
+  los contratos puros — `PluginManifest` (id, name, version, description, author,
+  dependencies, compatibility, contributions y permissions), las trece clases de
+  contribución, `PluginDefinition` con sus hooks, `PluginState` y el vocabulario
+  cerrado de diagnósticos `plugin.*` — sin React ni motor, dependiendo solo de
+  `@nodera/contracts`; `@nodera/plugin-manager` aporta la infraestructura sobre
+  el SDK: validación de manifests no confiables, resolución de dependencias en
+  el conjunto descubierto con la gramática semver de la fase, detección de
+  conflictos de id de plugin y de par `(type, id)` antes de ejecutar código, y
+  el ciclo de vida `discover → resolve → validate → register → activate →
+  deactivate → unregister` con propiedad de las contribuciones para retirarlas.
+  El SDK gana los slots de contribución que faltaban (validadores, importadores,
+  exportadores, diálogos y estrategias de colocación) y los eventos
+  `plugin.activated`/`plugin.deactivated`/`plugin.unregistered`, manteniendo
+  `BuilderPlugin`/`installPlugin`/`builder.use` de la Fase 6 sin cambios. La fase
+  está terminada cuando un host instala, activa, desactiva y desinstala plugins
+  declarados por manifest importando solo `@nodera/sdk`, `@nodera/plugin-api` y
+  `@nodera/plugin-manager`, y un plugin se escribe importando solo las dos
+  primeras, sin acceder a ningún módulo interno.

@@ -821,7 +821,7 @@ change. A binding owns exactly five things:
 The SDK itself stays untouched, and a host that only uses `@nodera/sdk` keeps
 working.
 
-## What a plugin can do in Phase 6
+## What a plugin can do
 
 A plugin is `{ id, version, install(api) }`. `install` runs synchronously and can
 contribute nodes, edges, properties, panels, tools, themes and layouts, plus bind
@@ -840,12 +840,17 @@ Guarantees the SDK gives a plugin author:
 - a fully successful install announces exactly one `plugin.registered` with the
   contribution ids in registration order.
 
-**What Phase 7 will add — not available today.** A plugin manifest with an SDK
-version and declared dependencies, a registry of manifests, dependency
-resolution, load/activate/deactivate lifecycle, cross-plugin conflict detection
-and example plugins. In Phase 6 there is no manifest, no compatibility policy
-beyond the id/version check, and no way for a plugin to be deactivated or
-retracted.
+**Phase 7 adds the ecosystem around this contract.** A plugin manifest with an
+SDK version and declared dependencies, validation of untrusted manifests,
+dependency resolution, the load/activate/deactivate/unregister lifecycle,
+cross-plugin conflict detection and five example plugins all exist today: see
+[`docs/PLUGINS.md`](PLUGINS.md) for the manifest reference, the lifecycle, the
+security model, distribution and the known limitations. The Phase 6 authoring
+surface above is unchanged and remains the way a plugin registers its
+contributions; `BuilderPluginApi` gained the contribution slots the ecosystem
+needed (`validators`, `importers`, `exporters`, `dialogs`, `layoutStrategies`)
+and the SDK event api gained `plugin.activated`, `plugin.deactivated` and
+`plugin.unregistered`.
 
 ## Known limits
 

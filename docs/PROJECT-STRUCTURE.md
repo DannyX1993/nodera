@@ -204,7 +204,7 @@ consume `@nodera/sdk` no necesita React Flow (AGENTS.md §4.1 y §8). El paquete
 Reglas de frontera, verificadas de forma ejecutable con `pnpm check:architecture`
 (`scripts/check-architecture.mjs`, sin dependencias añadidas). El script imprime
 una línea de estado por regla y falla con código distinto de cero; las seis
-reglas son:
+reglas de esta sección son:
 
 - `core-framework-free` — `ui-core`, `theme-engine` y `layout-engine` no importan
   React, módulos solo-DOM, React Flow, `application` ni `domain`.
@@ -223,6 +223,9 @@ reglas son:
   `@nodera/document`. La composición tiene una sola superficie y es el SDK; la
   capa de canvas sí puede usar `application` y los paquetes del modelo, porque su
   trabajo es traducir entre ambos.
+
+El mismo script verifica las tres reglas de frontera del ecosistema de plugins
+(§7.5).
 
 Reglas de comportamiento:
 
@@ -300,8 +303,8 @@ Reglas de frontera:
   devuelve posiciones o un diagnóstico estructurado. Su `package.json` declara
   únicamente `@nodera/contracts` y `@nodera/graph-model`, y esas son las dos
   únicas importaciones de sus fuentes. `pnpm check:architecture` todavía no
-  verifica esta frontera: sus seis reglas cubren la capa de presentación y el SDK
-  (§7.2, §7.3).
+  verifica esta frontera: sus nueve reglas cubren la capa de presentación, el SDK
+  y el ecosistema de plugins (§7.2, §7.3, §7.5).
 - Escribir posiciones no es responsabilidad de este paquete: el SDK aplica la
   respuesta a través del caso de uso `arrangeGraph` de `@nodera/application`, que
   valida todo antes de escribir y lo hace como una única unidad reversible.
@@ -323,3 +326,50 @@ valores por defecto, códigos de diagnóstico y limitaciones) está en
 del SDK y el ejemplo, en `docs/GRAPH-LAYOUT.md`; el ejemplo ejecutable en
 `examples/layout-switch-demo`.
 
+## 7.5. Ecosistema de plugins implementado (Fase 7)
+
+El sistema de plugins es responsabilidad de la capa de infraestructura
+(`docs/GLOBAL-ARCHITECTURE.md` §Infrastructure Layer) y su dirección de
+dependencias es la de §7.1: los plugins consumen contratos públicos, nunca el
+core. Se implementa en dos paquetes más la superficie que el SDK ya publicaba:
+
+```text
+plugins/*                    (terceros: solo la superficie pública)
+        |
+        +--> @nodera/sdk                BuilderPluginApi, builder, eventos
+        +--> @nodera/plugin-api         manifest, contribuciones, lifecycle, errores
+
+@nodera/plugin-manager       (infraestructura del host)
+        |
+        +--> @nodera/plugin-api
+        +--> @nodera/sdk
+        +--> @nodera/contracts
+
+@nodera/plugin-api --> @nodera/contracts
+@nodera/sdk         -X-> @nodera/plugin-api, @nodera/plugin-manager   (sin ciclo)
+```
+
+Reglas de frontera, verificadas con `pnpm check:architecture`:
+
+- `plugin-api-is-pure-contracts` — `packages/plugin-api` no menciona React, React
+  DOM, `@xyflow`, `@nodera/ui-*` ni `@nodera/react-flow`, ni en sus fuentes ni en
+  su `package.json`, y sus dependencias de ejecución son solo
+  `@nodera/contracts`. Es un contrato puro: no puede arrastrar una presentación a
+  cada consumidor.
+- `plugin-manager-is-infrastructure-only` — `packages/plugin-manager` importa solo
+  `@nodera/plugin-api`, `@nodera/sdk`, `@nodera/contracts` y módulos nativos de
+  Node; nunca `domain`, `application`, `document`, `ui-core`, `ui-react`,
+  `react-flow`, los registros, `validation`, `theme-engine`, `layout-engine`,
+  `graph-layout` ni `serialization-*`. El manager compone el SDK; reimplementar
+  por debajo lo que el SDK ya posee rompería la superficie única de composición.
+- `example-plugins-use-the-public-surface` — cada `plugins/*` importa solo
+  `@nodera/sdk` y `@nodera/plugin-api` en su código de producción (sus tests
+  pueden importar además `@nodera/plugin-manager` y `vitest`) y nunca un paquete
+  interno del core. Un plugin es un tercero: se escribe contra la superficie
+  publicada y nada más.
+
+La guía completa — manifest, contribuciones, ciclo de vida, resolución de
+dependencias, conflictos, seguridad, distribución y limitaciones conocidas —
+está en `docs/PLUGINS.md`; el detalle de cada paquete en
+`packages/plugin-api/README.md` y `packages/plugin-manager/README.md`; los cinco
+ejemplos en `plugins/*`.
