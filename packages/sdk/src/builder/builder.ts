@@ -20,11 +20,17 @@
 import { ok, err, RegistryStore, type RegistryError, type Result } from "@nodera/contracts";
 import { DEFAULT_FORMAT_VERSION, GGD_FORMAT } from "@nodera/document";
 import { EditorEngine, type EditorEngineOptions } from "@nodera/application";
-import { NoderaDomain } from "@nodera/domain";
+import {
+  NoderaDomain,
+  type Exporter,
+  type ExporterRegistry,
+  type Importer,
+  type ImporterRegistry,
+} from "@nodera/domain";
 import { LayoutStrategyRegistry, type GraphLayoutNodeSize, type GraphLayoutStrategy } from "@nodera/graph-layout";
 import { NodeRegistry, type NodeDefinition } from "@nodera/node-registry";
 import { EdgeRegistry, type EdgeDefinition } from "@nodera/edge-registry";
-import { ValidatorRegistry } from "@nodera/validation";
+import { ValidatorRegistry, type GraphValidator } from "@nodera/validation";
 import { DEFAULT_THEME_ID, ThemeRegistry, createTheme } from "@nodera/theme-engine";
 import type { CreateThemeInput, ThemeDefinition } from "@nodera/theme-engine";
 import { EDITOR_LAYOUT_ID, LayoutRegistry, createLayoutState } from "@nodera/layout-engine";
@@ -237,6 +243,16 @@ export interface BuilderGraphLayoutApi {
    * shadow the strategy the host already selected.
    */
   register(strategy: GraphLayoutStrategy): Result<GraphLayoutStrategy, SdkIssues>;
+  /**
+   * Removes one strategy, so a plugin uninstalled by the host leaves no entry
+   * behind.
+   *
+   * An unknown id is a `sdk.unknown-definition`, never a silent no-op, and the
+   * registry moves the active selection to a strategy that remains when the
+   * removed one was active — so a removed strategy can never be the one
+   * `arrange` runs next.
+   */
+  unregister(strategyId: string): Result<GraphLayoutStrategy, SdkIssues>;
   /** Selects the strategy `arrange` runs; an unknown id is an explicit diagnostic. */
   setDefault(strategyId: string): Result<GraphLayoutStrategy, SdkIssues>;
   /** Globally qualified id of the strategy `arrange` runs today. */
@@ -385,8 +401,60 @@ export interface BuilderGraphLayoutApi {
 export interface BuilderDialogApi {
   /** Registers one declarative dialog; a used id is `sdk.duplicate-id`. */
   register(dialog: DialogDefinition): Result<DialogDefinition, SdkIssues>;
+  /**
+   * Removes one dialog and closes it when it was the open one.
+   *
+   * An unknown id is a `sdk.unknown-definition`. The store owns the open id, so
+   * the removal closes it in the same call that unregisters it: “the open dialog
+   * is a registered one” stays true however a plugin is uninstalled.
+   */
+  unregister(dialogId: string): Result<DialogDefinition, SdkIssues>;
   /** Every registered dialog, in registration order. */
   all(): readonly DialogDefinition[];
+}
+
+/**
+ * Validator surface of the builder: the graph-validator registry the editing
+ * session validates with.
+ *
+ * A validator is code, not declarative data, so this is the composition point
+ * where an extension contributes a rule (AGENTS.md §9) and the one where it is
+ * withdrawn again.
+ */
+export interface BuilderValidatorApi {
+  /** Registers one graph validator; a used id is `sdk.duplicate-id`. */
+  register(validator: GraphValidator): Result<GraphValidator, SdkIssues>;
+  /** Removes one graph validator; an unknown id is `sdk.unknown-definition`. */
+  unregister(validatorId: string): Result<GraphValidator, SdkIssues>;
+  /** Every registered graph validator, in registration order. */
+  all(): readonly GraphValidator[];
+}
+
+/**
+ * Importer surface of the builder: the domain registry a host resolves import
+ * formats from.
+ *
+ * An importer is the inbound half of the portable document boundary, so a
+ * plugin contributes it through the same registry the framework's own formats
+ * use and never through a private path.
+ */
+export interface BuilderImporterApi {
+  /** Registers one importer; a used id is `sdk.duplicate-id`. */
+  register(importer: Importer): Result<Importer, SdkIssues>;
+  /** Removes one importer; an unknown id is `sdk.unknown-definition`. */
+  unregister(importerId: string): Result<Importer, SdkIssues>;
+  /** Every registered importer, in registration order. */
+  all(): readonly Importer[];
+}
+
+/** Exporter surface of the builder: the outbound half of the same boundary. */
+export interface BuilderExporterApi {
+  /** Registers one exporter; a used id is `sdk.duplicate-id`. */
+  register(exporter: Exporter): Result<Exporter, SdkIssues>;
+  /** Removes one exporter; an unknown id is `sdk.unknown-definition`. */
+  unregister(exporterId: string): Result<Exporter, SdkIssues>;
+  /** Every registered exporter, in registration order. */
+  all(): readonly Exporter[];
 }
 
 /** The assembled builder: the only object a host needs after configuration. */
@@ -427,7 +495,8 @@ export interface Builder {
   readonly document: BuilderDocumentApi;
   /**
    * Event subscriptions: the application events of the editing session plus the
-   * two SDK-owned plugin events.
+   * five SDK-owned plugin events (registration, failure and the Phase 7
+   * lifecycle).
    */
   readonly events: BuilderEventApi;
   /** Theme contributions, bound to the builder's UI state store. */
@@ -442,6 +511,18 @@ export interface Builder {
    * dialog the host declares or registers here.
    */
   readonly dialogs: BuilderDialogApi;
+  /**
+   * Graph validators the editing session validates with.
+   *
+   * The escape hatch a plugin uses to contribute code, not data: the registry is
+   * the one the session's validation reads, so a validator registered here takes
+   * part in the next validation with no re-composition.
+   */
+  readonly validators: BuilderValidatorApi;
+  /** Import formats the host can read documents with. */
+  readonly importers: BuilderImporterApi;
+  /** Export formats the host can write documents with. */
+  readonly exporters: BuilderExporterApi;
   /**
    * Placement strategies, and the one an explicit `graph.arrange()` runs.
    *
@@ -1288,6 +1369,143 @@ function dialogIssues(dialog: unknown, path: readonly string[]): SdkIssue[] {
   return issues;
 }
 
+/**
+ * Structural checks of one graph validator.
+ *
+ * `ValidatorRegistry` owns duplicate and unknown ids only, so the SDK checks
+ * what an extension contributes as code: the id it is registered under, the
+ * level it reports at, and the function that produces the issues.
+ */
+function validatorIssues(validator: unknown, path: readonly string[]): SdkIssue[] {
+  if (!isPlainObject(validator)) {
+    return [
+      shapeIssue(
+        "A validator must be an object declaring an id, a level and a validate function",
+        validator,
+        path,
+      ),
+    ];
+  }
+  const issues: SdkIssue[] = [];
+  const id: unknown = Reflect.get(validator, "id");
+  if (typeof id !== "string" || id.trim().length === 0) {
+    issues.push(identifierFieldIssue("Validator", "id", id, [...path, "id"]));
+  }
+  const level: unknown = Reflect.get(validator, "level");
+  if (typeof level !== "string" || level.trim().length === 0) {
+    issues.push(stringFieldIssue("Validator", "level", level, [...path, "level"]));
+  }
+  const validate: unknown = Reflect.get(validator, "validate");
+  if (typeof validate !== "function") {
+    issues.push(
+      shapeIssue("A validator must declare validate as a function", validate, [
+        ...path,
+        "validate",
+      ]),
+    );
+  }
+  return issues;
+}
+
+/** Registers one graph validator after checking its structure. */
+function registerValidator(
+  validators: ValidatorRegistry,
+  validator: unknown,
+  path: readonly string[],
+): Result<GraphValidator, SdkIssues> {
+  const issues = validatorIssues(validator, path);
+  if (issues.length > 0) {
+    return err(issues);
+  }
+  const registered = validators.registerValidator(validator as GraphValidator);
+  if (!registered.ok) {
+    return err([registryIssue(registered.error, [...path, registered.error.id])]);
+  }
+  return ok(registered.value);
+}
+
+/**
+ * Structural checks of one importer or exporter.
+ *
+ * Both kinds share the same declared shape — identity, format, version and the
+ * function that does the work — so one check keeps them from drifting apart.
+ * The registry owns conflicts only; a code contribution is checked here.
+ */
+function ioIssues(
+  owner: "importer" | "exporter",
+  entry: unknown,
+  operation: "importContent" | "exportContent",
+  path: readonly string[],
+): SdkIssue[] {
+  if (!isPlainObject(entry)) {
+    return [
+      shapeIssue(
+        `An ${owner} must be an object declaring an id, a format, a version and a ${operation} function`,
+        entry,
+        path,
+      ),
+    ];
+  }
+  const named = owner === "importer" ? "Importer" : "Exporter";
+  const issues: SdkIssue[] = [];
+  const id: unknown = Reflect.get(entry, "id");
+  if (typeof id !== "string" || id.trim().length === 0) {
+    issues.push(identifierFieldIssue(named, "id", id, [...path, "id"]));
+  }
+  const format: unknown = Reflect.get(entry, "format");
+  if (typeof format !== "string" || format.trim().length === 0) {
+    issues.push(stringFieldIssue(named, "format", format, [...path, "format"]));
+  }
+  const version: unknown = Reflect.get(entry, "version");
+  if (typeof version !== "string" || version.trim().length === 0) {
+    issues.push(stringFieldIssue(named, "version", version, [...path, "version"]));
+  }
+  const behaviour: unknown = Reflect.get(entry, operation);
+  if (typeof behaviour !== "function") {
+    issues.push(
+      shapeIssue(`An ${owner} must declare ${operation} as a function`, behaviour, [
+        ...path,
+        operation,
+      ]),
+    );
+  }
+  return issues;
+}
+
+/** Registers one importer after checking its structure. */
+function registerImporter(
+  importers: ImporterRegistry,
+  importer: unknown,
+  path: readonly string[],
+): Result<Importer, SdkIssues> {
+  const issues = ioIssues("importer", importer, "importContent", path);
+  if (issues.length > 0) {
+    return err(issues);
+  }
+  const registered = importers.register(importer as Importer);
+  if (!registered.ok) {
+    return err([registryIssue(registered.error, [...path, registered.error.id])]);
+  }
+  return ok(registered.value);
+}
+
+/** Registers one exporter after checking its structure. */
+function registerExporter(
+  exporters: ExporterRegistry,
+  exporter: unknown,
+  path: readonly string[],
+): Result<Exporter, SdkIssues> {
+  const issues = ioIssues("exporter", exporter, "exportContent", path);
+  if (issues.length > 0) {
+    return err(issues);
+  }
+  const registered = exporters.register(exporter as Exporter);
+  if (!registered.ok) {
+    return err([registryIssue(registered.error, [...path, registered.error.id])]);
+  }
+  return ok(registered.value);
+}
+
 /** Registers one dialog definition after checking its structure. */
 function registerDialog(
   dialogs: DialogRegistry,
@@ -1307,7 +1525,6 @@ function registerDialog(
 
 /**
  * Composes the dialog registry the UI state resolves ids from.
- *
  * A declared list replaces the framework's built-in dialogs (`DialogRegistry`'s
  * own seeding rule). Either source is registered through {@link registerDialog},
  * so a duplicate id or a malformed definition becomes an `sdk.duplicate-id` /
@@ -1594,6 +1811,9 @@ class SdkBuilder implements Builder {
   readonly theme: BuilderThemeApi;
   readonly layout: BuilderLayoutApi;
   readonly dialogs: BuilderDialogApi;
+  readonly validators: BuilderValidatorApi;
+  readonly importers: BuilderImporterApi;
+  readonly exporters: BuilderExporterApi;
   readonly graphLayout: BuilderGraphLayoutApi;
 
   private readonly domain: NoderaDomain;
@@ -1700,6 +1920,7 @@ class SdkBuilder implements Builder {
     };
     this.graphLayout = {
       register: (strategy) => this.addStrategy(strategy),
+      unregister: (strategyId) => this.removeStrategy(strategyId),
       setDefault: (strategyId) => this.selectStrategy(strategyId),
       active: () => this.strategyRegistry.defaultStrategyId,
       all: () => this.strategyRegistry.all(),
@@ -1718,7 +1939,23 @@ class SdkBuilder implements Builder {
     };
     this.dialogs = {
       register: (dialog) => this.addDialog(dialog),
+      unregister: (dialogId) => this.removeDialog(dialogId),
       all: () => this.dialogRegistry.all(),
+    };
+    this.validators = {
+      register: (validator) => this.addValidator(validator),
+      unregister: (validatorId) => this.removeValidator(validatorId),
+      all: () => this.registries.validators.all(),
+    };
+    this.importers = {
+      register: (importer) => this.addImporter(importer),
+      unregister: (importerId) => this.removeImporter(importerId),
+      all: () => this.domain.importers.all(),
+    };
+    this.exporters = {
+      register: (exporter) => this.addExporter(exporter),
+      unregister: (exporterId) => this.removeExporter(exporterId),
+      all: () => this.domain.exporters.all(),
     };
   }
 
@@ -1871,8 +2108,10 @@ class SdkBuilder implements Builder {
    * Disposing is idempotent and closes every operation that would mutate the
    * graph or extend the composition: `register*`, `bindRenderer`, `use`,
    * `createEditor`, `theme.register`/`setDefault`,
-   * `layout.register`/`setDefault`, `dialogs.register`,
-   * `graphLayout.register`/`setDefault`/`setDragPolicy`,
+   * `layout.register`/`setDefault`, `dialogs.register`/`unregister`,
+   * `validators.register`/`unregister`, `importers.register`/`unregister`,
+   * `exporters.register`/`unregister`,
+   * `graphLayout.register`/`unregister`/`setDefault`/`setDragPolicy`,
    * `registries.nodes.unregister`,
    * `registries.edges.unregister`, every mutating `graph.*` call and
    * `document.import` fail with `sdk.disposed`. Reads keep working — `graph`
@@ -1937,6 +2176,78 @@ class SdkBuilder implements Builder {
   }
 
   /**
+   * Removes one dialog the UI state may open.
+   *
+   * The store owns the open id, so removing a definition closes it when it was
+   * the open one: the invariant “the open id is a registered one” is restored in
+   * the same call, never left to the caller.
+   */
+  private removeDialog(dialogId: string): Result<DialogDefinition, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("dialogs.unregister")]);
+    }
+    const removed = this.dialogRegistry.unregister(dialogId);
+    if (!removed.ok) {
+      return err([registryIssue(removed.error, ["dialogs", removed.error.id])]);
+    }
+    if (this.store.getState().activeDialogId === dialogId) {
+      this.store.closeDialog();
+    }
+    return ok(removed.value);
+  }
+
+  private addValidator(validator: GraphValidator): Result<GraphValidator, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("validators.register")]);
+    }
+    return registerValidator(this.registries.validators, validator, ["validators"]);
+  }
+
+  private removeValidator(validatorId: string): Result<GraphValidator, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("validators.unregister")]);
+    }
+    const removed = this.registries.validators.unregister(validatorId);
+    return removed.ok
+      ? ok(removed.value)
+      : err([registryIssue(removed.error, ["validators", removed.error.id])]);
+  }
+
+  private addImporter(importer: Importer): Result<Importer, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("importers.register")]);
+    }
+    return registerImporter(this.domain.importers, importer, ["importers"]);
+  }
+
+  private removeImporter(importerId: string): Result<Importer, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("importers.unregister")]);
+    }
+    const removed = this.domain.importers.unregister(importerId);
+    return removed.ok
+      ? ok(removed.value)
+      : err([registryIssue(removed.error, ["importers", removed.error.id])]);
+  }
+
+  private addExporter(exporter: Exporter): Result<Exporter, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("exporters.register")]);
+    }
+    return registerExporter(this.domain.exporters, exporter, ["exporters"]);
+  }
+
+  private removeExporter(exporterId: string): Result<Exporter, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("exporters.unregister")]);
+    }
+    const removed = this.domain.exporters.unregister(exporterId);
+    return removed.ok
+      ? ok(removed.value)
+      : err([registryIssue(removed.error, ["exporters", removed.error.id])]);
+  }
+
+  /**
    * Applies a registered layout together with the panel state it produces.
    *
    * The layout engine derives that state from the registered panels, so the
@@ -1974,6 +2285,27 @@ class SdkBuilder implements Builder {
     return registered.ok
       ? ok(registered.value)
       : err([registryIssue(registered.error, ["graph", "layout", "strategy"])]);
+  }
+
+  /**
+   * Removes one strategy the host could select.
+   *
+   * The registry owns the default id, so it moves the selection to a strategy
+   * that remains when the removed one was active; the store is then told, which
+   * is what keeps the UI state pointing at a registered strategy.
+   */
+  private removeStrategy(strategyId: string): Result<GraphLayoutStrategy, SdkIssues> {
+    if (this.disposedFlag) {
+      return err([disposedIssue("graphLayout.unregister")]);
+    }
+    const removed = this.strategyRegistry.unregister(strategyId);
+    if (!removed.ok) {
+      return err([
+        registryIssue(removed.error, ["graph", "layout", "strategy", removed.error.id]),
+      ]);
+    }
+    this.store.setActiveGraphStrategyId(this.strategyRegistry.defaultStrategyId);
+    return ok(removed.value);
   }
 
   /**

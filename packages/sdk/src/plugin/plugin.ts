@@ -2,12 +2,13 @@
  * The plugin authoring contract of the SDK (Phase 6).
  *
  * A plugin is a third party that contributes definitions to a builder through
- * one narrow api: nodes, edges, properties, panels, tools, themes, layouts and
- * opaque renderer bindings. Installation is synchronous and additive — no
- * manifest, no dependency resolution and no activation lifecycle, which belong
- * to a later phase. What this module owns is the *contract*: which id and
- * version a plugin must declare, what happens to a contribution that fails, and
- * what the host can observe afterwards.
+ * one narrow api: nodes, edges, properties, panels, tools, themes, layouts,
+ * graph validators, importers, exporters, dialogs, layout strategies and opaque
+ * renderer bindings. Installation is synchronous and additive — no manifest, no
+ * dependency resolution and no activation lifecycle, which belong to a later
+ * phase. What this module owns is the *contract*: which id and version a plugin
+ * must declare, what happens to a contribution that fails, and what the host can
+ * observe afterwards.
  *
  * Two rules shape the implementation:
  *
@@ -31,9 +32,17 @@
  */
 
 import { err, ok, type Result } from "@nodera/contracts";
+import type { Exporter, Importer } from "@nodera/domain";
+import type { GraphLayoutStrategy } from "@nodera/graph-layout";
 import type { PropertyDefinition } from "@nodera/property-system";
 import type { CreateThemeInput, ThemeDefinition } from "@nodera/theme-engine";
-import type { LayoutDefinition, PanelDefinition, ToolDefinition } from "@nodera/ui-core";
+import type {
+  DialogDefinition,
+  LayoutDefinition,
+  PanelDefinition,
+  ToolDefinition,
+} from "@nodera/ui-core";
+import type { GraphValidator } from "@nodera/validation";
 import type { RendererKind } from "../adapter/renderer-bindings.js";
 import type { EdgeDefinitionInput } from "../authoring/edges.js";
 import type { NodeDefinitionInput } from "../authoring/nodes.js";
@@ -75,6 +84,31 @@ export interface BuilderPluginApi {
   };
   readonly layouts: {
     register(layout: LayoutDefinition): Result<LayoutDefinition, SdkIssues>;
+  };
+  /**
+   * Contributes a graph validator — code, not declarative data.
+   *
+   * The validator joins the registry the editing session validates with, so it
+   * takes part in the next validation with no re-composition.
+   */
+  readonly validators: {
+    register(validator: GraphValidator): Result<GraphValidator, SdkIssues>;
+  };
+  /** Contributes an importer for one document format. */
+  readonly importers: {
+    register(importer: Importer): Result<Importer, SdkIssues>;
+  };
+  /** Contributes an exporter for one document format. */
+  readonly exporters: {
+    register(exporter: Exporter): Result<Exporter, SdkIssues>;
+  };
+  /** Contributes a declarative dialog the UI state may open by id. */
+  readonly dialogs: {
+    register(dialog: DialogDefinition): Result<DialogDefinition, SdkIssues>;
+  };
+  /** Contributes a graph placement strategy the host may select. */
+  readonly layoutStrategies: {
+    register(strategy: GraphLayoutStrategy): Result<GraphLayoutStrategy, SdkIssues>;
   };
   /**
    * Binds an opaque presentation value to a renderer slot.
@@ -272,6 +306,22 @@ function createPluginApi(
     },
     layouts: {
       register: (layout) => record(builder.layout.register(layout), (entry) => entry.id),
+    },
+    validators: {
+      register: (validator) =>
+        record(builder.validators.register(validator), (entry) => entry.id),
+    },
+    importers: {
+      register: (importer) => record(builder.importers.register(importer), (entry) => entry.id),
+    },
+    exporters: {
+      register: (exporter) => record(builder.exporters.register(exporter), (entry) => entry.id),
+    },
+    dialogs: {
+      register: (dialog) => record(builder.dialogs.register(dialog), (entry) => entry.id),
+    },
+    layoutStrategies: {
+      register: (strategy) => record(builder.graphLayout.register(strategy), (entry) => entry.id),
     },
     renderers: {
       bind(kind, id, value) {

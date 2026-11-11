@@ -312,6 +312,11 @@ describe("plugin api surface", () => {
       "tools",
       "themes",
       "layouts",
+      "validators",
+      "importers",
+      "exporters",
+      "dialogs",
+      "layoutStrategies",
       "renderers",
     ]);
     expect(nestedRegistered).toBe(true);
