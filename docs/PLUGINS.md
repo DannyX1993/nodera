@@ -319,9 +319,9 @@ concreto:
 
 | # | Paso | Qué ocurre | Fallo |
 | --- | --- | --- | --- |
-| 1 | Discover | se comprueba que cada entrada tiene `manifest` y `activate` | `plugin.invalid-manifest` |
+| 1 | Discover | se comprueba que cada entrada tiene `manifest` y `activate`, y `validatePluginManifest` valida el manifest (id, name, version, dependencias, compatibilidad, contribuciones, permisos) | `plugin.invalid-manifest` |
 | 2 | Resolve dependencies | orden topológico por `dependencies`, rangos semver, ciclos y faltantes | `plugin.missing-dependency`, `plugin.dependency-cycle`, `plugin.invalid-manifest` |
-| 3 | Validate manifest | `validatePluginManifest` sobre cada manifest y compatibilidad con el host | `plugin.invalid-manifest`, `plugin.incompatible-sdk` |
+| 3 | Validate compatibility | `sdkVersion` (rango) y `documentFormat`/`documentVersion` (igualdad) contra las opciones del host, cuando éste las declara | `plugin.incompatible-sdk` |
 | 4 | Detect conflicts | ids de plugin y pares `(type, id)` de contribución, incluidos los ya instalados por este manager | `plugin.duplicate-plugin`, `plugin.contribution-conflict` |
 | 5 | Register + activate | `installPlugin` del SDK registra las contribuciones y emite `plugin.registered`; después corre `activate`, el plugin queda `active` y se emite `plugin.activated` | `plugin.activation-failed` |
 | 6 | Deactivate | corre el hook `deactivate` si existe; el plugin queda `inactive` y se emite `plugin.deactivated` | `plugin.deactivation-failed` |
