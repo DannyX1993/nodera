@@ -578,13 +578,13 @@ createBuilder({
 Members: `mode` (`"free" | "auto"`, default `"free"`), `direction`
 (`"horizontal" | "vertical"`, default `"horizontal"`; horizontal fills
 row-major and arranges the ranks along `x`, vertical fills column-major and
-arranges them along `y`), `spacing` (distance between adjacent add-time slots, and
-the **gap between two neighbouring node boxes** of an arrangement — not the
-distance between their origins — in document units, default `240`),
-`nodeSize` (`{ width, height }`, the fallback box an arrangement reserves for a
-node that carries no size of its own, default: the strategy's `{ width: 140,
-height: 40 }`; a width or height that is not a positive finite number is refused
-at `graph.layout.nodeSize.width` / `.height`),
+arranges them along `y`), `spacing` (the **gap between two neighbouring node
+boxes** — of an arrangement rank and of two consecutive add-time slots — not the
+distance between their origins, in document units, default `240`), `nodeSize`
+(`{ width, height }`, the fallback box an arrangement reserves and the box the
+add-time step advances by, for a node that carries no size of its own, default:
+the strategy's `{ width: 140, height: 40 }`; a width or height that is not a
+positive finite number is refused at `graph.layout.nodeSize.width` / `.height`),
 `strategy` (globally qualified id of the strategy [`arrange()`](#graph-layout-strategies--buildergraphlayout)
 runs, default `nodera.graph-layout.layered`), `rankSpacing` (distance between
 consecutive ranks of an arrangement, default: the declared `spacing`) and `drag`
@@ -619,18 +619,22 @@ the host declares `arrangeOnChange: "downstream"`.
 
 #### Where `mode: "auto"` puts the new node — `AddNodeRequest.after`
 
-The slot is a pure function of three things: the positions the document already
-carries, the configured axis and `spacing`, and the **anchor** the host names in
-`after` (a node instance id).
+The slot is a pure function of four things: the positions the document already
+carries, the configured axis, the `spacing` and `nodeSize` geometry, and the
+**anchor** the host names in `after` (a node instance id). Consecutive slots are
+one **box** plus the gap apart: the step is the box extent of the advanced axis
+(`width` for `horizontal`, `height` for `vertical`) plus `spacing`, the same
+geometry an `Arrange` rank reserves. A spacing smaller than the box therefore
+never produces overlapping slots.
 
 - **With an anchor that carries a position**: the first free slot **forward** of
-  the anchor along `direction`, stepping by `spacing`. An occupied slot is
-  skipped forward, never backward, so the node always lands after the node it was
-  asked to follow, even when a slot behind that node is free.
+  the anchor along `direction`, stepping by the box plus `spacing`. An occupied
+  slot is skipped forward, never backward, so the node always lands after the
+  node it was asked to follow, even when a slot behind that node is free.
 - **With an anchor that carries no position, or with no anchor at all**: the node
   lands after the graph's extent. The farthest occupied slot along the axis keeps
-  its own row, the candidate starts one `spacing` step past it, and the first
-  free slot from there wins.
+  its own row, the candidate starts one box-plus-`spacing` step past it, and the
+  first free slot from there wins.
 - **Empty graph**: the origin.
 - **An explicit `position` in the request** always wins over any anchor.
 - **`mode: "free"`** ignores the anchor for placement and invents no position.
@@ -644,7 +648,7 @@ const anchor = assertValid(builder.graph.addNode({ type: "demo.fetch" }));
 const next = assertValid(
   builder.graph.addNode({ type: "demo.parse", after: anchor.id }),
 );
-// next.position: one `spacing` step past the anchor along `direction`
+// next.position: one box-plus-`spacing` step past the anchor along `direction`
 ```
 
 **The host decides the anchor, the SDK never reads the UI selection.** A palette

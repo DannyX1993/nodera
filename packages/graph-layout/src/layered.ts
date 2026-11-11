@@ -1,6 +1,7 @@
 import { err, ok } from "@nodera/contracts";
 import type { NodeId, Result } from "@nodera/contracts";
 
+import { resolveLayoutNodeSize } from "./node-size.js";
 import type {
   GraphLayoutDiagnostic,
   GraphLayoutEdgeInput,
@@ -16,14 +17,13 @@ import type {
 export const LAYERED_STRATEGY_ID = "nodera.graph-layout.layered";
 
 /**
- * Fallback box of a node that carries no size of its own, in flow units.
+ * The fallback box of a node with no size of its own, re-exported from
+ * `./node-size.js`, which owns it and the resolver that answers it.
  *
- * It matches the `--ndr-node-min-width` / `--ndr-node-min-height` token defaults
- * of the default node renderer, so a host that never measures its nodes still
- * gets a grid whose gaps are the gaps the painted boxes have. Only a fallback:
- * a node's own `width`/`height` and the host's `nodeSize` always win.
+ * Kept at this path so an existing import of `DEFAULT_LAYOUT_NODE_SIZE` from the
+ * layered strategy keeps working.
  */
-export const DEFAULT_LAYOUT_NODE_SIZE = { width: 140, height: 40 } as const;
+export { DEFAULT_LAYOUT_NODE_SIZE } from "./node-size.js";
 
 const DIRECTIONS: readonly string[] = ["horizontal", "vertical"];
 const SCOPES: readonly string[] = ["all", "unpositioned"];
@@ -349,8 +349,8 @@ function orderByBarycenter(
  *
  * The cross axis is measured in **boxes**, not in positions. Every box takes the
  * space its `width` (or `height`, for the axis the rank advances along) declares,
- * falling back to `options.nodeSize` and then to
- * {@link DEFAULT_LAYOUT_NODE_SIZE}, and a rank steps by the **widest** box it
+ * falling back to `options.nodeSize` and then to the one shared default box
+ * ({@link resolveLayoutNodeSize}), and a rank steps by the **widest** box it
  * holds plus `nodeSpacing`: `pitch = max(boxCross) + nodeSpacing`. `nodeSpacing`
  * is therefore the gap between two neighbouring boxes, not the distance between
  * their origins, which is what keeps a rank of mixed sizes from overlapping
@@ -616,14 +616,14 @@ function restoreSeparation(
 
 /**
  * The box of one node: what the host declared for it, the host's fallback box, or
- * the strategy's own default, in that order.
+ * the shared default, in that order.
  *
  * A declared extent that cannot describe a box (zero, negative, non-finite) is
  * treated as absent instead of producing geometry that cannot hold anything: the
  * sizes are hints, and a hint a host could not measure must not break the grid.
  */
 function boxOf(node: GraphLayoutNodeInput, options: GraphLayoutOptions): GraphLayoutNodeSize {
-  const fallback = options.nodeSize ?? DEFAULT_LAYOUT_NODE_SIZE;
+  const fallback = resolveLayoutNodeSize(options.nodeSize);
   return {
     width: usableExtent(node.width) ?? fallback.width,
     height: usableExtent(node.height) ?? fallback.height,

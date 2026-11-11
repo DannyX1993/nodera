@@ -36,7 +36,8 @@ Everything below is re-exported from the package root (`src/index.ts`).
 | `GraphLayoutDiagnosticCode` | type | The three stable codes below |
 | `createFreeStrategy` / `FREE_STRATEGY_ID` | factory / constant | The no-op strategy, id `nodera.graph-layout.free` |
 | `createLayeredStrategy` / `LAYERED_STRATEGY_ID` | factory / constant | The in-house layered strategy, id `nodera.graph-layout.layered` |
-| `DEFAULT_LAYOUT_NODE_SIZE` | constant | The `{ width: 140, height: 40 }` box the layered strategy reserves for a node nobody measured |
+| `DEFAULT_LAYOUT_NODE_SIZE` | constant | The `{ width: 140, height: 40 }` box a placement reserves for a node nobody measured; it lives in `./node-size.ts` and is re-exported here |
+| `resolveLayoutNodeSize` | function | The one resolver for "the box the host declared, or the default": the ranked strategy and the SDK's add-time step both read the default through it |
 | `LayoutStrategyRegistry` | class | The composition point: holds strategies, names a default |
 | `LayoutStrategyRegistryOptions` | interface | `strategies` and `defaultStrategyId` |
 | `BUILT_IN_STRATEGIES` | constant | One instance each of `free` and `layered` |
@@ -194,12 +195,14 @@ action needs. There is no edge routing and no edge bend point (see
 
 ## Defaults
 
-The strategy has one default of its own: `options.nodeSize ?? { width: 140,
-height: 40 }` (`DEFAULT_LAYOUT_NODE_SIZE`), the box it reserves for a node nobody
-measured — the `--ndr-node-min-width` / `--ndr-node-min-height` token defaults of
-the default node renderer. `direction`, `nodeSpacing`, `rankSpacing` and `scope`
-are required members. The defaults a host actually sees are resolved above this
-package, and these are the exact values:
+The strategy has one default of its own: the box `resolveLayoutNodeSize(options.nodeSize)`
+answers, which is the declared `nodeSize` or `{ width: 140, height: 40 }`
+(`DEFAULT_LAYOUT_NODE_SIZE`) — the `--ndr-node-min-width` / `--ndr-node-min-height`
+token defaults of the default node renderer, reserved for a node nobody measured.
+That resolver is the framework's only source for "the declared box or the
+default": the SDK's add-time step calls it too. `direction`, `nodeSpacing`,
+`rankSpacing` and `scope` are required members. The defaults a host actually sees
+are resolved above this package, and these are the exact values:
 
 | Setting | Declared by the host | Default | Resolved in |
 | --- | --- | --- | --- |
@@ -207,12 +210,16 @@ package, and these are the exact values:
 | `graph.layout.direction` | `@nodera/sdk` | `"horizontal"` | same |
 | `graph.layout.spacing` | `@nodera/sdk` | `240` (`DEFAULT_GRAPH_LAYOUT_SPACING`), the `nodeSpacing` of `arrange()` | same |
 | `graph.layout.rankSpacing` | `@nodera/sdk` | the declared `spacing` | `packages/sdk/src/builder/builder.ts` |
-| `graph.layout.nodeSize` | `@nodera/sdk` | absent, so this package's `140 × 40` applies | `packages/sdk/src/builder/builder.ts` (`resolveNodeSize`) |
+| `graph.layout.nodeSize` | `@nodera/sdk` | absent, so this package's `140 × 40` (`DEFAULT_LAYOUT_NODE_SIZE`, via `resolveLayoutNodeSize`) applies | `packages/sdk/src/graph/placement.ts` (`resolveGraphLayout`, the add-time step); the strategy option is the declared box or nothing, resolved by this package's `resolveLayoutNodeSize` |
 | `graph.layout.strategy` | `@nodera/sdk` | `DEFAULT_STRATEGY_ID`, which is `nodera.graph-layout.layered` | `LayoutStrategyRegistry` |
 | `scope` of `arrange()` | not configurable | `"all"` | `packages/sdk/src/graph/graph-api.ts` |
 
 The add-time grid of `mode: "auto"` is not this package: it is the SDK's own
-`nextFreeSlot` over the positions the document already carries.
+`nextFreeSlot` over the positions the document already carries. It still measures
+with this package's geometry: the step is the box extent of the axis it advances
+along — `width` under `horizontal`, `height` under `vertical` — plus `nodeSpacing`,
+and a host that declares no `nodeSize` gets `DEFAULT_LAYOUT_NODE_SIZE`, the same
+box the layered strategy reserves. Both grids therefore measure the same boxes.
 
 ## Diagnostics
 

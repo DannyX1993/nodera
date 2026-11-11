@@ -144,54 +144,80 @@ describe("graph layout: automatic placement", () => {
     expect(added(builderWith({ mode: "auto" })).position).toEqual({ x: 0, y: 0 });
   });
 
-  it("grows horizontally by the default spacing", () => {
+  it("grows horizontally by the default box plus the default spacing", () => {
     const builder = builderWith({ mode: "auto" });
+    expect(added(builder).position).toEqual({ x: 0, y: 0 });
+    // The strategy's default 140-wide box plus the default 240 gap.
+    expect(added(builder).position).toEqual({ x: 380, y: 0 });
+  });
+
+  it("grows horizontally by the default box plus the configured spacing", () => {
+    const builder = builderWith({ mode: "auto", spacing: 100 });
     expect(added(builder).position).toEqual({ x: 0, y: 0 });
     expect(added(builder).position).toEqual({ x: 240, y: 0 });
   });
 
-  it("grows horizontally by the configured spacing", () => {
-    const builder = builderWith({ mode: "auto", spacing: 100 });
+  it("steps along the advanced axis by the declared box plus the spacing", () => {
+    const layout = { mode: "auto", spacing: 100, nodeSize: { width: 60, height: 20 } };
+    const horizontal = builderWith({ ...layout, direction: "horizontal" });
+    expect(added(horizontal).position).toEqual({ x: 0, y: 0 });
+    expect(added(horizontal).position).toEqual({ x: 160, y: 0 });
+    expect(added(horizontal).position).toEqual({ x: 320, y: 0 });
+
+    // `vertical` advances `y`, so the step reads the height: 20 + 100 = 120.
+    const vertical = builderWith({ ...layout, direction: "vertical" });
+    expect(added(vertical).position).toEqual({ x: 0, y: 0 });
+    expect(added(vertical).position).toEqual({ x: 0, y: 120 });
+    expect(added(vertical).position).toEqual({ x: 0, y: 240 });
+  });
+
+  it("keeps the boxes apart when the spacing is smaller than the box", () => {
+    const builder = builderWith({
+      mode: "auto",
+      spacing: 10,
+      nodeSize: { width: 200, height: 40 },
+    });
     expect(added(builder).position).toEqual({ x: 0, y: 0 });
-    expect(added(builder).position).toEqual({ x: 100, y: 0 });
+    expect(added(builder).position).toEqual({ x: 210, y: 0 });
   });
 
   it("grows vertically when the host asks for vertical placement", () => {
     const builder = builderWith({ mode: "auto", direction: "vertical" });
     expect(added(builder).position).toEqual({ x: 0, y: 0 });
-    expect(added(builder).position).toEqual({ x: 0, y: 240 });
+    // The default 40-tall box plus the default 240 gap.
+    expect(added(builder).position).toEqual({ x: 0, y: 280 });
   });
 
   it("skips a slot the host already occupies", () => {
     const builder = builderWith({ mode: "auto" });
     expect(added(builder, { x: 0, y: 0 }).position).toEqual({ x: 0, y: 0 });
-    expect(added(builder).position).toEqual({ x: 240, y: 0 });
+    expect(added(builder).position).toEqual({ x: 380, y: 0 });
   });
 
   it("assigns the same slot whatever order the occupied nodes were added in", () => {
     const forward = builderWith({ mode: "auto" });
     added(forward, { x: 240, y: 0 });
     added(forward, { x: 480, y: 0 });
-    expect(added(forward).position).toEqual({ x: 720, y: 0 });
+    expect(added(forward).position).toEqual({ x: 860, y: 0 });
 
     const backward = builderWith({ mode: "auto" });
     added(backward, { x: 480, y: 0 });
     added(backward, { x: 240, y: 0 });
-    expect(added(backward).position).toEqual({ x: 720, y: 0 });
+    expect(added(backward).position).toEqual({ x: 860, y: 0 });
   });
 
   it("lands after the graph's extent when the host declares no anchor", () => {
     const builder = builderWith({ mode: "auto" });
     added(builder, { x: 0, y: 0 });
     added(builder, { x: 240, y: 0 });
-    expect(added(builder).position).toEqual({ x: 480, y: 0 });
+    expect(added(builder).position).toEqual({ x: 620, y: 0 });
   });
 
   it("keeps the farthest row and steps past the extent along the vertical axis", () => {
     const builder = builderWith({ mode: "auto", direction: "vertical" });
     added(builder, { x: 0, y: 0 });
     added(builder, { x: 0, y: 240 });
-    expect(added(builder).position).toEqual({ x: 0, y: 480 });
+    expect(added(builder).position).toEqual({ x: 0, y: 520 });
   });
 
   it("keeps a position the host supplied itself", () => {
@@ -214,7 +240,7 @@ describe("graph layout: automatic placement", () => {
     const first = added(builder);
     const second = added(builder);
     expect(first.position).toEqual({ x: 0, y: 0 });
-    expect(second.position).toEqual({ x: 240, y: 0 });
+    expect(second.position).toEqual({ x: 380, y: 0 });
 
     expect(builder.graph.undo()).toBe(true);
     expect(builder.graph.nodes()).toHaveLength(1);
@@ -222,7 +248,7 @@ describe("graph layout: automatic placement", () => {
 
     expect(builder.graph.redo()).toBe(true);
     expect(builder.graph.nodes().find((restored) => restored.id === second.id)?.position).toEqual({
-      x: 240,
+      x: 380,
       y: 0,
     });
   });
@@ -236,8 +262,10 @@ describe("graph layout: anchored placement", () => {
     );
     placed(builder.graph.addNode({ type: STEP, nodeId: "sibling", position: { x: 240, y: 0 } }));
 
+    // The default box plus the default gap: the candidate starts at 380, which is
+    // free, so it is the first free slot forward of the anchor.
     expect(placed(builder.graph.addNode({ type: STEP, after: anchor.id })).position).toEqual({
-      x: 480,
+      x: 380,
       y: 0,
     });
   });
@@ -251,7 +279,7 @@ describe("graph layout: anchored placement", () => {
     );
 
     expect(placed(builder.graph.addNode({ type: STEP, after: anchor.id })).position).toEqual({
-      x: 720,
+      x: 860,
       y: 0,
     });
   });
@@ -265,18 +293,18 @@ describe("graph layout: anchored placement", () => {
 
     expect(placed(builder.graph.addNode({ type: STEP, after: anchor.id })).position).toEqual({
       x: 0,
-      y: 720,
+      y: 520,
     });
   });
 
-  it("keeps the anchor's row and steps by the configured spacing", () => {
+  it("keeps the anchor's row and steps by the default box plus the spacing", () => {
     const builder = builderWith({ mode: "auto", spacing: 100 });
     const anchor = placed(
       builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 50, y: 300 } }),
     );
 
     expect(placed(builder.graph.addNode({ type: STEP, after: anchor.id })).position).toEqual({
-      x: 150,
+      x: 290,
       y: 300,
     });
   });
@@ -289,7 +317,7 @@ describe("graph layout: anchored placement", () => {
     ]);
 
     expect(placed(builder.graph.addNode({ type: STEP, after: "unplaced" })).position).toEqual({
-      x: 480,
+      x: 620,
       y: 0,
     });
   });
@@ -313,14 +341,14 @@ describe("graph layout: anchored placement", () => {
       builder.graph.addNode({ type: STEP, nodeId: "anchor", position: { x: 0, y: 0 } }),
     );
     const child = placed(builder.graph.addNode({ type: STEP, nodeId: "child", after: anchor.id }));
-    expect(child.position).toEqual({ x: 240, y: 0 });
+    expect(child.position).toEqual({ x: 380, y: 0 });
 
     expect(builder.graph.undo()).toBe(true);
     expect(builder.graph.nodes().map((node) => node.id)).toEqual([anchor.id]);
 
     expect(builder.graph.redo()).toBe(true);
     expect(builder.graph.nodes().find((node) => node.id === child.id)?.position).toEqual({
-      x: 240,
+      x: 380,
       y: 0,
     });
   });
@@ -332,7 +360,7 @@ describe("graph layout: anchored placement", () => {
     );
     placed(forward.graph.addNode({ type: STEP, nodeId: "alpha", position: { x: 240, y: 0 } }));
     const slot = placed(forward.graph.addNode({ type: STEP, after: first.id })).position;
-    expect(slot).toEqual({ x: 480, y: 0 });
+    expect(slot).toEqual({ x: 380, y: 0 });
 
     // The same positions stored in the other order, under other ids.
     const backward = builderWith({ mode: "auto" });

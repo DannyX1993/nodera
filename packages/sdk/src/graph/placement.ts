@@ -17,6 +17,11 @@
  */
 
 import type { NodePosition } from "@nodera/graph-model";
+import {
+  DEFAULT_LAYOUT_NODE_SIZE,
+  resolveLayoutNodeSize,
+  type GraphLayoutNodeSize,
+} from "@nodera/graph-layout";
 import type { GraphLayoutConfiguration } from "../builder/configuration.js";
 
 /** Who owns placement: the host, or the builder for the nodes left unpositioned. */
@@ -32,7 +37,24 @@ export const DEFAULT_GRAPH_LAYOUT_SPACING = 240;
 export interface ResolvedGraphLayout {
   readonly mode: GraphLayoutMode;
   readonly direction: GraphLayoutDirection;
+  /**
+   * Gap between two neighbouring boxes, in document units.
+   *
+   * It measures the **gap**, never the distance between two positions: the step
+   * between consecutive slots is the box extent plus this gap, exactly as
+   * `Arrange` computes it, and the same number reaches the strategy as its
+   * `nodeSpacing`.
+   */
   readonly spacing: number;
+  /**
+   * Fallback box of a node, which the automatic step reserves.
+   *
+   * One source for both placements: the host's `graph.layout.nodeSize` when it
+   * declared a box, else the ranked strategy's own default
+   * (`resolveLayoutNodeSize`), so the add-time grid and the ranked grid measure
+   * the same boxes.
+   */
+  readonly nodeSize: GraphLayoutNodeSize;
 }
 
 /** Settings of a builder that places nothing: today's free editing. */
@@ -40,6 +62,7 @@ export const FREE_GRAPH_LAYOUT: ResolvedGraphLayout = {
   mode: "free",
   direction: "horizontal",
   spacing: DEFAULT_GRAPH_LAYOUT_SPACING,
+  nodeSize: DEFAULT_LAYOUT_NODE_SIZE,
 };
 
 /**
@@ -63,7 +86,28 @@ export function resolveGraphLayout(
       configuration.spacing > 0
         ? configuration.spacing
         : DEFAULT_GRAPH_LAYOUT_SPACING,
+    nodeSize: resolveLayoutNodeSize(usableNodeSize(configuration?.nodeSize)),
   };
+}
+
+/**
+ * A declared box that can describe one, or `undefined`.
+ *
+ * A value that cannot (zero, negative, non-finite) is treated as absent instead
+ * of producing a step that cannot hold a node; the default itself is not decided
+ * here — {@link resolveLayoutNodeSize} owns it, so the add-time grid and the
+ * ranked grid read one box.
+ */
+function usableNodeSize(
+  nodeSize: { readonly width: number; readonly height: number } | undefined,
+): GraphLayoutNodeSize | undefined {
+  return nodeSize !== undefined &&
+    Number.isFinite(nodeSize.width) &&
+    nodeSize.width > 0 &&
+    Number.isFinite(nodeSize.height) &&
+    nodeSize.height > 0
+    ? { width: nodeSize.width, height: nodeSize.height }
+    : undefined;
 }
 
 /** Positions of the nodes that carry one, in the order the graph stores them. */
@@ -100,11 +144,18 @@ export function placeUnpositionedNode(
 /**
  * First free slot at or ahead of the point placement starts from.
  *
- * With an anchor the walk starts one `spacing` step past it and keeps the
- * anchor's own row; an occupied slot only ever pushes the candidate **forward**,
- * never backward, so a new node always lands after the node it follows. Without
- * an anchor the graph grows along the same rule, from the farthest slot it
- * occupies.
+ * The step between two consecutive slots is measured in **boxes**, exactly like
+ * the ranked layout: the box extent of the axis the layout advances along plus
+ * `spacing`. `horizontal` advances `x`, so it reserves the box `width`;
+ * `vertical` advances `y` and reserves the `height`. `spacing` is therefore the
+ * gap between two neighbouring boxes, never the distance between their origins,
+ * which is what keeps a host that declares a spacing below its node size from
+ * getting overlapping slots.
+ *
+ * With an anchor the walk starts one step past it and keeps the anchor's own row;
+ * an occupied slot only ever pushes the candidate **forward**, never backward, so
+ * a new node always lands after the node it follows. Without an anchor the graph
+ * grows along the same rule, from the farthest slot it occupies.
  *
  * An empty graph — no occupied positions at all, which includes a document
  * whose nodes carry no position yet — starts at the origin. The walk is bounded
@@ -121,7 +172,7 @@ export function nextFreeSlot(
   }
   const taken = new Set(occupied.map(slotKey));
   const vertical = layout.direction === "vertical";
-  const step = layout.spacing;
+  const step = (vertical ? layout.nodeSize.height : layout.nodeSize.width) + layout.spacing;
   let candidate: NodePosition = vertical
     ? { x: start.x, y: start.y + step }
     : { x: start.x + step, y: start.y };

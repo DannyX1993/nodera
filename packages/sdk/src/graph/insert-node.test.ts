@@ -267,15 +267,15 @@ describe("graph.insertNode: refused requests", () => {
 describe("graph.insertNode: placement of the inserted node", () => {
   it("lands one step past the edge source in auto mode, inside the same history unit", () => {
     const builder = create({ mode: "auto", spacing: 240 });
-    // The endpoints are two slots apart, so the insertion has its own slot
-    // between them.
+    // The endpoints are more than one default step apart (140-wide default box
+    // plus the 240 gap), so the insertion has its own slot between them.
     const source = added(builder, SOURCE, { position: { x: 0, y: 0 } });
     const target = added(builder, TARGET, { position: { x: 480, y: 0 } });
     const edgeId = connectOrThrow(builder, source.id, target.id);
 
     const insertion = inserted(builder, edgeId, { nodeId: "node-middle" });
 
-    expect(insertion.node.position).toEqual({ x: 240, y: 0 });
+    expect(insertion.node.position).toEqual({ x: 380, y: 0 });
 
     // The position belongs to the insertion: one undo takes the node with it.
     expect(builder.graph.undo()).toBe(true);
@@ -284,7 +284,7 @@ describe("graph.insertNode: placement of the inserted node", () => {
     expect(builder.graph.redo()).toBe(true);
     expect(
       builder.graph.nodes().find((node) => node.id === "node-middle")?.position,
-    ).toEqual({ x: 240, y: 0 });
+    ).toEqual({ x: 380, y: 0 });
   });
 
   it("leaves the node unpositioned in free mode", () => {
@@ -366,7 +366,7 @@ describe("graph.insertNode: the downstream auto policy", () => {
       "node-source": { x: 0, y: 500 },
       "node-sibling": { x: 1000, y: 1000 },
       "node-target": { x: 900, y: 900 },
-      "node-middle": { x: 240, y: 500 },
+      "node-middle": { x: 380, y: 500 },
     });
 
     // A second undo is the insertion itself.
@@ -385,7 +385,7 @@ describe("graph.insertNode: the downstream auto policy", () => {
       "node-source": { x: 0, y: 500 },
       "node-sibling": { x: 1000, y: 1000 },
       "node-target": { x: 900, y: 900 },
-      "node-middle": { x: 240, y: 500 },
+      "node-middle": { x: 380, y: 500 },
     });
     expect(builder.graph.lastAutoArrangement()).toEqual({ outcome: "skipped" });
 
@@ -401,7 +401,7 @@ describe("graph.insertNode: the downstream auto policy", () => {
 
     expect(positionsOf(builder)).toEqual({
       "node-source": { x: 0, y: 0 },
-      "node-target": { x: 240, y: 0 },
+      "node-target": { x: 380, y: 0 },
     });
     expect(builder.graph.lastAutoArrangement()).toEqual({ outcome: "skipped" });
 
@@ -485,7 +485,7 @@ describe("graph.insertNode: the downstream auto policy", () => {
       "node-source": { x: 0, y: 500 },
       "node-sibling": { x: 1000, y: 1000 },
       "node-target": { x: 900, y: 900 },
-      "node-middle": { x: 240, y: 500 },
+      "node-middle": { x: 380, y: 500 },
     });
     const outcome = builder.graph.lastAutoArrangement();
     if (outcome.outcome !== "refused") {

@@ -19,7 +19,7 @@ nothing moves unless the host asks.
 | | Who places a node |
 | --- | --- |
 | `mode: "free"` (the default) | The host. A node added without a position keeps no position; the canvas adapter decides how to render it until the host places it. |
-| `mode: "auto"` | The builder, and only for the nodes the host left unpositioned: the first free slot **forward** of the anchor the host names (`AddNodeRequest.after`), or the slot one step past the graph's extent when there is no anchor, at add time. A node that already carries a position is never moved. |
+| `mode: "auto"` | The builder, and only for the nodes the host left unpositioned: the first free slot **forward** of the anchor the host names (`AddNodeRequest.after`), or the slot one box-plus-`spacing` step past the graph's extent when there is no anchor, at add time. A node that already carries a position is never moved. |
 | `Arrange` (explicit) | The selected strategy, for the whole graph when the host calls `builder.graph.arrange()`, or only for `from` and its descendants with `arrange({ from })`. One history unit either way. |
 | Downstream auto (`insertNode`, `connect`) | The selected strategy, for the node the change touched and its descendants, when the host declares `graph.layout.arrangeOnChange: "downstream"`. **A second** history unit, applied after the mutation (see [Automatic downstream arrangement](#automatic-downstream-arrangement)). |
 | Edge insertion (`builder.graph.insertNode`) | The builder, in `mode: "auto"`, anchored on the edge's **source**: one step past it along the axis, exactly like an `after` anchor. In `mode: "free"` nothing. One history unit together with the node and the two edges that replace the original — plus, with `arrangeOnChange: "downstream"`, a second one for the downstream arrangement. |
@@ -49,14 +49,21 @@ Three invariants hold in every mode:
 
 ### Where an added node lands
 
-`mode: "auto"` answers one slot, from three inputs and no others: the positions
-the document already carries, the configured `direction` and `spacing`, and the
-anchor the host names in `AddNodeRequest.after` (a node instance id).
+`mode: "auto"` answers one slot, from the positions the document already carries,
+the configured `direction`, `spacing` and `nodeSize`, and the anchor the host
+names in `AddNodeRequest.after` (a node instance id).
+
+The step between consecutive slots is the **box extent of the axis it advances
+plus `spacing`** — the box `width` under `horizontal`, the `height` under
+`vertical` — so `spacing` is the gap between two boxes here too, exactly as it is
+for an `Arrange` rank. The box is `graph.layout.nodeSize`, or the strategy's
+`{ width: 140, height: 40 }` when the host declares none: one default, shared by
+both grids.
 
 | The request | The slot |
 | --- | --- |
-| `after` names a node **with** a position | The first free slot **forward** of that node along the axis, stepping by `spacing`. A taken slot pushes the candidate forward, never backward. |
-| `after` names a node **without** a position | After the graph's extent: the farthest occupied slot along the axis keeps its own row, the candidate starts one step past it, the first free slot from there wins. |
+| `after` names a node **with** a position | The first free slot **forward** of that node along the axis, stepping by the box plus `spacing`. A taken slot pushes the candidate forward, never backward. |
+| `after` names a node **without** a position | After the graph's extent: the farthest occupied slot along the axis keeps its own row, the candidate starts one box-plus-`spacing` step past it, the first free slot from there wins. |
 | No `after` at all | The same extent rule: the new node lands at the end of the graph. |
 | Empty graph | The origin. |
 | An explicit `position` | Whatever the request says: it wins over any anchor. |
@@ -73,7 +80,7 @@ const anchor = assertValid(builder.graph.addNode({ type: "acme.http.request" }))
 const next = assertValid(
   builder.graph.addNode({ type: "acme.http.request", after: anchor.id }),
 );
-// next.position: one `spacing` step past the anchor along `direction`
+// next.position: one box-plus-`spacing` step past the anchor along `direction`
 ```
 
 **The anchor is the host's decision, never the framework's.** The palette passes
@@ -91,7 +98,7 @@ puts it (AGENTS.md §4, §12; odd task S5):
 | --- | --- | --- |
 | Geometry | `@nodera/graph-layout` | The strategy port, the `free` no-op, the in-house layered strategy and the registry. Plain data in, positions or a diagnostic out. No React, no React Flow, no graph instance. |
 | Position writes | `@nodera/application` | `arrangeGraph(editor, { moves })` validates every id and position first, then writes the whole answer as one reversible history unit (`arrange-graph`). All-or-nothing: a rejected move writes nothing, pushes nothing and emits nothing. |
-| Add-time placement | `@nodera/sdk` | `resolveGraphLayout`, `placeUnpositionedNode` and `nextFreeSlot` decide a position **before** the `add-node` use case runs, so it belongs to the same history unit as the creation. The anchor (`AddNodeRequest.after`) is a node id the host chose; the rule reads its position and the graph's, nothing else. |
+| Add-time placement | `@nodera/sdk` | `resolveGraphLayout`, `placeUnpositionedNode` and `nextFreeSlot` decide a position **before** the `add-node` use case runs, so it belongs to the same history unit as the creation. The anchor (`AddNodeRequest.after`) is a node id the host chose; the rule reads its position and the graph's, nothing else. The step reads the same box as `Arrange` (`graph.layout.nodeSize`, default `{ width: 140, height: 40 }`), so the add-time grid and the ranked grid measure one geometry. |
 | Edge insertion | `@nodera/application`, `@nodera/sdk` | `insertNodeOnEdge(editor, input)` validates the edge, the definition, the instance id and both middle ports first, then writes the node and the two halves as one reversible unit (`insert-node-on-edge`); a refusal writes nothing, pushes nothing and emits nothing. The SDK decides the position with the same placement rule, anchored on the edge source, **before** the use case runs. |
 | Configuration and command | `@nodera/sdk` | `graph.layout`, `builder.graphLayout` and `builder.graph.arrange(request?)`. The SDK reads the graph as plain data, asks the selected strategy and applies the answer through the use case above. |
 | Rendering and affordances | `@nodera/react-flow`, `@nodera/ui-*` | The canvas renders positions **from the document**; the node-creation dialog and its "+" affordance (which is how a node enters the graph in the first place) live in `ui-react`/`ui-core`. Neither calls `arrange`, and neither ships a placement control. |
@@ -115,9 +122,9 @@ Two consequences worth stating, because they are easy to break:
 | --- | --- | --- |
 | `mode` | `"free"` or `"auto"` | `"free"` |
 | `direction` | `"horizontal"` or `"vertical"` | `"horizontal"` |
-| `spacing` | positive finite number, document units: **gap between two neighbouring node boxes** of an `Arrange` rank, and the step between adjacent automatic slots | `240` |
+| `spacing` | positive finite number, document units: **gap between two neighbouring node boxes**, of an `Arrange` rank and of two adjacent automatic slots (the step is the box extent plus `spacing`) | `240` |
 | `rankSpacing` | positive finite number, document units: distance between consecutive `Arrange` ranks | the declared `spacing` |
-| `nodeSize` | `{ width, height }`, positive finite numbers in document units: the fallback box of a node that carries no size of its own, so `Arrange` can reserve the room it takes | the strategy's `{ width: 140, height: 40 }` |
+| `nodeSize` | `{ width, height }`, positive finite numbers in document units: the fallback box of a node that carries no size of its own, which `Arrange` reserves and which the add-time step advances by | the strategy's `{ width: 140, height: 40 }` |
 | `strategy` | globally qualified strategy id | `nodera.graph-layout.layered` |
 | `drag` | `"locked"` or `"snap-back"`: what a manual drag does when the layout owns the positions (inert under `mode: "free"`) | `"locked"` |
 | `nodeTransition` | `"animated"` or `"instant"`: whether a node moves to its new position or appears there (independent of `mode`) | `"instant"` |
@@ -156,8 +163,9 @@ const builder = assertValid(
 // Add time: only the nodes without a position, in the slot the anchor or the
 // graph's extent points at.
 const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }));
-// placed.position === { x: 0, y: 0 }; with direction "vertical" the next one is
-// { x: 0, y: 160 }; with `after: placed.id` it is the slot right after `placed`.
+// placed.position === { x: 0, y: 0 }; the next unpositioned node lands at
+// { x: 0, y: 194 } — this 34-tall box plus the 160 gap, because `direction` is
+// "vertical" — and with `after: placed.id` it is the slot right after `placed`.
 ```
 
 An invalid value is a configuration problem and fails closed: `createBuilder`
@@ -205,7 +213,10 @@ last node of a short branch to the midpoint between the branches.
 The box the arithmetic reads comes from, in order: the node's own `width` /
 `height` (a hint a strategy may receive), then `nodeSize`, then the strategy's
 `{ width: 140, height: 40 }` default — the `--ndr-node-min-width` /
-`--ndr-node-min-height` token defaults of the default node renderer. `nodeSize` is
+`--ndr-node-min-height` token defaults of the default node renderer. The add-time
+placement of `mode: "auto"` measures the same two values: its step is the box
+extent of the axis it advances along plus `spacing`, so `nodeSize` and `spacing`
+mean the same thing whether a node is added or the graph is arranged. `nodeSize` is
 a **fallback**, never a measurement: it is configuration, never document data, and
 nothing about it reaches the portable document, the history or an event. The SDK
 itself passes no per-node size, because a node in `@nodera/graph-model` carries no

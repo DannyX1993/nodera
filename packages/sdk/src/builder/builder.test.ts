@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { Result } from "@nodera/contracts";
+import { ok, type Result } from "@nodera/contracts";
+import {
+  DEFAULT_LAYOUT_NODE_SIZE,
+  resolveLayoutNodeSize,
+  type GraphLayoutDiagnostic,
+  type GraphLayoutInput,
+  type GraphLayoutOptions,
+  type GraphLayoutResult,
+  type GraphLayoutStrategy,
+} from "@nodera/graph-layout";
 import { EDITOR_LAYOUT_ID, CANVAS_ONLY_LAYOUT_ID } from "@nodera/layout-engine";
 import {
   DARK_THEME,
@@ -1403,6 +1412,56 @@ describe("graph layout node size", () => {
       });
     },
   );
+
+  /**
+   * A host strategy that records the options it receives and places nothing.
+   *
+   * It is the only honest way to observe what the builder hands over: a strategy
+   * registers through the public registry, exactly like a host's.
+   */
+  function recordingStrategy(calls: GraphLayoutOptions[]): GraphLayoutStrategy {
+    return {
+      id: "acme.recording",
+      place(input: GraphLayoutInput): Result<GraphLayoutResult, GraphLayoutDiagnostic> {
+        calls.push(input.options);
+        return ok<GraphLayoutResult>({ positions: [] });
+      },
+    };
+  }
+
+  /** The options the builder hands the recording strategy on one `arrange()`. */
+  function handedOver(layout?: GraphLayoutConfiguration): GraphLayoutOptions {
+    const calls: GraphLayoutOptions[] = [];
+    const builder = create(
+      layout === undefined
+        ? { registry: { nodes: [nodeInput()] } }
+        : { registry: { nodes: [nodeInput()] }, graph: { layout } },
+    );
+    expect(builder.graphLayout.register(recordingStrategy(calls)).ok).toBe(true);
+    expect(builder.graphLayout.setDefault("acme.recording").ok).toBe(true);
+    expect(builder.graph.addNode({ type: "demo.node", nodeId: "a" }).ok).toBe(true);
+    expect(builder.graph.arrange().ok).toBe(true);
+    const options = calls[0];
+    if (options === undefined) {
+      throw new Error("expected the strategy to receive one arrange call");
+    }
+    return options;
+  }
+
+  it("hands a declared box to a host strategy and never invents one", () => {
+    expect(handedOver({ nodeSize: { width: 60, height: 20 } }).nodeSize).toEqual({
+      width: 60,
+      height: 20,
+    });
+
+    // Absent stays absent: the strategy answers it with the one shared default
+    // (`resolveLayoutNodeSize`), so the SDK never hands over a box the host did
+    // not declare.
+    const options = handedOver();
+    expect(options.nodeSize).toBeUndefined();
+    expect(Object.hasOwn(options, "nodeSize")).toBe(false);
+    expect(resolveLayoutNodeSize(options.nodeSize)).toBe(DEFAULT_LAYOUT_NODE_SIZE);
+  });
 
   it("reaches the strategy through arrange: the box drives the pitch of a rank", () => {
     const builder = create({

@@ -4,6 +4,8 @@ import type { NodePosition } from "@nodera/graph-model";
 
 import {
   createLayeredStrategy,
+  DEFAULT_LAYOUT_NODE_SIZE,
+  resolveLayoutNodeSize,
   type GraphLayoutDiagnostic,
   type GraphLayoutEdgeInput,
   type GraphLayoutNodeInput,
@@ -968,5 +970,59 @@ describe("createLayeredStrategy", () => {
     );
 
     expect(reversed).toEqual(forward);
+  });
+});
+
+/**
+ * The one default box, and the resolver that answers it.
+ *
+ * The framework has a single source for "the box the host declared, or the
+ * default": `resolveLayoutNodeSize`. The strategy reads its per-node fallback
+ * through it, and the SDK's add-time placement does the same, so a host that
+ * declares no `nodeSize` gets one box from both grids instead of two literals
+ * that happen to agree.
+ */
+describe("the shared default box", () => {
+  it("answers the declared box, or the one default object", () => {
+    // Identity, not just equality: there is one object to compare and one place
+    // to change it.
+    expect(resolveLayoutNodeSize(undefined)).toBe(DEFAULT_LAYOUT_NODE_SIZE);
+    expect(resolveLayoutNodeSize(undefined)).toEqual({ width: 140, height: 40 });
+
+    const declared = { width: 60, height: 20 };
+    expect(resolveLayoutNodeSize(declared)).toBe(declared);
+  });
+
+  it("pitches a rank by that default when the host declares no nodeSize", () => {
+    // Two nodes with no edge share one rank. `vertical` puts them side by side
+    // and the pitch reads the box `width`, so it is the default 140 plus the 60
+    // gap. A second, different default would move the second node.
+    expect(
+      placed(
+        layered.place({
+          nodes: [node("a"), node("b")],
+          edges: [],
+          options: options({ direction: "vertical", nodeSpacing: 60, nodeSize: undefined }),
+        }),
+      ),
+    ).toEqual([
+      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "b", x: 200, y: 0 },
+    ]);
+
+    // `horizontal` stacks the same rank on `y`, so the default box is read as
+    // its height: 40 plus the 60 gap.
+    expect(
+      placed(
+        layered.place({
+          nodes: [node("a"), node("b")],
+          edges: [],
+          options: options({ direction: "horizontal", nodeSpacing: 60, nodeSize: undefined }),
+        }),
+      ),
+    ).toEqual([
+      { nodeId: "a", x: 0, y: 0 },
+      { nodeId: "b", x: 0, y: 100 },
+    ]);
   });
 });

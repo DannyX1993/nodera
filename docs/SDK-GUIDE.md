@@ -271,15 +271,20 @@ deviation from the illustrative contract in `docs/FASE6-DEFINITION.md`:
 `"free"`: the framework places nothing and `NodeInstanceView.position` stays
 absent until the host sets it. `mode: "auto"` assigns a position only to the
 nodes the host left unpositioned, honouring `direction` (`"horizontal" |
-"vertical"`) and `spacing` (default 240). The slot follows the anchor the host
-names in `AddNodeRequest.after` — the first free slot **forward** of it along the
-axis, stepping by `spacing` — and, with no anchor or an anchor that carries no
-position, the end of the graph: the farthest occupied slot keeps its own row and
-the candidate starts one step past it. An empty graph starts at the origin. An
-anchor id the graph does not contain is `sdk.invalid-input` at path `after` and
-nothing is created. No mode moves a node that already carries a position, an
-explicit `position` always wins over an anchor, and no mode re-lays out an
-existing graph on add or on read: that is an explicit `Arrange` action.
+"vertical"`) and `spacing` (default 240, the **gap between two neighbouring node
+boxes**). The step between two consecutive slots is therefore the box extent of
+the axis the layout advances along plus `spacing` — the box `width` for
+`horizontal`, the `height` for `vertical` — exactly the geometry `Arrange`
+reserves: the box comes from `nodeSize` (default `{ width: 140, height: 40 }`,
+the same default the strategy uses). The slot follows the anchor the host names
+in `AddNodeRequest.after` — the first free slot **forward** of it along the axis,
+stepping by that box-plus-`spacing` step — and, with no anchor or an anchor that
+carries no position, the end of the graph: the farthest occupied slot keeps its
+own row and the candidate starts one step past it. An empty graph starts at the
+origin. An anchor id the graph does not contain is `sdk.invalid-input` at path
+`after` and nothing is created. No mode moves a node that already carries a
+position, an explicit `position` always wins over an anchor, and no mode re-lays
+out an existing graph on add or on read: that is an explicit `Arrange` action.
 
 ```ts
 const builder = assertValid(
@@ -290,7 +295,9 @@ const builder = assertValid(
 );
 
 const placed = assertValid(builder.graph.addNode({ type: "acme.http.request" }));
-// placed.position === { x: 0, y: 0 }; the next unpositioned node lands at { x: 0, y: 240 }
+// placed.position === { x: 0, y: 0 }; the next unpositioned node lands at
+// { x: 0, y: 280 } — the default 40-tall box plus the default 240 gap — because
+// `direction` is "vertical"
 
 const anchored = assertValid(
   builder.graph.addNode({ type: "acme.http.request", after: placed.id }),

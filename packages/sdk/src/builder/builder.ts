@@ -1079,27 +1079,6 @@ function resolveRemovalPolicy(
 }
 
 /**
- * Resolves the default node box a validated configuration declares.
- *
- * Absent or unusable, nothing is passed to the strategy, which is what keeps one
- * default in one place: the strategy falls back to its own box. A declared value
- * is the host's, so it wins as it is.
- */
-function resolveNodeSize(
-  configuration: GraphLayoutConfiguration | undefined,
-): GraphLayoutNodeSize | undefined {
-  const nodeSize = configuration?.nodeSize;
-  if (
-    nodeSize === undefined ||
-    !isPositiveFiniteNumber(nodeSize.width) ||
-    !isPositiveFiniteNumber(nodeSize.height)
-  ) {
-    return undefined;
-  }
-  return { width: nodeSize.width, height: nodeSize.height };
-}
-
-/**
  * Structural checks of one placement strategy the host hands in.
  *
  * `LayoutStrategyRegistry` owns duplicate and unknown ids only; a strategy
@@ -2436,7 +2415,11 @@ export function createBuilder(
     graphLayout,
     strategies,
     rankSpacing,
-    nodeSize: resolveNodeSize(declaredGraphLayout),
+    // The declared box, or nothing at all: `nodeSizeIssues` already refused an
+    // unusable one, and a host-written strategy must see `nodeSize === undefined`
+    // when the host declared none, so its own default stays the only fallback
+    // (`resolveLayoutNodeSize` in `@nodera/graph-layout`).
+    nodeSize: declaredGraphLayout?.nodeSize,
     arrangeOnChange: resolveArrangeOnChange(declaredGraphLayout),
     onRemove: resolveRemovalPolicy(declaredGraphLayout),
     viewport: resolveViewport(declaredViewport),
