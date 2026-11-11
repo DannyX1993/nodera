@@ -21,8 +21,10 @@ It does not do the following:
   opaque `unknown` values and are keyed by stable ids (`bindRenderer`);
 - execute graphs, nodes or tools — Nodera models and edits graphs and never
   interprets them;
-- own plugin manifests, dependency resolution or an activation lifecycle — the
-  Phase 6 plugin contract is authoring plus synchronous installation.
+- own plugin manifests, dependency resolution or an activation lifecycle — those
+  live in `@nodera/plugin-api` and `@nodera/plugin-manager` (Phase 7); this
+  package ships the plugin *authoring* surface (`BuilderPluginApi`) and
+  synchronous installation.
 
 A host that wants React and the React Flow canvas adds `@nodera/react-flow`, the
 React binding and the first engine adapter — the same package that owns the
@@ -1375,19 +1377,17 @@ const refused = builder.graph.addNode({ type: "acme.node" });
 builder.graph.nodeCount(); // still a number: reads never fail
 ```
 
-## Deliberately absent (Phases 7 and 8)
+## Deliberately absent
 
-Phase 6 ships the plugin *authoring contract* and synchronous installation only.
-The following do not exist and are not promised by any type here:
-
-- plugin manifests (`PluginManifest`), a registry of manifests, sdk/compatibility
-  checks, dependency resolution, load/activate/deactivate lifecycle, cross-plugin
-  conflict detection and example plugins — Phase 7;
 - `exports` maps, bundling, release automation, npm publishing, accessibility and
   i18n audits, performance work — Phase 8. Packages stay source-level
   (`main`/`types` → `./src/index.ts`, `tsc --noEmit`);
 - Vue and Angular bindings. The adapter port is designed for them; none is
   implemented.
+
+Phase 7 (plugin manifests, dependency resolution, activation lifecycle,
+conflict detection and example plugins) is delivered in `@nodera/plugin-api`,
+`@nodera/plugin-manager` and `plugins/*`; see `docs/PLUGINS.md`.
 
 The Phase 6 decisions and their rationale are recorded in
 `odd/tasks/fase6-sdk.md` (`## Decisions` D1–D21). The integration guide for a
