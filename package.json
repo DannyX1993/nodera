@@ -3,6 +3,22 @@
   "version": "0.0.0",
   "private": true,
   "description": "Generic graph editing framework: domain-agnostic, execution-agnostic, extensible by plugins.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DannyX1993/nodera.git"
+  },
+  "author": "Nodera contributors",
+  "keywords": [
+    "graph",
+    "graph-editor",
+    "graph-builder",
+    "node-editor",
+    "visual-editor",
+    "framework",
+    "react-flow",
+    "typescript"
+  ],
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=20"
