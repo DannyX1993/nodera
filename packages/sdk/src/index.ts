@@ -15,6 +15,7 @@
  */
 
 export * from "./errors.js";
+export * from "./version.js";
 export * from "./vocabulary.js";
 export * from "./view/index.js";
 export * from "./authoring/renderer-binding.js";

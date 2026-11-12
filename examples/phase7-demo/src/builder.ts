@@ -198,7 +198,7 @@ function issueSummary(issues: readonly { readonly code: string; readonly message
  * the builder untouched and this throws instead of booting a half ecosystem.
  */
 function installPlugins(builder: Builder): PluginManager {
-  const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+  const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
   const installed = manager.install(MOUNTED_PLUGINS);
   if (!installed.ok) {
     throw new Error(`The demo could not install its plugins: ${issueSummary(installed.error)}`);

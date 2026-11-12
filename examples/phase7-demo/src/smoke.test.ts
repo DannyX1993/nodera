@@ -25,7 +25,7 @@ describe("Phase 7 plugin ecosystem (real end-to-end)", () => {
     builder.events.on("plugin.deactivated", (p) => seen.push(`deactivated:${p.pluginId}`));
     builder.events.on("plugin.unregistered", (p) => seen.push(`unregistered:${p.pluginId}`));
 
-    const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+    const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
 
     const install = manager.install([
       basicNodesPlugin,

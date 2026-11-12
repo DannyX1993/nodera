@@ -30,6 +30,7 @@ import type {
 import { pluginIssue } from "@nodera/plugin-api";
 import {
   installPlugin,
+  SDK_VERSION,
   type Builder,
   type BuilderPlugin,
   type BuilderPluginApi,
@@ -198,6 +199,15 @@ export function createPluginManager(
 ): PluginManager {
   const registry = new PluginRegistry();
 
+  // The SDK's own version is the compatibility baseline (D5): a host that does
+  // not pin another version is assumed to run this exact SDK release, so a
+  // manifest's `compatibility.sdkVersion` range is always resolved against a
+  // real value. Document format/version stay host facts (no default).
+  const hostOptions: PluginManagerOptions = {
+    ...options,
+    ...(options.sdkVersion === undefined ? { sdkVersion: SDK_VERSION } : {}),
+  };
+
   function install(
     plugins: readonly PluginDefinition<BuilderPluginApi>[],
   ): Result<readonly PluginRecord[], PluginIssues> {
@@ -230,7 +240,7 @@ export function createPluginManager(
 
     // c. Validate host compatibility of every accepted manifest.
     const incompatibilities = ordered.value.flatMap((manifest) =>
-      checkCompatibility(manifest, options),
+      checkCompatibility(manifest, hostOptions),
     );
     if (incompatibilities.length > 0) return err(incompatibilities);
 

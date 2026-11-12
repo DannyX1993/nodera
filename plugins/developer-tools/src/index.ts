@@ -125,7 +125,7 @@ export const DEVELOPER_TOOLS_MANIFEST: PluginManifest = {
   description: "Two tools, two panels and one dialog contributed as declarative interface actions.",
   author: { name: "Nodera examples" },
   compatibility: {
-    sdkVersion: "^0.0.0",
+    sdkVersion: "^1.0.0",
     documentFormat: "ggd",
     documentVersion: "1.0.0",
   },

@@ -298,10 +298,10 @@ describe("plugin manager installation", () => {
     expect(manager.list()).toEqual([]);
   });
 
-  it("accepts a satisfied SDK range and skips the check when the host declares none", () => {
+  it("accepts a satisfied SDK range and defaults to the SDK version when the host declares none", () => {
     const builder = createTestBuilder();
     const compatible = createPluginManager(builder, { sdkVersion: "1.4.0" });
-    const hostUnknown = createPluginManager(createTestBuilder());
+    const hostDefault = createPluginManager(createTestBuilder());
 
     const withRange = pluginManifest({
       id: "acme.new-sdk",
@@ -313,7 +313,13 @@ describe("plugin manager installation", () => {
     });
 
     expect(compatible.install([definition(withRange, () => {})]).ok).toBe(true);
-    expect(hostUnknown.install([definition(strictRange, () => {})]).ok).toBe(true);
+    // Without a host sdkVersion the SDK's own version (1.0.0) is the baseline:
+    // a ^1.0.0 range passes, and a ^3.0.0 range is rejected.
+    expect(hostDefault.install([definition(withRange, () => {})]).ok).toBe(true);
+    const rejected = hostDefault.install([definition(strictRange, () => {})]);
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) return;
+    expect(rejected.error.map((issue) => issue.code)).toEqual(["plugin.incompatible-sdk"]);
   });
 
   it("rejects a plugin whose document format or version the host does not match", () => {

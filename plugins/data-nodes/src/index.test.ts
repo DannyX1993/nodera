@@ -45,7 +45,7 @@ function createTestBuilder(): Builder {
 describe("example.data-nodes", () => {
   it("installs and registers its properties, its validator and its importer", () => {
     const builder = createTestBuilder();
-    const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+    const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
     const activated: PluginActivatedEvent[] = [];
     builder.events.on("plugin.activated", (payload) => activated.push(payload));
 

@@ -155,7 +155,7 @@ export const DATA_NODES_MANIFEST: PluginManifest = {
     "Two property definitions, a graph validator and a newline-delimited JSON importer.",
   author: { name: "Nodera examples" },
   compatibility: {
-    sdkVersion: "^0.0.0",
+    sdkVersion: "^1.0.0",
     documentFormat: "ggd",
     documentVersion: "1.0.0",
   },

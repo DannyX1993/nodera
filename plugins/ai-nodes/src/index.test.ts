@@ -60,7 +60,7 @@ function createTestBuilder(): Builder {
 describe("example.ai-nodes", () => {
   it("installs, registers its two nodes and binds no renderer of its own", () => {
     const builder = createTestBuilder();
-    const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+    const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
     const activated: PluginActivatedEvent[] = [];
     builder.events.on("plugin.activated", (payload) => activated.push(payload));
 
@@ -109,7 +109,7 @@ describe("example.ai-nodes", () => {
 
   it("leaves the two renderer bindings to the host", () => {
     const builder = createTestBuilder();
-    const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+    const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
 
     expect(manager.install([aiNodesPlugin]).ok).toBe(true);
 
