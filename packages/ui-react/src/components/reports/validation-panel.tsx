@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties, type ReactNode } from "react";
+import { memo, useEffect, type CSSProperties, type ReactNode } from "react";
 
 import {
   VALIDATION_SEVERITIES,
@@ -8,6 +8,7 @@ import {
 
 import { useEditorCommands } from "../../bindings/editor-commands.js";
 import { useValidation } from "../../bindings/validation.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { useEditorEngine } from "../../providers/ui-provider.js";
 import {
   BORDER,
@@ -28,7 +29,7 @@ export interface ValidationPanelProps {
   readonly autoValidate?: boolean;
   /** Host handler for an element activation. Defaults to the selection commands. */
   readonly onSelectElement?: (elementId: string) => void;
-  /** Message shown when the report has no issues. */
+  /** Message shown when the report has no issues. Defaults to the catalog's `validation.empty`. */
   readonly emptyMessage?: string;
 }
 
@@ -129,10 +130,10 @@ const ELEMENT_STYLE: CSSProperties = {
   fontFamily: "var(--ndr-typography-font-family-mono, ui-monospace)",
 };
 
-const SEVERITY_LABELS: Readonly<Record<ValidationSeverity, string>> = Object.freeze({
-  error: "Errors",
-  warning: "Warnings",
-  info: "Information",
+const SEVERITY_KEYS: Readonly<Record<ValidationSeverity, string>> = Object.freeze({
+  error: "validation.severity.error",
+  warning: "validation.severity.warning",
+  info: "validation.severity.info",
 });
 
 /**
@@ -142,11 +143,15 @@ const SEVERITY_LABELS: Readonly<Record<ValidationSeverity, string>> = Object.fre
  * pipeline through the `validation.completed` event, never from rules
  * re-implemented here. Selecting an issue's element goes through the documented
  * selection commands, so the canvas and the panel agree on the selection.
+ *
+ * Memoized (S7/D10) on its own props: the panel re-renders from the validation
+ * subscription it owns, never because an unrelated host layout re-rendered.
  */
-export function ValidationPanel(props: ValidationPanelProps): ReactNode {
+function ValidationPanelImpl(props: ValidationPanelProps): ReactNode {
   const editor = useEditorEngine();
   const { report, issues, revalidate } = useValidation(editor);
   const executeCommand = useEditorCommands(editor);
+  const t = useTranslate();
   const autoValidate = props.autoValidate === true;
 
   useEffect(() => {
@@ -178,6 +183,15 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
   return (
     <div
       data-nodera-validation-panel=""
+      /*
+       * The report is announced, not only painted (S8 "ARIA"): validating is an
+       * action whose result a keyboard or screen-reader user must learn about
+       * without hunting for the panel. `polite` keeps the announcement behind
+       * the action that caused it, and `atomic` reads counts plus issues as one
+       * statement instead of a stream of fragments.
+       */
+      aria-live="polite"
+      aria-atomic="true"
       {...(props.className === undefined ? {} : { className: props.className })}
       style={PANEL_STYLE}
     >
@@ -186,7 +200,7 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
           <span
             key={severity}
             data-nodera-validation-count={severity}
-            aria-label={`${grouped[severity].length} ${severity} issues`}
+            aria-label={t("validation.count", { count: grouped[severity].length, severity })}
             style={{ ...COUNT_STYLE, ...COUNT_TONES[severity] }}
           >
             {grouped[severity].length}
@@ -196,20 +210,20 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
         <button
           type="button"
           data-nodera-validation-action="validate"
-          aria-label="Validate graph"
+          aria-label={t("validation.validate")}
           onClick={revalidate}
           style={BUTTON_STYLE}
         >
-          Validate
+          {t("validation.action")}
         </button>
       </header>
       {report === undefined ? (
         <p data-nodera-validation-status="" style={STATUS_STYLE}>
-          Not validated yet
+          {t("validation.pending")}
         </p>
       ) : issues.length === 0 ? (
         <p data-nodera-validation-empty="" style={STATUS_STYLE}>
-          {props.emptyMessage ?? "No validation issues"}
+          {props.emptyMessage ?? t("validation.empty")}
         </p>
       ) : (
         VALIDATION_SEVERITIES.filter((severity) => grouped[severity].length > 0).map((severity) => (
@@ -217,9 +231,9 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
             key={severity}
             data-nodera-validation-group={severity}
             style={GROUP_STYLE}
-            aria-label={SEVERITY_LABELS[severity]}
+            aria-label={t(SEVERITY_KEYS[severity])}
           >
-            <h3 style={GROUP_TITLE_STYLE}>{SEVERITY_LABELS[severity]}</h3>
+            <h3 style={GROUP_TITLE_STYLE}>{t(SEVERITY_KEYS[severity])}</h3>
             <ul style={LIST_STYLE}>
               {grouped[severity].map((issue, index) => (
                 <IssueRow
@@ -236,6 +250,9 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
   );
 }
 
+/** The memoized validation report panel. */
+export const ValidationPanel = memo(ValidationPanelImpl);
+
 interface IssueRowProps {
   readonly issue: ValidationIssue;
   readonly onSelectElement: (elementId: string) => void;
@@ -247,6 +264,7 @@ interface IssueRowProps {
  * issues that reference nothing selectable.
  */
 function IssueRow(props: IssueRowProps): ReactNode {
+  const t = useTranslate();
   const elementId = props.issue.elementId;
   return (
     <li
@@ -265,7 +283,7 @@ function IssueRow(props: IssueRowProps): ReactNode {
         <button
           type="button"
           data-nodera-validation-element={elementId}
-          aria-label={`Select ${elementId}`}
+          aria-label={t("validation.selectElement", { elementId })}
           onClick={() => {
             props.onSelectElement(elementId);
           }}

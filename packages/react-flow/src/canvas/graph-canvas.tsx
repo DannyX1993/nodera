@@ -52,7 +52,7 @@ import type {
   PortsPolicy,
 } from "@nodera/ui-core";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
-import { useEdgeInsertActions, useNoderaUi } from "@nodera/ui-react";
+import { useEdgeInsertActions, useNoderaUi, useShortcuts, useTranslate } from "@nodera/ui-react";
 import { NoderaWaypointEditingProvider, NoderaPortAxisProvider } from "./editor-context.js";
 import {
   moveNode,
@@ -67,7 +67,11 @@ import {
   validateConnection as validateConnectionUseCase,
 } from "@nodera/application";
 
-import { useEditorGraph } from "./use-editor-graph.js";
+import {
+  applyEdgeSelection,
+  applyNodeSelection,
+  useEditorGraph,
+} from "./use-editor-graph.js";
 import { useNodeTypes } from "./custom-node.js";
 import { isNodeDefinitionDrag, nodeDefinitionFromDataTransfer } from "./definition-drop.js";
 import { NoderaEditorProvider } from "./editor-context.js";
@@ -308,8 +312,14 @@ export const NODE_TRANSITION_STYLE = `
 /*  Edge insert affordance (S6)                                        */
 /* ------------------------------------------------------------------ */
 
-/** Accessible name of the framework's "+" button. */
-export const EDGE_INSERT_LABEL = "Insert node";
+/**
+ * Accessible name of the framework's "+" button role.
+ *
+ * The affordances read their accessible name from the active locale catalog
+ * (`canvas.insertNode`, S8 "Textos traducibles"); this key documents the
+ * message a host overrides when it renames the affordance.
+ */
+export const EDGE_INSERT_LABEL_KEY = "canvas.insertNode";
 
 /**
  * Style of the affordance button.
@@ -352,12 +362,13 @@ export interface DefaultEdgeInsertButtonProps {
  */
 export function DefaultEdgeInsertButton(props: DefaultEdgeInsertButtonProps): ReactNode {
   const insert = useEdgeInsertActions();
+  const t = useTranslate();
 
   return (
     <button
       type="button"
       data-nodera-edge-insert=""
-      aria-label={EDGE_INSERT_LABEL}
+      aria-label={t(EDGE_INSERT_LABEL_KEY)}
       aria-haspopup="dialog"
       style={EDGE_INSERT_BUTTON_STYLE}
       onClick={(event) => {
@@ -1022,13 +1033,14 @@ export function canvasPlaceholders(
  */
 function PhantomInsertButton(props: { readonly anchorId: string | undefined }): ReactNode {
   const { store } = useNoderaUi();
+  const t = useTranslate();
 
   return (
     <button
       type="button"
       data-nodera-phantom-insert=""
       data-nodera-phantom-insert-for={props.anchorId ?? ""}
-      aria-label={EDGE_INSERT_LABEL}
+      aria-label={t(EDGE_INSERT_LABEL_KEY)}
       aria-haspopup="dialog"
       style={EDGE_INSERT_BUTTON_STYLE}
       onClick={(event) => {
@@ -1629,6 +1641,19 @@ export interface GraphCanvasProps {
   readonly showMinimap?: boolean;
   /** Show the zoom/pan controls. */
   readonly showControls?: boolean;
+  /**
+   * Let React Flow mount only the nodes and edges inside the viewport (S7).
+   *
+   * On by default, which is the documented performance configuration for large
+   * graphs (`docs/PRODUCT-DESCRIPTION.md` §11.1): elements the camera cannot see
+   * are not mounted, so a large graph costs what the visible region costs. It is
+   * a boolean prop, never a heuristic, because a host that measures or paints
+   * away from the viewport (a print/export surface, a headless renderer, a
+   * canvas whose container has no measurable size yet) needs every element
+   * mounted and only the host knows that. Turning it off restores the previous
+   * behaviour byte for byte: every element is mounted whatever the camera frames.
+   */
+  readonly onlyRenderVisibleElements?: boolean;
   /** Color mode of the canvas chrome ("system" follows the OS). */
   readonly colorMode?: "light" | "dark" | "system";
   /** Optional callback for node changes (position, remove, etc). */
@@ -1659,7 +1684,9 @@ export interface GraphCanvasProps {
  *
  * Controlled-flow rules:
  *   - The engine is the single source of truth; nodes/edges are derived
- *     from it (with engine selection merged in) on every relevant event.
+ *     from it on every event that changes the document, and the engine
+ *     selection is applied on top of them as a separate, last step (S7).
+ *     Selection is editor state, so it never re-derives the graph.
  *   - Measured node dimensions are applied back onto the derived nodes
  *     (guarded by `hasNewDimensions` so identical re-measurements never
  *     trigger a re-render — otherwise the controlled flow loops forever).
@@ -1690,6 +1717,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   layoutDirection = "horizontal",
   layoutRankSpacing,
   layoutNodeSpacing,
+  onlyRenderVisibleElements = true,
   renderEdgeInsert,
   renderPlaceholder,
   className,
@@ -1704,8 +1732,21 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   onLinkValidate: externalOnLinkValidate,
   onDropNodeDefinition: externalOnDropNodeDefinition,
 }) => {
+  // The host's deletion key comes from the shortcut contract (S8 "Atajos
+  // configurables"); React Flow takes the key itself, so the canvas passes the
+  // configured one instead of a literal list of its own.
+  const deleteKey = useShortcuts()["delete-selection"].key;
+  const deleteKeyCode: string | string[] =
+    typeof deleteKey === "string" ? deleteKey : [...deleteKey];
+
   // Derive RF nodes/edges/selection from engine via event-driven hook.
-  const { nodes, edges, refresh } = useEditorGraph(editor);
+  //
+  // Two derivations, deliberately kept apart (S7): `nodes`/`edges` are the
+  // document, rebuilt only when the graph changes, and the selection arrives on
+  // its own channel. Folding the selection into the elements is what made a
+  // single click re-create every node and edge of the graph.
+  const { nodes, edges, selectedNodeIds, selectedEdgeIds, refresh } =
+    useEditorGraph(editor);
 
   // nodeTypes: wrapper components that resolve the definition renderer
   // and ALWAYS render the port handles (via useNodeTypes/createNodeType).
@@ -1748,6 +1789,25 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
         node.type !== undefined && nodeTypes[node.type] ? node : { ...node, type: DEFAULT_NODE_RENDERER_ID },
       ),
     [nodesWithDrag, nodeTypes],
+  );
+
+  // What the engine selects, painted onto the derived elements (S7).
+  //
+  // React Flow's controlled model reads `selected` off the node/edge it is
+  // given, so the highlight cannot be dropped — but the cost has to follow the
+  // selection, not the graph. It is applied as the LAST step of the pipeline, on
+  // top of the already derived elements, so a click re-runs neither the document
+  // derivation nor the measured-dimension / drag / node-type passes: with an
+  // unchanged selection `applyNodeSelection` returns the very same array, and
+  // otherwise it re-creates only the elements whose flag changed (every other
+  // element keeps its identity, so its memoized renderer bails out).
+  const nodesForReactFlow = useMemo(
+    () => applyNodeSelection(nodesWithTypes, selectedNodeIds),
+    [nodesWithTypes, selectedNodeIds],
+  );
+  const edgesForReactFlow = useMemo(
+    () => applyEdgeSelection(edges, selectedEdgeIds),
+    [edges, selectedEdgeIds],
   );
 
   const edgeSources = useMemo(
@@ -2064,32 +2124,29 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
     [editor, refresh],
   );
 
-  // Edge click handler: selection → selectEdge. `selectEdge` now emits
-  // `selection.changed` (D5) for panels, but the canvas deliberately keeps
-  // its own `refresh()`: re-deriving from that event would make React Flow
-  // re-emit its own selection change and re-enter this loop (the phase-4
-  // selection ping-pong documented in the feature log).
+  // Edge click handler: selection → selectEdge.
+  //
+  // `selectEdge` emits `selection.changed`, which is the channel the hook
+  // follows, so the highlight arrives without a forced re-derivation: an event
+  // that only moves the selection must not rebuild the graph (S7/D10).
   const handleEdgeClick = useCallback(
     (event: MouseEvent, edge: RfEdge) => {
       if (externalOnEdgeClick) {
         externalOnEdgeClick(event, edge);
       }
       selectEdge(editor, { edgeId: edge.id });
-      refresh();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor, refresh],
+    [editor],
   );
 
   // Clicking the pane clears the selection. `clearSelection` emits
-  // `selection.changed` (D5) for panels, but the canvas still re-derives
-  // locally for the same reason as `handleEdgeClick`: refreshing on that
-  // event re-enters React Flow's selection emission.
+  // `selection.changed`, so the cleared flags reach React Flow through the same
+  // selection channel the hook follows, again without re-deriving the graph.
   const handlePaneClick = useCallback(() => {
     clearSelection(editor);
-    refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, refresh]);
+  }, [editor]);
 
   // Box/multi selection (selectionKeyCode drag, meta-click) → engine.
   // Replaces the whole engine selection with RF's current one. No refresh:
@@ -2131,12 +2188,13 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
           <style data-nodera-node-transition="">{NODE_TRANSITION_STYLE}</style>
         )}
         <ReactFlow
-          nodes={nodesWithTypes}
-          edges={edges}
+          nodes={nodesForReactFlow}
+          edges={edgesForReactFlow}
+          onlyRenderVisibleElements={onlyRenderVisibleElements}
           onInit={handleInit}
           nodeTypes={nodeTypes as unknown as NodeTypes}
           edgeTypes={edgeTypes}
-          deleteKeyCode={["Delete", "Backspace"]}
+          deleteKeyCode={deleteKeyCode}
           // Deletion keeps the canvas' hands off the edges that hang on the
           // removed nodes: their fate is the use case's decision, not React
           // Flow's. Under "detach" `removeNode` takes them with the node in one

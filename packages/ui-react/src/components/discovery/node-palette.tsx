@@ -1,9 +1,10 @@
-import { useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
+import { memo, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
 
 import type { NodeDefinition } from "@nodera/node-registry";
 import { NODE_DEFINITION_MIME_TYPE } from "@nodera/ui-core";
 
 import { useEditorCommands } from "../../bindings/editor-commands.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { useEditorEngine } from "../../providers/ui-provider.js";
 import {
   BUTTON_STYLE,
@@ -27,7 +28,7 @@ export interface NodePaletteProps {
    * or confirmation supplies its own handler (S2: the host decides).
    */
   readonly onAddNode?: (definitionId: string) => void;
-  /** Copy shown when no definition matches. Defaults to `No node definitions`. */
+  /** Copy shown when no definition matches. Defaults to the catalog's `palette.empty`. */
   readonly emptyMessage?: string;
   /**
    * Definitions to offer. Defaults to the live editor registry, which is what a
@@ -156,10 +157,18 @@ function visibleGroups(
  * category and lets the host either place nodes itself (`onAddNode`) or accept
  * the framework default (`add-node`). It imposes no width, position or layout:
  * the host puts it wherever it wants (S2).
+ *
+ * Memoized (S7/D10). Its own props are primitives; the one unstable prop in the
+ * framework composition is the dialog's `onAddNode` arrow
+ * (`node-creation-dialog.tsx`), which re-creates the callback on a dialog
+ * re-render. The memo is kept because it still bails out for the compositions
+ * that pass no callback at all (the default `<NodePalette />`) or a stable one,
+ * and because the dialog's parent is outside this surface to restructure.
  */
-export function NodePalette(props: NodePaletteProps): ReactNode {
+function NodePaletteImpl(props: NodePaletteProps): ReactNode {
   const editor = useEditorEngine();
   const executeCommand = useEditorCommands(editor);
+  const t = useTranslate();
   const [filter, setFilter] = useState("");
 
   const definitions = props.definitions;
@@ -190,8 +199,8 @@ export function NodePalette(props: NodePaletteProps): ReactNode {
       {offersDefinitions ? (
         <input
           type="search"
-          aria-label="Search nodes"
-          placeholder="Search nodes"
+          aria-label={t("palette.search")}
+          placeholder={t("palette.search")}
           value={filter}
           onChange={(event) => {
             setFilter(event.target.value);
@@ -214,7 +223,7 @@ export function NodePalette(props: NodePaletteProps): ReactNode {
                 <button
                   type="button"
                   data-nodera-palette-item={definition.id}
-                  aria-label={`Add ${definition.name}`}
+                  aria-label={t("palette.addNode", { name: definition.name })}
                   draggable
                   onDragStart={(event) => {
                     writeDefinitionPayload(event, definition.id);
@@ -241,9 +250,12 @@ export function NodePalette(props: NodePaletteProps): ReactNode {
       ))}
       {groups.length === 0 ? (
         <p data-nodera-palette-empty="" style={EMPTY_STYLE}>
-          {props.emptyMessage ?? "No node definitions"}
+          {props.emptyMessage ?? t("palette.empty")}
         </p>
       ) : null}
     </div>
   );
 }
+
+/** The memoized node-definition palette. */
+export const NodePalette = memo(NodePaletteImpl);

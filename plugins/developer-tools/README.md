@@ -25,7 +25,7 @@ import { assertValid, createBuilder } from "@nodera/sdk";
 import { developerToolsPlugin, SHORTCUTS_DIALOG_ID } from "@nodera/developer-tools";
 
 const builder = assertValid(createBuilder());
-const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
 
 const installed = manager.install([developerToolsPlugin]);
 if (installed.ok) {

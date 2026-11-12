@@ -28,7 +28,7 @@ import { assertValid, createBuilder } from "@nodera/sdk";
 import { dataNodesPlugin, JSON_LINES_FORMAT } from "@nodera/data-nodes";
 
 const builder = assertValid(createBuilder());
-const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
 
 const installed = manager.install([dataNodesPlugin]);
 if (!installed.ok) {

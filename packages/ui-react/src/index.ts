@@ -47,6 +47,7 @@ export * from "./components/overlay/create-node-button.js";
 export * from "./components/reports/validation-panel.js";
 export * from "./components/reports/history-panel.js";
 export * from "./providers/ui-provider.js";
+export * from "./providers/locale-provider.js";
 export * from "./providers/theme-provider.js";
 export * from "./bindings/ui-state-actions.js";
 export * from "./bindings/dialog-actions.js";

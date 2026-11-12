@@ -4,6 +4,7 @@ import type { Edge, Node } from "@nodera/graph-model";
 
 import { useEditorSnapshot } from "../../bindings/editor-snapshot.js";
 import { useGraphQueries, type GraphQueries } from "../../bindings/graph-queries.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { useEditorEngine } from "../../providers/ui-provider.js";
 import {
   HEADING_STYLE,
@@ -28,7 +29,6 @@ export interface InspectorPanelProps {
   readonly showRawProperties?: boolean;
 }
 
-const EMPTY_MESSAGE = "Select a node or edge to inspect";
 /** Formats one metadata or property value for the read-only text rows. */
 function displayValue(value: unknown): string {
   if (value === undefined) {
@@ -91,6 +91,7 @@ function NodeInspector(props: {
   readonly showRawProperties: boolean;
   readonly className: string | undefined;
 }): ReactNode {
+  const t = useTranslate();
   const { node } = props;
   const definition = props.queries.nodeDefinition(node.definitionId);
   const version = definition?.version ?? node.definitionVersion;
@@ -114,7 +115,7 @@ function NodeInspector(props: {
         <MetadataRows metadata={node.metadata} />
       </dl>
       <section data-nodera-inspector-section="ports" style={SECTION_STYLE}>
-        <h4 style={HEADING_STYLE}>Ports</h4>
+        <h4 style={HEADING_STYLE}>{t("inspector.ports")}</h4>
         <ul style={LIST_STYLE}>
           {node.getPorts().map((port) => {
             const declaration = declarations.find(
@@ -142,7 +143,7 @@ function NodeInspector(props: {
       </section>
       {props.showRawProperties ? (
         <section data-nodera-inspector-section="properties" style={SECTION_STYLE}>
-          <h4 style={HEADING_STYLE}>Properties</h4>
+          <h4 style={HEADING_STYLE}>{t("inspector.properties")}</h4>
           <pre data-nodera-inspector-raw-properties="" style={RAW_STYLE}>
             {JSON.stringify(node.getProperties(), null, 2)}
           </pre>
@@ -186,6 +187,7 @@ function EdgeInspector(props: {
  */
 export function InspectorPanel(props: InspectorPanelProps): ReactNode {
   const editor = useEditorEngine();
+  const t = useTranslate();
   const snapshot = useEditorSnapshot(editor);
   const queries = useGraphQueries(editor);
   const showRawProperties = props.showRawProperties !== false;
@@ -218,7 +220,7 @@ export function InspectorPanel(props: InspectorPanelProps): ReactNode {
   return (
     <div {...rootProps(props.className, "none")}>
       <p data-nodera-inspector-empty="" style={MUTED_STYLE}>
-        {EMPTY_MESSAGE}
+        {t("inspector.empty")}
       </p>
     </div>
   );

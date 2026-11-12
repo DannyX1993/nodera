@@ -187,6 +187,19 @@ describe("ValidationPanel", () => {
     expect(required(container, "[data-nodera-validation-element]").tagName).toBe("BUTTON");
   });
 
+  it("announces the validation results politely", () => {
+    const { container } = renderWithUi(<ValidationPanel />, { editor: editorWithRequiredError() });
+
+    fireEvent.click(required(container, '[data-nodera-validation-action="validate"]'));
+
+    // The report region is a live region, so assistive technology reads the
+    // counts and the issues a validation produced without a focus change.
+    const panel = required<HTMLElement>(container, "[data-nodera-validation-panel]");
+    expect(panel.getAttribute("aria-live")).toBe("polite");
+    expect(panel.getAttribute("aria-atomic")).toBe("true");
+    expect(issueRows(panel)).toHaveLength(1);
+  });
+
   it("validates on mount and on every graph change when autoValidate is on", () => {
     const editor = createActionEditor();
     const { container } = renderWithUi(<ValidationPanel autoValidate />, { editor });

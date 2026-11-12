@@ -278,7 +278,7 @@ import { basicNodesPlugin } from "@nodera/basic-nodes";
 
 const builder = assertValid(createBuilder());
 // `sdkVersion` es la versión del SDK que este host ejecuta.
-const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
 
 const installed = manager.install([basicNodesPlugin]);
 if (!installed.ok) {

@@ -3,6 +3,22 @@
   "version": "0.0.0",
   "private": true,
   "description": "Generic graph editing framework: domain-agnostic, execution-agnostic, extensible by plugins.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DannyX1993/nodera.git"
+  },
+  "author": "Nodera contributors",
+  "keywords": [
+    "graph",
+    "graph-editor",
+    "graph-builder",
+    "node-editor",
+    "visual-editor",
+    "framework",
+    "react-flow",
+    "typescript"
+  ],
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=20"
@@ -12,11 +28,17 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "check:architecture": "node scripts/check-architecture.mjs",
-    "lint": "turbo run lint",
-    "clean": "turbo run clean"
+    "lint": "eslint .",
+    "clean": "turbo run clean",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.1",
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
     "turbo": "^2.3.3",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.72.2"
   }
 }

@@ -369,6 +369,7 @@ const SUPPORTED_EXPORTS = [
   "RENDERER_KINDS",
   "SDK_EVENT_NAMES",
   "SDK_ISSUE_CODES",
+  "SDK_VERSION",
   "SUPPORTED_FEATURES",
   "SdkAssertionError",
   "assertOk",

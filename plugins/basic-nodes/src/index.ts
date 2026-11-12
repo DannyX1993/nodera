@@ -98,7 +98,7 @@ export const BASIC_NODES_MANIFEST: PluginManifest = {
   description: "Two node definitions and one edge definition contributed through the public plugin api.",
   author: { name: "Nodera examples" },
   compatibility: {
-    sdkVersion: "^0.0.0",
+    sdkVersion: "^1.0.0",
     documentFormat: "ggd",
     documentVersion: "1.0.0",
     definitionVersions: {

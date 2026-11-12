@@ -31,7 +31,7 @@ import { assertValid, createBuilder } from "@nodera/sdk";
 import { basicNodesPlugin } from "@nodera/basic-nodes";
 
 const builder = assertValid(createBuilder());
-const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
 
 const installed = manager.install([basicNodesPlugin]);
 // installed.value[0].contributionIds === the three ids above, in registration order

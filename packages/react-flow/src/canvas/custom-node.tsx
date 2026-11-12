@@ -1,4 +1,4 @@
-import { type FC, type ComponentType, type ReactNode, useEffect, useMemo } from "react";
+import { type FC, type ComponentType, type ReactNode, memo, useEffect, useMemo } from "react";
 
 import { useUpdateNodeInternals } from "@xyflow/react";
 
@@ -155,6 +155,11 @@ function usePortInternalsReporter(
  * rendering: a custom node renderer gets ports for free and ports are
  * never duplicated.
  *
+ * The returned component is memoized (S7/D10): React Flow hands a node the
+ * identity and flags of that one node, so a canvas re-render that changes none
+ * of them — another node moving, panning, another element being selected — no
+ * longer re-renders this wrapper nor the renderer body it resolves.
+ *
  * @param registry - the node renderer registry (may be undefined)
  * @param portRendererRegistry - the port renderer registry (may be undefined)
  * @returns a React Flow node type component
@@ -163,11 +168,11 @@ export function createNodeType(
   registry?: NodeRendererRegistry,
   portRendererRegistry?: PortRendererRegistry,
 ): ComponentType<NoderaNodeComponentProps> {
-  return function NoderaNodeRendererComponent({
+  const NodeTypeComponent: FC<NoderaNodeComponentProps> = ({
     id,
     data,
     selected,
-  }: NoderaNodeComponentProps): ReactNode {
+  }: NoderaNodeComponentProps) => {
     // Determine the renderer id from extended data.
     const rendererId = (data as NoderaNodeDataWithRenderer).rendererId;
 
@@ -199,6 +204,8 @@ export function createNodeType(
       </>
     );
   };
+
+  return memo(NodeTypeComponent);
 }
 
 /* ------------------------------------------------------------------ */
@@ -211,13 +218,21 @@ export function createNodeType(
  *
  * This component is intended for direct use in tests or in host
  * applications that do not use the factory pattern.
+ *
+ * Memoized like the factory output (S7/D10).
  */
 export const NoderaNodeRenderer: FC<
   NoderaNodeComponentProps & {
     nodeRendererRegistry?: NodeRendererRegistry;
     portRendererRegistry?: PortRendererRegistry;
   }
-> = ({ id, data, selected, nodeRendererRegistry, portRendererRegistry }) => {
+> = memo(function NoderaNodeRenderer({
+  id,
+  data,
+  selected,
+  nodeRendererRegistry,
+  portRendererRegistry,
+}) {
   // Determine the renderer id from extended data.
   const rendererId = (data as NoderaNodeDataWithRenderer).rendererId;
 
@@ -243,7 +258,7 @@ export const NoderaNodeRenderer: FC<
       <RendererComponent data={data} selected={selected} />
     </>
   );
-};
+});
 
 /* ------------------------------------------------------------------ */
 /*  Hook: build nodeTypes from registry                                */

@@ -8,9 +8,10 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import type { FC, CSSProperties, PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useCallback, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 
 import type { EdgeGeometry } from "@nodera/edge-registry";
+import { useTranslate } from "@nodera/ui-react";
 
 import { edgeStyleHintsFromData } from "./edge-options.js";
 import { useNoderaEditor, useNoderaWaypointEditing } from "../canvas/editor-context.js";
@@ -353,8 +354,14 @@ const WAYPOINT_HANDLE_ACTIVE_STYLE: CSSProperties = {
  * Dragging a handle commits once on drag end through
  * {@link updateEdgeWaypoints}.  Double-clicking a handle removes it.
  * Double-clicking the edge path creates a new waypoint at the grab point.
+ *
+ * Wrapped in `React.memo` (S7/D10). React Flow hands an edge the geometry and
+ * flags of that one edge, so a canvas re-render that changes none of them — any
+ * other node moving, panning, another element being selected — no longer
+ * re-renders this path. The renderer still re-renders on its own when the
+ * document changes, through the `useEditorGraph` subscription below.
  */
-export const DefaultEdgeRenderer: FC<EdgeProps> = ({
+const DefaultEdgeRendererImpl: FC<EdgeProps> = ({
   sourceX,
   sourceY,
   targetX,
@@ -371,6 +378,7 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
 }) => {
   // --- Context: read editor, waypoints and gesture gate ---
   const editor = useNoderaEditor();
+  const t = useTranslate();
   const waypointEditingEnabled = useNoderaWaypointEditing();
 
   // Read waypoints from edge data; the mapper puts them here from the domain.
@@ -659,7 +667,7 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
                 data-nodera-waypoint-index={index}
                 data-nodera-waypoint-id={`${id}-wp-${index}`}
                 role="button"
-                aria-label={`Waypoint ${index + 1}: drag to move, double-click to remove, arrow keys to nudge, Delete to remove`}
+                aria-label={t("canvas.waypoint", { index: index + 1 })}
                 tabIndex={0}
                 style={{
                   width: "16px",
@@ -710,5 +718,13 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
 /* ------------------------------------------------------------------ */
 /*  Re-export for consumers                                            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * The default Nodera edge, memoized on React Flow's edge props.
+ *
+ * See {@link DefaultEdgeRendererImpl} for the renderer itself; the identity is
+ * stable so a parent re-render with unchanged props reuses the previous render.
+ */
+export const DefaultEdgeRenderer: FC<EdgeProps> = memo(DefaultEdgeRendererImpl);
 
 export { defaultEdgeOptionsFromVisual, type EdgeOptions } from "./edge-options.js";

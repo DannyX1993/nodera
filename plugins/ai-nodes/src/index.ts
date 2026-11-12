@@ -87,7 +87,7 @@ export const AI_NODES_MANIFEST: PluginManifest = {
   description: "Two node definitions; the host binds the components that paint them.",
   author: { name: "Nodera examples" },
   compatibility: {
-    sdkVersion: "^0.0.0",
+    sdkVersion: "^1.0.0",
     documentFormat: "ggd",
     documentVersion: "1.0.0",
     definitionVersions: {

@@ -45,7 +45,7 @@ function createTestBuilder(): Builder {
 describe("example.kitchen-sink", () => {
   it("installs and registers its theme, layout, layout strategy and exporter", () => {
     const builder = createTestBuilder();
-    const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+    const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
     const activated: PluginActivatedEvent[] = [];
     builder.events.on("plugin.activated", (payload) => activated.push(payload));
 

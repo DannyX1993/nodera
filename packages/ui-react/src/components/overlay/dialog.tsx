@@ -22,6 +22,7 @@ import {
   SURFACE_STYLE,
   TEXT_STYLE,
 } from "../shell/styles.js";
+import { useShortcuts } from "../../providers/ui-provider.js";
 
 /** Base class of the rendered dialog panel. */
 export const DIALOG_BASE_CLASS = "nodera-dialog";
@@ -118,8 +119,9 @@ export interface DialogProps {
  * definition title, the description is wired with `aria-describedby` when the
  * definition declares one, focus moves to the first control on open, `Tab` and
  * `Shift+Tab` wrap inside the panel, and focus returns to the element that had
- * it before opening. `Escape` and a backdrop click close the dialog **only**
- * when the definition is dismissible.
+ * it before opening. The dismissal key comes from the `close-overlay` shortcut
+ * (`Escape` by default, rebindable by the host); a backdrop click closes the
+ * dialog too, and both close it **only** when the definition is dismissible.
  *
  * The component owns no state: it renders what the host tells it to render and
  * reports dismissal through `onClose`, so the UI store stays the single source
@@ -134,6 +136,8 @@ export function Dialog(props: DialogProps): ReactNode {
   const restoreRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const descriptionId = useId();
+  const closeKey = useShortcuts()["close-overlay"].key;
+  const closeKeys = Array.isArray(closeKey) ? closeKey : [closeKey];
   const open = props.open;
 
   useEffect(() => {
@@ -165,7 +169,7 @@ export function Dialog(props: DialogProps): ReactNode {
   const description = definition.description;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === "Escape") {
+    if (closeKeys.includes(event.key)) {
       if (defaults.dismissible) {
         props.onClose();
       }

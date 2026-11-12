@@ -1348,6 +1348,14 @@ generic-graph-builder/
 
 No es obligatorio publicar cada directorio como paquete npm independiente. La estructura física puede agrupar módulos internos, mientras que la API pública mantiene límites claros.
 
+> **Estado real del árbol (Fase 8):** `apps/playground`, `apps/documentation` y
+> `apps/dev-tools` son placeholders (solo `package.json` privado, sin código), y
+> los ejemplos `examples/workflow-builder`, `examples/data-pipeline-builder` y
+> `examples/agent-builder` aún no existen (directorios vacíos/placeholder). Los
+> paquetes `packages/core`, `packages/testing`, `packages/adapter-storage-local` y
+> `packages/adapter-storage-http` también son placeholders privados sin fuente. El
+> resto de `packages/*` está implementado y publicable (Fase 8).
+
 ## 7.1. Dependencias
 
 Las dependencias deben seguir esta dirección:

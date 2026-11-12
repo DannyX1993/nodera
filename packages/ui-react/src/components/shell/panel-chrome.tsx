@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 
+import { useTranslate } from "../../providers/locale-provider.js";
 import {
   BUTTON_STYLE,
   BORDER,
@@ -83,6 +84,7 @@ const BODY_STYLE: CSSProperties = {
  * appears when the panel is hideable *and* the host wired a handler.
  */
 export function PanelChrome(props: PanelChromeProps): ReactNode {
+  const t = useTranslate();
   const onHide = props.onHide;
   const showHide = props.hideable === true && onHide !== undefined;
 
@@ -100,7 +102,7 @@ export function PanelChrome(props: PanelChromeProps): ReactNode {
         {showHide ? (
           <button
             type="button"
-            aria-label={`Hide ${props.title}`}
+            aria-label={t("panel.hide", { title: props.title })}
             onClick={onHide}
             style={BUTTON_STYLE}
           >

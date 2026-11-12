@@ -209,7 +209,7 @@ export const KITCHEN_SINK_MANIFEST: PluginManifest = {
   description: "A theme, a layout, a layout strategy and an exporter in one plugin.",
   author: { name: "Nodera examples" },
   compatibility: {
-    sdkVersion: "^0.0.0",
+    sdkVersion: "^1.0.0",
     documentFormat: "ggd",
     documentVersion: "1.0.0",
   },

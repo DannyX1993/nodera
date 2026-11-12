@@ -46,7 +46,7 @@ function createTestBuilder(): Builder {
 describe("example.basic-nodes", () => {
   it("installs and registers its nodes and its edge", () => {
     const builder = createTestBuilder();
-    const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+    const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
     const activated: PluginActivatedEvent[] = [];
     builder.events.on("plugin.activated", (payload) => activated.push(payload));
 
