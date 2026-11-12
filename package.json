@@ -29,9 +29,12 @@
     "typecheck": "turbo run typecheck",
     "check:architecture": "node scripts/check-architecture.mjs",
     "lint": "eslint .",
-    "clean": "turbo run clean"
+    "clean": "turbo run clean",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.1",
     "@eslint/js": "^9.39.5",
     "eslint": "^9.39.5",
     "turbo": "^2.3.3",
