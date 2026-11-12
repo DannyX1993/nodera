@@ -1,6 +1,7 @@
 {
   "name": "@nodera/plugin-manager",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Plugin infrastructure for the Nodera plugin ecosystem: manifest validation, dependency resolution, conflict detection and the plugin lifecycle manager.",
   "main": "./dist/index.js",

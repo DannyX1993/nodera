@@ -1,6 +1,7 @@
 {
   "name": "@nodera/layout-engine",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Framework-agnostic layout model, geometry and preference persistence for Nodera",
   "main": "./dist/index.js",

@@ -1,6 +1,7 @@
 {
   "name": "@nodera/edge-registry",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Edge definitions (visual presentation separated from relation semantics) and the EdgeRegistry.",
   "main": "./dist/index.js",

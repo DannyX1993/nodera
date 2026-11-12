@@ -3,8 +3,8 @@
  *
  * One `createBuilder` call composes the whole host: the React Flow adapter, the
  * node vocabulary and the initial placement policy. The demo imports only
- * `@nodera/sdk` and the two React packages, so nothing here reaches an internal
- * Nodera module.
+ * `@nodera/sdk` and `@nodera/react`, so nothing here reaches an internal Nodera
+ * module.
  *
  * The graph is seeded **without positions on purpose**: `mode: "auto"` places
  * those nodes on a deterministic grid at add time, and the explicit `Arrange`
@@ -24,7 +24,7 @@ import type {
   SdkIssues,
   ViewportConfiguration,
 } from "@nodera/sdk";
-import { createReactFlowAdapter } from "@nodera/react-flow";
+import { createReactFlowAdapter } from "@nodera/react";
 
 import {
   DEMO_NODES,

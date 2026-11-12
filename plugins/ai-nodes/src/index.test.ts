@@ -9,7 +9,7 @@
  * the host's half of the contract (`builder.bindRenderer`). The cases below pin
  * that split — the plugin registers definitions, the host attaches components —
  * which is what lets a builder with this plugin installed be mounted by
- * `@nodera/react-flow` (its `createRendererSet` rejects a binding that is not a
+ * `@nodera/react` (its `createRendererSet` rejects a binding that is not a
  * React component).
  *
  * Every case composes a fresh builder on purpose: the SDK remembers the plugin
@@ -18,9 +18,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import { createPluginManager, validatePluginManifest } from "@nodera/plugin-manager";
 import {
   createBuilder,
+  createPluginManager,
+  validatePluginManifest,
   type Builder,
   type PluginActivatedEvent,
   type PluginUnregisteredEvent,

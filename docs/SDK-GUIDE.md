@@ -5,7 +5,7 @@ packages. This document covers how to go from nothing to a rendered editor, whic
 public name means what, and what the framework deliberately does not do yet.
 
 The package-level detail lives in `packages/sdk/README.md` and
-`packages/react-flow/README.md`; the executable proof lives in
+`packages/react/README.md`; the executable proof lives in
 `examples/phase6-demo`.
 
 ## What the SDK is
@@ -26,12 +26,15 @@ Three properties define it:
 - **Execution-free.** Nodera models and edits graphs; it never runs nodes, tools
   or workflows. A graph is data.
 
-`@nodera/react-flow` is the first binding: React components that read a
-builder, plus the React Flow engine adapter. The same package also owns the
-canvas adapter those components render (`GraphCanvas`, the renderer registries
-and the default renderers), which is why both layers ship together. A host that
-renders a UI imports the SDK *and* a binding; a host that only builds graphs,
-documents or definitions imports the SDK alone.
+`@nodera/react` is the first binding: one published package that bundles the
+framework-free SDK, the React components that read a builder, the React Flow
+engine adapter and the React presentation layer. The canvas layer
+(`GraphCanvas`, the renderer registries, the default renderers) ships with the
+binding because the binding is written against its types. A host that renders a UI
+installs `@nodera/react` (plus React and `@xyflow/react`); a host that only
+builds graphs, documents or definitions installs `@nodera/sdk` alone and stays
+framework-free. A different framework means a different binding package over the
+same SDK — never a change in the core.
 
 ### The three integration levels
 
@@ -42,7 +45,7 @@ SDK:
 | --- | --- | --- |
 | 1. Theme | Registers token data and applies it | `builder.theme.register` / `setDefault` |
 | 2. Component replacement | Replaces a node, edge, port, property, panel, toolbar or menu renderer | `renderer` / `component` on a definition, `builder.bindRenderer` |
-| 3. UI composition | Builds its own interface instead of the default editor | `NoderaBuilderProvider` + `@nodera/ui-react` / the canvas layer of `@nodera/react-flow` |
+| 3. UI composition | Builds its own interface instead of the default editor | `NoderaBuilderProvider` + the presentation and canvas layers of `@nodera/react` |
 
 Two hosts can use the same core and present radically different editors; the graph
 semantics do not change.
@@ -63,7 +66,7 @@ import {
   type LayoutDefinition,
   type NodeDefinitionInput,
 } from "@nodera/sdk";
-import { createReactFlowAdapter } from "@nodera/react-flow";
+import { createReactFlowAdapter } from "@nodera/react";
 
 // --- Node API: `type` is the identity, `label` the display name ----------
 const HTTP_REQUEST: NodeDefinitionInput = {
@@ -184,7 +187,7 @@ export function createAppBuilder(): Builder {
 ```tsx
 // --- React binding: mount one component ----------------------------------
 import { createRoot } from "react-dom/client";
-import { NoderaEditor } from "@nodera/react-flow";
+import { NoderaEditor } from "@nodera/react";
 
 const builder = createAppBuilder();
 const root = document.getElementById("root");
@@ -780,7 +783,7 @@ export interface BuilderAdapter {
 `portRenderers`, `propertyRenderers`, `edgeStyles`, `customPanels`.
 
 To select an engine you either pass a binding's factory
-(`createReactFlowAdapter()` from `@nodera/react-flow`) or declare it yourself:
+(`createReactFlowAdapter()` from `@nodera/react`) or declare it yourself:
 
 ```ts
 const builder = assertValid(
@@ -859,7 +862,7 @@ These are honest boundaries of Phase 6, not roadmap guesses.
 - **Renderer values are opaque by design.** The SDK stores what you pass and
   never inspects it, so a wrong value cannot be diagnosed by the SDK: the
   framework binding is what rejects a non-renderable value
-  (`InvalidRendererBindingError` in `@nodera/react-flow`). A host that uses the
+  (`InvalidRendererBindingError` in `@nodera/react`). A host that uses the
   SDK alone owns that check.
 - **The SDK ships no stylesheet.** The React binding mounts the engine, so the
   host imports the engine's CSS itself (`import "@xyflow/react/dist/style.css";`)
@@ -880,10 +883,14 @@ These are honest boundaries of Phase 6, not roadmap guesses.
   this renderer: an edge of a definition resolves to it instead of to React
   Flow's built-in geometry types, which is what gives every declared geometry
   the waypoint affordances.
-- **No `exports` map and no bundle yet.** `@nodera/sdk` and `@nodera/react-flow`
-  are consumed from source (`main`/`types` → `./src/index.ts`, `tsc --noEmit`),
-  and publishing is a Phase 8 concern. A host bundler resolves the TypeScript
-  sources directly.
+- **Packaging is bundled, publication is still Phase 8.** `@nodera/sdk` and
+  `@nodera/react` each build one ESM entry with `tsup`, with every `@nodera/*`
+  package inlined into `dist/index.js` and its declarations inlined into a
+  self-contained `dist/index.d.ts` (`exports` exposes `"."` only). They are not
+  on any registry yet; `npm pack --dry-run` is the smoke test. Inside the
+  monorepo, `tsconfig.base.json` maps those two specifiers to the unbundled
+  declaration tree (`dist/types`) so every workspace package keeps one type
+  identity (`docs/PROJECT-STRUCTURE.md` §7.6).
 - **`builder.editor` is an escape hatch.** It is the editing session behind the
   facades. `builder.graph` and `builder.document` are the supported surface for
   mutation; reaching into the editor bypasses no rule but does skip the SDK's
@@ -911,12 +918,12 @@ These are honest boundaries of Phase 6, not roadmap guesses.
 - `packages/sdk/README.md` — the package, its APIs and its error model.
 - `docs/GRAPH-LAYOUT.md` — node placement: `graph.layout`, `Arrange`, the
   strategy port and `examples/layout-switch-demo`.
-- `packages/react-flow/README.md` — the React Flow integration: the canvas
-  adapter (engine) and the SDK binding (composition).
-- `docs/PROJECT-STRUCTURE.md` §7.3 — the package boundaries and the executable
-  rules that enforce them.
+- `packages/react/README.md` — the React binding: what it bundles and what it
+  asks of the host (React, React DOM, `@xyflow/react`).
+- `docs/PROJECT-STRUCTURE.md` §7.3 and §7.6 — the package boundaries, the
+  executable rules that enforce them and the two-package distribution.
 - `examples/phase6-demo` — the complete integration, importing only
-  `@nodera/sdk` and `@nodera/react-flow`. Its `pnpm test` runs
+  `@nodera/sdk` and `@nodera/react`. Its `pnpm test` runs
   `src/imports.test.ts`, which parses every source file and fails on any other
   internal `@nodera/*` package or on an `@xyflow/react` import other than its
   stylesheet.

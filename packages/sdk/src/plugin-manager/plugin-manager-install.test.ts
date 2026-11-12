@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { PluginContext, PluginDefinition, PluginManifest } from "@nodera/plugin-api";
-import type {
-  BuilderPluginApi,
-  PluginActivatedEvent,
-  PluginRegisteredEvent,
-} from "@nodera/sdk";
+import type { PluginContext, PluginDefinition, PluginManifest } from "../plugin-api/index.js";
+import type { BuilderPluginApi } from "../plugin/plugin.js";
+import type { PluginActivatedEvent, PluginRegisteredEvent } from "../events/events-api.js";
 import { createPluginManager } from "./index.js";
 import {
   contribution,

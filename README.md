@@ -34,14 +34,41 @@ Plugins -----------> Public SDK contracts
 Host Application --> Public SDK
 ```
 
-The domain never imports React, React Flow, the DOM, storage or execution code. `@xyflow/react` (React Flow) is the initial canvas engine, isolated inside the `@nodera/react-flow` adapter.
+The domain never imports React, React Flow, the DOM, storage or execution code. `@xyflow/react` (React Flow) is the initial canvas engine, isolated inside the React binding (`packages/react-flow`, published as part of `@nodera/react`).
+
+## Public distribution: two packages
+
+Nodera publishes **two** packages. Everything else in `packages/*` is internal:
+
+| Package | Contents | Peer dependencies |
+| --- | --- | --- |
+| `@nodera/sdk` | The framework-free core, bundled into one `dist/`: builder factory, authoring vocabulary, registries, document/event/plugin APIs, the plugin contracts and manager, the theme/layout/UI contracts and the engine-adapter port. | none |
+| `@nodera/react` | The React binding, bundled into one `dist/`: everything from `@nodera/sdk` plus the React Flow canvas adapter and the React presentation layer. | `react`, `react-dom`, `@xyflow/react` |
+
+```ts
+// A host that builds, validates or serializes graphs: framework-free.
+import { assertValid, createBuilder } from "@nodera/sdk";
+
+// A React host: one package, plus React and the canvas engine.
+import { createBuilder, NoderaEditor } from "@nodera/react";
+```
+
+`@nodera/sdk` is bundled into `@nodera/react` in one direction only, so the core
+never depends on a framework and a future binding (Vue, Svelte, plain DOM) is a
+different package over the same SDK. `@nodera/plugin-api`,
+`@nodera/plugin-manager`, `@nodera/react-flow`, `@nodera/ui-react` and the 19
+core packages are `private` workspace packages: they carry the architecture and
+the tests, are bundled into the two published tarballs and are never published
+on their own (`docs/KNOWN-ISSUES.md` KI-12).
 
 ## Monorepo layout
 
 | Path | Purpose |
 | --- | --- |
-| `packages/*` | The framework: `contracts`, `domain`, `graph-model`, `application`, `document`, `serialization-json`, `serialization-yaml`, `validation`, `node-registry`, `edge-registry`, `property-system`, `history`, `graph-layout`, `sdk`, `plugin-api`, `plugin-manager`, `ui-core`, `ui-react`, `react-flow`, `theme-engine`, `layout-engine` and a few placeholders (`core`, `testing`, `adapter-storage-*`). |
-| `plugins/*` | Example plugins (`basic-nodes`, `data-nodes`, `ai-nodes`, `developer-tools`, `example-plugin`). |
+| `packages/sdk` | **Public.** `@nodera/sdk` — the bundled framework-free core (the plugin contracts and the plugin manager live inside it, in `src/plugin-api/` and `src/plugin-manager/`). |
+| `packages/react` | **Public.** `@nodera/react` — the bundled React binding, which composes `@nodera/sdk`, `@nodera/react-flow` and `@nodera/ui-react`. |
+| `packages/*` (rest) | Internal, `private`: `contracts`, `domain`, `graph-model`, `application`, `document`, `serialization-json`, `serialization-yaml`, `validation`, `node-registry`, `edge-registry`, `property-system`, `history`, `graph-layout`, `ui-core`, `theme-engine`, `layout-engine`, `react-flow`, `ui-react`, the former `plugin-api`/`plugin-manager` shells, and the placeholders (`core`, `testing`, `adapter-storage-*`). They are bundled into the two public packages and are not published. |
+| `plugins/*` | Example plugins (`basic-nodes`, `data-nodes`, `ai-nodes`, `developer-tools`, `example-plugin`), written against `@nodera/sdk` only. |
 | `apps/*` | Placeholders (`playground`, `documentation`, `dev-tools`) — not implemented yet. |
 | `examples/*` | Runnable examples, including `phase4-demo` … `phase7-demo`. |
 | `docs/*` | Architecture, contract and phase documentation (Spanish). |
@@ -57,11 +84,15 @@ The domain never imports React, React Flow, the DOM, storage or execution code. 
 ```bash
 pnpm install
 pnpm typecheck   # tsc --noEmit across the workspace
-pnpm build       # per-package tsc build
+pnpm build       # tsup for the two public packages, tsc for the internal ones
 pnpm test        # vitest across the workspace
 pnpm lint        # eslint across the workspace
 pnpm check:architecture   # layer-dependency rules
 ```
+
+The two public packages pack self-contained: `npm pack --dry-run` in
+`packages/sdk` and `packages/react` lists only `dist/index.js`, `dist/index.d.ts`
+(and their source maps), with every `@nodera/*` module inlined.
 
 ## Documentation
 

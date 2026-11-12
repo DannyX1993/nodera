@@ -1,6 +1,7 @@
 {
   "name": "@nodera/node-registry",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Declarative node definitions and the NodeRegistry: registration, lookup, versioning and conflicts.",
   "main": "./dist/index.js",

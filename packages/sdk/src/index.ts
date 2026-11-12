@@ -12,6 +12,13 @@
  * The published vocabulary (`./vocabulary.js`) is the set of names a host must
  * be able to write to use this API: they are type-only re-exports of the module
  * that owns each one, never a re-declaration.
+ *
+ * The plugin ecosystem lives here too. `./plugin-api` holds the manifest,
+ * lifecycle and diagnostic contracts a plugin and a host share, and
+ * `./plugin-manager` holds the infrastructure that installs, activates and
+ * retires plugins over the builder surface. They were separate packages until
+ * the distribution was consolidated into two: folding them into the SDK removes
+ * the `sdk ↔ plugin-manager` cycle and gives a plugin one import path.
  */
 
 export * from "./errors.js";
@@ -32,3 +39,5 @@ export * from "./graph/graph-api.js";
 export * from "./document/document-api.js";
 export * from "./events/events-api.js";
 export * from "./plugin/plugin.js";
+export * from "./plugin-api/index.js";
+export * from "./plugin-manager/index.js";

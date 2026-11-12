@@ -19,7 +19,11 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@nodera/sdk": ["./packages/sdk/dist/types/index.d.ts"],
+      "@nodera/react": ["./packages/react/dist/types/index.d.ts"]
+    }
   },
   "exclude": ["node_modules", "dist"]
 }

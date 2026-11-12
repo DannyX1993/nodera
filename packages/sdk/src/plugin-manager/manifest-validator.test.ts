@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PluginIssue, PluginManifest } from "@nodera/plugin-api";
+import type { PluginIssue, PluginManifest } from "../plugin-api/index.js";
 import { validatePluginManifest } from "./manifest-validator.js";
 
 const MINIMAL_MANIFEST = {

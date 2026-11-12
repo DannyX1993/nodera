@@ -1,6 +1,7 @@
 {
   "name": "@nodera/property-system",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Declarative property definitions with a JSON Schema based data model and a UI metamodel.",
   "main": "./dist/index.js",

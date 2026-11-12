@@ -1,6 +1,7 @@
 {
   "name": "@nodera/theme-engine",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Design tokens, themes and CSS variables for the Nodera UI layer",
   "main": "./dist/index.js",

@@ -24,7 +24,7 @@ import {
   createDefaultComponentRenderers,
   createDefaultPanelRegistry,
   createDefaultToolRegistry,
-} from "@nodera/ui-react";
+} from "@nodera/react";
 
 import { DemoValidationPanel, VALIDATION_RENDERER_ID } from "./brand.js";
 import { DEMO_WORKSPACE_LAYOUT, createDemoEditor } from "./definitions.js";

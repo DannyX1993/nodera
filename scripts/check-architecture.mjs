@@ -14,7 +14,8 @@
  * 3. `packages/ui-react` never references `@nodera/react-flow` — neither in its
  *    sources nor in its `package.json`: the React UI layer composes the adapter
  *    from the host's side, it does not own it.
- * 4. No package outside `packages/react-flow` imports `@xyflow/react`.
+ * 4. Only `packages/react-flow` and the `@nodera/react` binding import
+ *    `@xyflow/react`.
  * 5. `packages/sdk` is framework- and engine-free: its sources never import
  *    React, React DOM, `@nodera/ui-react`, `@nodera/react-flow` or `@xyflow`,
  *    and its manifest never declares them. The public SDK composes the
@@ -24,18 +25,16 @@
  *    `@nodera/domain`, `@nodera/application` or `@nodera/document` directly.
  *    Builder composition has one surface, and it is the public SDK.
  *
- * Phase 7 adds the plugin ecosystem boundaries (`docs/PROJECT-STRUCTURE.md`
- * §7.5, `docs/PLUGINS.md`):
+ * The two-package distribution (docs/KNOWN-ISSUES.md KI-12) collapses the plugin
+ * packages into the SDK, so the Phase 7 rules about them are gone. What replaces
+ * them is the boundary that now carries the framework:
  *
- * 7. `packages/plugin-api` is pure contracts: its sources and its manifest
- *    mention no React, React DOM, React Flow or `@nodera/ui-*` package, and its
- *    runtime dependencies are exactly `@nodera/contracts`.
- * 8. `packages/plugin-manager` is infrastructure over the public surface: it
- *    imports only `@nodera/plugin-api`, `@nodera/sdk`, `@nodera/contracts` and
- *    Node builtins, never a core package directly.
- * 9. every `plugins/*` package uses the public surface only: its non-test
- *    sources import `@nodera/sdk` and `@nodera/plugin-api`, its tests may
- *    additionally import `@nodera/plugin-manager` and `vitest`.
+ * 7. `packages/react` (the published `@nodera/react`) is the React surface: it
+ *    imports only `@nodera/sdk`, the two React packages it bundles, React, React
+ *    DOM and `@xyflow/react`. The plugin contracts and the plugin manager are
+ *    part of `@nodera/sdk`, so they need no rule of their own.
+ * 8. every `plugins/*` package uses the public surface only: its non-test
+ *    sources import `@nodera/sdk`, its tests may additionally import `vitest`.
  *
  * Plain Node ESM, builtins only: the check must be runnable without installing
  * anything and without a bundler (`node scripts/check-architecture.mjs`).
@@ -54,6 +53,19 @@ const PACKAGES_ROOT = join(REPO_ROOT, "packages");
 const PLUGINS_ROOT = join(REPO_ROOT, "plugins");
 /** The React Flow integration: canvas adapter plus SDK binding in one package. */
 const REACT_FLOW_PACKAGE = "react-flow";
+
+/** The published React binding: it composes the SDK and the React packages. */
+const REACT_BINDING_PACKAGE = "react";
+
+/**
+ * Packages that own the canvas engine.
+ *
+ * `packages/react-flow` translates the portable graph into React Flow;
+ * `packages/react` is the published binding that bundles it, so it is the other
+ * legal mention of the engine (as a peer dependency and, from its barrel, as a
+ * re-export). `packages/ui-react` stays out on purpose: it is engine-agnostic.
+ */
+const REACT_FLOW_OWNER_PACKAGES = [REACT_FLOW_PACKAGE, REACT_BINDING_PACKAGE];
 
 /** Source extensions the check reads. */
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
@@ -268,7 +280,7 @@ async function checkReactFlowIsAdapterOnly() {
   const entries = await readdir(PACKAGES_ROOT, { withFileTypes: true });
   const violations = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === REACT_FLOW_PACKAGE) {
+    if (!entry.isDirectory() || REACT_FLOW_OWNER_PACKAGES.includes(entry.name)) {
       continue;
     }
     const { files } = await packageSources(entry.name);
@@ -280,7 +292,7 @@ async function checkReactFlowIsAdapterOnly() {
             violation(
               file,
               line,
-              `packages/${entry.name} imports "${specifier}" — only packages/${REACT_FLOW_PACKAGE} may`,
+              `packages/${entry.name} imports "${specifier}" — only ${REACT_FLOW_OWNER_PACKAGES.map((name) => `packages/${name}`).join(" and ")} may`,
             ),
           );
         }
@@ -295,7 +307,7 @@ async function checkReactFlowIsAdapterOnly() {
         violation(
           manifest,
           lineAt(manifestText, index),
-          `packages/${entry.name}/package.json declares "${XYFLOW_SUBSTRING}" — only packages/${REACT_FLOW_PACKAGE} may`,
+          `packages/${entry.name}/package.json declares "${XYFLOW_SUBSTRING}" — only ${REACT_FLOW_OWNER_PACKAGES.map((name) => `packages/${name}`).join(" and ")} may`,
         ),
       );
     }
@@ -474,151 +486,27 @@ async function checkReactFlowConsumesTheSdk() {
 }
 
 /**
- * Rule 7: `@nodera/plugin-api` is pure contracts.
+ * Rule 7: the published React binding composes the SDK and the React packages.
  *
- * The package is what a plugin and a host share, so it must be readable by any
- * host: a framework, a DOM or an engine in this package would drag one
- * presentation into every consumer (AGENTS.md §4.1, §9). The scan is a plain
- * mention search on purpose — a comment or a type-only import would bind the
- * contract to the framework just as hard as runtime code — and the same search
- * runs over the manifest.
+ * `packages/react` is the whole React surface a host installs (`@nodera/react`),
+ * so the boundary that matters is the one it publishes: the framework-free SDK,
+ * the two React packages it bundles, React itself and the canvas engine. A core
+ * package in this list would let the binding reach past the SDK — exactly the
+ * drift rule 6 forbids for `@nodera/react-flow` (AGENTS.md §4.1).
  */
-const PLUGIN_API_PACKAGE = "plugin-api";
-
-/** Tokens the pure plugin contract never mentions, with the reason it cannot. */
-const PLUGIN_API_BANNED_MENTIONS = [
-  { token: "react-dom", reason: "the contract has no DOM" },
-  { token: "React", reason: "React belongs to @nodera/ui-react" },
-  { token: "@xyflow", reason: "React Flow lives in packages/react-flow" },
-  { token: "@nodera/ui-", reason: "the contract sits below the UI layer" },
-  {
-    token: "@nodera/react-flow",
-    reason: "the React Flow integration is a presentation sibling, never a contract dependency",
-  },
-];
-
-/** Modules the pure plugin contract may never import, matched on the specifier. */
-const PLUGIN_API_FORBIDDEN_MODULES = [
-  { pattern: /^react$/, reason: "React belongs to @nodera/ui-react" },
-  { pattern: /^react\//, reason: "React belongs to @nodera/ui-react" },
-  { pattern: /^react-dom(\/|$)/, reason: "the contract has no DOM" },
-  { pattern: /^@xyflow(\/|$)/, reason: "React Flow lives in packages/react-flow" },
-  { pattern: /^@nodera\/ui-/, reason: "the contract sits below the UI layer" },
-  {
-    pattern: /^@nodera\/react-flow(\/|$)/,
-    reason: "the React Flow integration is a presentation sibling, never a contract dependency",
-  },
-];
-
-/** Runtime dependencies the pure contract may declare (devDependencies apart). */
-const PLUGIN_API_RUNTIME_DEPENDENCIES = ["@nodera/contracts"];
-
-/** Rule 7: the plugin contract never mentions a framework and depends on contracts only. */
-async function checkPluginApiIsPureContracts() {
-  const violations = [];
-  const { files, missing } = await packageSources(PLUGIN_API_PACKAGE);
-  if (missing) {
-    violations.push(
-      violation(
-        join(PACKAGES_ROOT, PLUGIN_API_PACKAGE, "src"),
-        0,
-        `packages/${PLUGIN_API_PACKAGE}/src is missing, so its boundaries cannot be checked`,
-      ),
-    );
-  }
-
-  for (const file of files) {
-    const text = await readFile(file, "utf8");
-    for (const { specifier, line } of moduleSpecifiers(text)) {
-      const forbidden = PLUGIN_API_FORBIDDEN_MODULES.find((entry) => entry.pattern.test(specifier));
-      if (forbidden !== undefined) {
-        violations.push(
-          violation(
-            file,
-            line,
-            `packages/${PLUGIN_API_PACKAGE} imports "${specifier}" — ${forbidden.reason}`,
-          ),
-        );
-      }
-    }
-    const banned = PLUGIN_API_BANNED_MENTIONS.map((entry) => ({
-      ...entry,
-      index: text.indexOf(entry.token),
-    })).find((entry) => entry.index !== -1);
-    if (banned !== undefined) {
-      violations.push(
-        violation(
-          file,
-          lineAt(text, banned.index),
-          `packages/${PLUGIN_API_PACKAGE} mentions "${banned.token}" — ${banned.reason}`,
-        ),
-      );
-    }
-  }
-
-  const manifest = await readManifest(PLUGIN_API_PACKAGE);
-  if (manifest === undefined) {
-    violations.push(
-      violation(
-        join(PACKAGES_ROOT, PLUGIN_API_PACKAGE),
-        1,
-        `packages/${PLUGIN_API_PACKAGE} has no package.json, so its dependencies cannot be checked`,
-      ),
-    );
-    return violations;
-  }
-
-  for (const { token, reason } of PLUGIN_API_BANNED_MENTIONS) {
-    const index = manifest.text.indexOf(token);
-    if (index !== -1) {
-      violations.push(
-        violation(
-          manifest.path,
-          lineAt(manifest.text, index),
-          `packages/${PLUGIN_API_PACKAGE}/package.json mentions "${token}" — ${reason}`,
-        ),
-      );
-    }
-  }
-
-  for (const name of Object.keys(manifest.json.dependencies ?? {})) {
-    if (!PLUGIN_API_RUNTIME_DEPENDENCIES.includes(name)) {
-      const index = manifest.text.indexOf(`"${name}"`);
-      violations.push(
-        violation(
-          manifest.path,
-          index === -1 ? 1 : lineAt(manifest.text, index),
-          `packages/${PLUGIN_API_PACKAGE} depends on "${name}" — the pure contract depends only on ${PLUGIN_API_RUNTIME_DEPENDENCIES.join(", ")}`,
-        ),
-      );
-    }
-  }
-  return violations;
-}
-
-/** The plugin lifecycle manager of the Phase 7 ecosystem. */
-const PLUGIN_MANAGER_PACKAGE = "plugin-manager";
-
-/**
- * Modules the manager may import.
- *
- * The manager orchestrates the lifecycle *over* the public surface: it adapts a
- * plugin to the SDK contract (`installPlugin`, builder removal surfaces) and
- * reports in the plugin diagnostic vocabulary. Reaching into `domain`,
- * `application`, `ui-core` or a registry package would reimplement, below the
- * SDK, what the SDK already owns (AGENTS.md §4.1, `docs/PROJECT-STRUCTURE.md`
- * §7.1 "Plugins --> Public SDK contracts").
- */
-const PLUGIN_MANAGER_ALLOWED_MODULES = [
-  "@nodera/plugin-api",
+const REACT_BINDING_ALLOWED_MODULES = [
   "@nodera/sdk",
-  "@nodera/contracts",
+  "@nodera/react-flow",
+  "@nodera/ui-react",
+  "react",
+  "react-dom",
+  "@xyflow/react",
 ];
 
-/** Additional modules a plugin-manager test file may import. */
-const PLUGIN_MANAGER_TEST_MODULES = ["vitest"];
+/** Additional modules a React binding test file may import. */
+const REACT_BINDING_TEST_MODULES = ["vitest"];
 
-/** Rules 8 and 9: a package imports the allowed modules, relative paths and builtins only. */
+/** Rules 7 and 8: a package imports the allowed modules, relative paths and builtins only. */
 function allowedModuleViolation(allowedModules, specifier) {
   return (
     !specifier.startsWith(".") &&
@@ -632,24 +520,24 @@ function isTestFile(file) {
   return /\.test\.[cm]?[jt]sx?$/.test(file);
 }
 
-/** Rule 8: the plugin manager is infrastructure over the public surface only. */
-async function checkPluginManagerIsInfrastructureOnly() {
+/** Rule 7: the React binding imports the SDK, its React packages and the engine only. */
+async function checkReactBindingSurface() {
   const violations = [];
-  const { files, missing } = await packageSources(PLUGIN_MANAGER_PACKAGE);
+  const { files, missing } = await packageSources(REACT_BINDING_PACKAGE);
   if (missing) {
     return [
       violation(
-        join(PACKAGES_ROOT, PLUGIN_MANAGER_PACKAGE, "src"),
+        join(PACKAGES_ROOT, REACT_BINDING_PACKAGE, "src"),
         0,
-        `packages/${PLUGIN_MANAGER_PACKAGE}/src is missing, so its imports cannot be checked`,
+        `packages/${REACT_BINDING_PACKAGE}/src is missing, so its imports cannot be checked`,
       ),
     ];
   }
 
   for (const file of files) {
     const allowed = isTestFile(file)
-      ? [...PLUGIN_MANAGER_ALLOWED_MODULES, ...PLUGIN_MANAGER_TEST_MODULES]
-      : PLUGIN_MANAGER_ALLOWED_MODULES;
+      ? [...REACT_BINDING_ALLOWED_MODULES, ...REACT_BINDING_TEST_MODULES]
+      : REACT_BINDING_ALLOWED_MODULES;
     const text = await readFile(file, "utf8");
     for (const { specifier, line } of moduleSpecifiers(text)) {
       if (allowedModuleViolation(allowed, specifier)) {
@@ -657,7 +545,7 @@ async function checkPluginManagerIsInfrastructureOnly() {
           violation(
             file,
             line,
-            `packages/${PLUGIN_MANAGER_PACKAGE} imports "${specifier}" — it composes plugins through ${PLUGIN_MANAGER_ALLOWED_MODULES.join(", ")} and never imports a core package directly`,
+            `packages/${REACT_BINDING_PACKAGE} imports "${specifier}" — the React binding composes ${REACT_BINDING_ALLOWED_MODULES.join(", ")} and never a core package directly`,
           ),
         );
       }
@@ -671,13 +559,14 @@ async function checkPluginManagerIsInfrastructureOnly() {
  *
  * A plugin is a third party (S6): it is written against the published surface
  * and nothing else, which is exactly what a host that installs it can offer.
- * The tests drive the plugin through the host surface, so they also reach the
- * manager that installs it.
+ * Since the two-package distribution the plugin contracts and the plugin
+ * manager are part of `@nodera/sdk`, so the SDK is the whole surface; the tests
+ * drive the plugin through a real builder and need no second import path.
  */
-const PLUGIN_ALLOWED_MODULES = ["@nodera/sdk", "@nodera/plugin-api"];
-const PLUGIN_TEST_ALLOWED_MODULES = [...PLUGIN_ALLOWED_MODULES, "@nodera/plugin-manager", "vitest"];
+const PLUGIN_ALLOWED_MODULES = ["@nodera/sdk"];
+const PLUGIN_TEST_ALLOWED_MODULES = [...PLUGIN_ALLOWED_MODULES, "vitest"];
 
-/** Rule 9: every `plugins/*` package imports the public surface only. */
+/** Rule 8: every `plugins/*` package imports the public surface only. */
 async function checkExamplePluginsUseThePublicSurface() {
   const entries = await readdir(PLUGINS_ROOT, { withFileTypes: true }).catch(() => []);
   const violations = [];
@@ -707,7 +596,7 @@ async function checkExamplePluginsUseThePublicSurface() {
             violation(
               file,
               line,
-              `plugins/${entry.name} imports "${specifier}" — a plugin imports ${PLUGIN_ALLOWED_MODULES.join(", ")} only and never a core package`,
+              `plugins/${entry.name} imports "${specifier}" — a plugin imports ${PLUGIN_ALLOWED_MODULES.join(", ")} only and never a core package or a former plugin package`,
             ),
           );
         }
@@ -737,7 +626,7 @@ const RULES = [
   },
   {
     id: "react-flow-adapter-only",
-    label: "no package outside packages/react-flow imports @xyflow/react",
+    label: "no package outside packages/react-flow and packages/react imports @xyflow/react",
     run: checkReactFlowIsAdapterOnly,
   },
   {
@@ -751,19 +640,14 @@ const RULES = [
     run: checkReactFlowConsumesTheSdk,
   },
   {
-    id: "plugin-api-is-pure-contracts",
+    id: "react-binding-composes-the-sdk",
     label:
-      "plugin-api mentions no React, React DOM, React Flow or @nodera/ui-* and depends only on @nodera/contracts",
-    run: checkPluginApiIsPureContracts,
-  },
-  {
-    id: "plugin-manager-is-infrastructure-only",
-    label: "plugin-manager imports only @nodera/plugin-api, @nodera/sdk and @nodera/contracts",
-    run: checkPluginManagerIsInfrastructureOnly,
+      "packages/react imports only @nodera/sdk, @nodera/react-flow, @nodera/ui-react, react, react-dom and @xyflow/react",
+    run: checkReactBindingSurface,
   },
   {
     id: "example-plugins-use-the-public-surface",
-    label: "every plugins/* package imports @nodera/sdk and @nodera/plugin-api only",
+    label: "every plugins/* package imports @nodera/sdk only",
     run: checkExamplePluginsUseThePublicSurface,
   },
 ];
@@ -780,7 +664,7 @@ for (const { rule, violations } of results) {
 const failed = results.filter((result) => result.violations.length > 0);
 if (failed.length === 0) {
   console.log(
-    `\nArchitecture check passed: ${results.length} boundary rules of docs/PROJECT-STRUCTURE.md §7.2-7.3 and §7.5 hold.`,
+    `\nArchitecture check passed: ${results.length} boundary rules of docs/PROJECT-STRUCTURE.md §7.2-7.3 and §7.5-7.6 hold.`,
   );
   process.exit(0);
 }

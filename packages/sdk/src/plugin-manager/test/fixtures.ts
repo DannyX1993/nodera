@@ -11,13 +11,10 @@ import type {
   PluginContribution,
   PluginDefinition,
   PluginManifest,
-} from "@nodera/plugin-api";
-import {
-  createBuilder,
-  type Builder,
-  type BuilderPluginApi,
-  type NodeDefinitionInput,
-} from "@nodera/sdk";
+} from "../../plugin-api/index.js";
+import { createBuilder, type Builder } from "../../builder/builder.js";
+import type { NodeDefinitionInput } from "../../authoring/nodes.js";
+import type { BuilderPluginApi } from "../../plugin/plugin.js";
 
 /** Composes a real builder, failing loudly when the composition itself breaks. */
 export function createTestBuilder(): Builder {

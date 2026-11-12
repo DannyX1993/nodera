@@ -13,51 +13,67 @@ y §16).
 
 ## Paquetes y dirección de dependencias
 
+Desde la consolidación de la distribución (`docs/KNOWN-ISSUES.md` KI-12) el
+ecosistema de plugins no es un paquete aparte: se publica dentro de
+`@nodera/sdk`. Los contratos viven en `packages/sdk/src/plugin-api/` y la
+infraestructura en `packages/sdk/src/plugin-manager/`; los antiguos
+`packages/plugin-api` y `packages/plugin-manager` siguen en el workspace como
+cascarones `private` sin exports, para no tocar el grafo de pnpm ni el de turbo.
+
 ```text
 plugins/*                     (terceros: solo la superficie pública)
         |
-        +--> @nodera/sdk               BuilderPluginApi, eventos, builder
-        +--> @nodera/plugin-api        manifest, contribuciones, lifecycle, errores
+        +--> @nodera/sdk               BuilderPluginApi, builder, eventos,
+        |                              manifest, contribuciones, lifecycle,
+        |                              createPluginManager
 
 host                          (compone el builder y decide qué carga)
         |
-        +--> @nodera/sdk
-        +--> @nodera/plugin-manager    infraestructura: validación, resolución,
+        +--> @nodera/sdk               (una sola ruta de import público)
+
+@nodera/sdk
+        src/plugin-api/                contratos: PluginManifest, PluginDefinition,
+        |                              PluginState, PluginIssue(s), isPluginId
+        src/plugin-manager/            infraestructura: validación, resolución,
         |                              conflictos y ciclo de vida
-        +--> @nodera/plugin-api
+        +--> la superficie pública del propio SDK
+             (installPlugin, unregister, eventos)
 ```
 
-| Paquete | Responsabilidad | Depende de |
-| --- | --- | --- |
-| `@nodera/plugin-api` | Contratos puros: `PluginManifest`, descriptores de contribución, `PluginDefinition`, `PluginState`, `PluginIssue(s)`, `isPluginId` | `@nodera/contracts` |
-| `@nodera/plugin-manager` | Infraestructura: `validatePluginManifest`, `resolveDependencyOrder`, `detectPluginConflicts`, `createPluginManager` | `@nodera/plugin-api`, `@nodera/sdk`, `@nodera/contracts` |
-| `@nodera/sdk` | La superficie que recibe un plugin (`BuilderPluginApi`) y los eventos de ciclo de vida | paquetes del core; **nunca** `plugin-api` ni `plugin-manager` |
-| `plugins/*` | Cinco plugins de ejemplo, uno por faceta de la superficie | `@nodera/sdk`, `@nodera/plugin-api` |
+| Ruta | Responsabilidad |
+| --- | --- |
+| `@nodera/sdk` (`src/plugin-api/`) | Contratos puros: `PluginManifest`, descriptores de contribución, `PluginDefinition`, `PluginState`, `PluginIssue(s)`, `isPluginId`. Genéricos sobre `PluginDefinition<TApi>`, sin conocer el builder. |
+| `@nodera/sdk` (`src/plugin-manager/`) | Infraestructura: `validatePluginManifest`, `resolveDependencyOrder`, `detectPluginConflicts`, `createPluginManager`. Compone la superficie pública del SDK. |
+| `@nodera/sdk` (`src/plugin/plugin.ts`) | La superficie que recibe un plugin (`BuilderPluginApi`) y los eventos de ciclo de vida. |
+| `plugins/*` | Cinco plugins de ejemplo, uno por faceta de la superficie. |
 
-El SDK no depende de los paquetes de plugins, así que no hay ciclo: el contrato
-de autoría vive en el SDK y `plugin-api` lo describe de forma genérica sobre
-`PluginDefinition<TApi>`.
+El SDK no depende de los paquetes de plugins y ningún paquete depende del SDK
+por un camino que vuelva: el manager ya vive dentro del SDK, así que el antiguo
+ciclo `sdk ↔ plugin-manager` no puede existir. El contrato de autoría sigue
+siendo genérico sobre `PluginDefinition<TApi>`, de modo que sirve también a un
+host que no sea el SDK de Nodera.
 
-Tres reglas de frontera verifican esto de forma ejecutable con
+Dos reglas de frontera lo verifican de forma ejecutable con
 `pnpm check:architecture` (`scripts/check-architecture.mjs`):
 
-- `plugin-api-is-pure-contracts` — `packages/plugin-api` no menciona React,
-  React DOM, `@xyflow`, `@nodera/ui-*` ni `@nodera/react-flow` (ni en el código
-  ni en su `package.json`) y sus dependencias de ejecución son solo
-  `@nodera/contracts`.
-- `plugin-manager-is-infrastructure-only` — `packages/plugin-manager` importa
-  solo `@nodera/plugin-api`, `@nodera/sdk`, `@nodera/contracts` y módulos
-  nativos de Node; nunca `domain`, `application`, `document`, `ui-*`,
-  `react-flow`, los registros, `validation`, `theme-engine`, `layout-engine`,
-  `graph-layout` ni `serialization-*`.
 - `example-plugins-use-the-public-surface` — cada `plugins/*` importa solo
-  `@nodera/sdk` y `@nodera/plugin-api` en su código de producción; sus tests
-  pueden importar además `@nodera/plugin-manager` y `vitest`.
+  `@nodera/sdk` en su código de producción; sus tests pueden importar además
+  `vitest`.
+- `sdk-framework-free` — `packages/sdk` no importa React, React DOM,
+  `@nodera/ui-react`, `@nodera/react-flow` ni `@xyflow`. Como los contratos de
+  plugin ahora viven dentro de ese paquete, la regla cubre también que un
+  manifest, un diagnóstico o un hook no arrastren una presentación a cada
+  consumidor.
+
+Las reglas `plugin-api-is-pure-contracts` y
+`plugin-manager-is-infrastructure-only` se retiraron con los paquetes que
+vigilaban: el código que cubrían ya no es un paquete propio.
+
 
 ## Qué puede aportar un plugin
 
 Trece clases de contribución, cerradas en `PluginContributionKind`
-(`packages/plugin-api/src/contributions.ts`) y en la superficie de plugins
+(`packages/sdk/src/plugin-api/contributions.ts`) y en la superficie de plugins
 `BuilderPluginApi` (`packages/sdk/src/plugin/plugin.ts`):
 
 | `type` del manifest | Superficie / declaración | Qué es |
@@ -88,7 +104,7 @@ sirva a un host React y a un host sin React.
 
 `api.renderers.bind(kind, id, value)` es el canal **del host y del adaptador de
 framework**, no el de un plugin agnóstico: el valor cruza como `unknown` y solo
-un binding de framework (`@nodera/react-flow`) decide cómo pintarlo, así que en
+un binding de framework (`@nodera/react`) decide cómo pintarlo, así que en
 React tiene que ser un componente (función o `memo`/`forwardRef`). Cualquier otro
 valor —un descriptor de datos, por ejemplo— hace que `createRendererSet` lance
 `InvalidRendererBindingError` para **todo** el builder, y un id ya ligado no se
@@ -104,7 +120,7 @@ algo que una persona puede usar, sin aportar componentes.
 
 ## El manifest
 
-`PluginManifest` (`packages/plugin-api/src/manifest.ts`) es el contrato
+`PluginManifest` (`packages/sdk/src/plugin-api/manifest.ts`) es el contrato
 declarativo que todo plugin distribuye. Es dato puro — sin funciones, sin
 componentes — para que pueda validarse, compararse y reportarse **antes** de
 ejecutar código de terceros.
@@ -132,7 +148,7 @@ export interface PluginManifest {
 }
 ```
 
-(`packages/plugin-api/src/manifest.ts`.)
+(`packages/sdk/src/plugin-api/manifest.ts`.)
 
 | Campo | Regla |
 | --- | --- |
@@ -159,7 +175,7 @@ ignoran, de modo que un manifest escrito para una versión posterior sigue
 validando.
 
 ```ts
-import { validatePluginManifest } from "@nodera/plugin-manager";
+import { validatePluginManifest } from "@nodera/sdk";
 
 const validated = validatePluginManifest({
   id: "acme.report-nodes",
@@ -187,8 +203,13 @@ síncrono. `ctx` es `{ manifest, api }`, y `api` es el `BuilderPluginApi` del SD
 cuando el host es un builder de Nodera.
 
 ```ts
-import type { PluginDefinition, PluginManifest } from "@nodera/plugin-api";
-import type { BuilderPluginApi, NodeDefinitionInput, SdkIssues } from "@nodera/sdk";
+import type {
+  BuilderPluginApi,
+  NodeDefinitionInput,
+  PluginDefinition,
+  PluginManifest,
+  SdkIssues,
+} from "@nodera/sdk";
 
 export const REPORT_NODE: NodeDefinitionInput = {
   type: "acme.report.table",
@@ -272,8 +293,7 @@ El host decide qué plugins existen y los instala con el manager, que corre el
 ciclo de vida completo sobre un builder del SDK:
 
 ```ts
-import { createPluginManager } from "@nodera/plugin-manager";
-import { assertValid, createBuilder } from "@nodera/sdk";
+import { assertValid, createBuilder, createPluginManager } from "@nodera/sdk";
 import { basicNodesPlugin } from "@nodera/basic-nodes";
 
 const builder = assertValid(createBuilder());
@@ -320,7 +340,7 @@ export interface PluginRecord {
 }
 ```
 
-(`packages/plugin-manager/src/plugin-manager.ts` y `plugin-records.ts`.)
+(`packages/sdk/src/plugin-manager/plugin-manager.ts` y `plugin-records.ts`.)
 
 `PluginRecord.issues` es donde el manager reporta lo que no impidió la
 operación: los avisos de contribución no declarada de una instalación y los
@@ -356,7 +376,7 @@ Dos invariantes gobiernan el conjunto:
 
 ### La máquina de estados
 
-`PluginState` (`packages/plugin-api/src/lifecycle.ts`) declara los estados del
+`PluginState` (`packages/sdk/src/plugin-api/lifecycle.ts`) declara los estados del
 contrato:
 
 ```ts
@@ -428,7 +448,7 @@ rango siguen significando "cualquiera". Las versiones de plugin usan
 `isValidSemver` de `@nodera/contracts` más la regla de "sin build metadata".
 
 ```ts
-import { resolveDependencyOrder } from "@nodera/plugin-manager";
+import { resolveDependencyOrder } from "@nodera/sdk";
 
 const ordered = resolveDependencyOrder([reportsPlugin.manifest, sharedPlugin.manifest]);
 if (!ordered.ok) {
@@ -484,11 +504,13 @@ Formatos soportados (S7), todos explícitos:
 - **Plugins cargados explícitamente en tiempo de ejecución** — el host hace el
   `import()` y pasa la definición resultante a `install`.
 
-Hoy los paquetes del workspace se consumen desde el código fuente (`main` y
-`types` apuntan a `./src/index.ts`), como el resto del monorepo: no hay `exports`
-map, ni bundle y ni publicación — eso es Fase 8. No existe marketplace, ni
-descarga dinámica, ni auto-actualización: primero tiene que estabilizarse el
-contrato de extensión.
+Hoy la superficie pública del ecosistema es `@nodera/sdk`, que se empaqueta con
+`tsup` en un único `dist/` autocontenido (`exports` con una sola entrada `"."`,
+sin subrutas) y se puede inspeccionar con `npm pack --dry-run`. Un plugin de
+terceros declara `@nodera/sdk` como peer del host, no un paquete de plugins
+propio. Publicar los cinco `plugins/*` de ejemplo sigue siendo Fase 8. No existe
+marketplace, ni descarga dinámica, ni auto-actualización: primero tiene que
+estabilizarse el contrato de extensión.
 
 ## Limitaciones conocidas
 
@@ -531,9 +553,11 @@ Límites reales de la implementación actual, no suposiciones de roadmap.
 
 ## Referencias
 
-- `packages/plugin-api/README.md` — los contratos.
-- `packages/plugin-manager/README.md` — validación, resolución, conflictos y
+- `packages/sdk/src/plugin-api/` — los contratos del ecosistema.
+- `packages/sdk/src/plugin-manager/` — validación, resolución, conflictos y
   ciclo de vida.
 - `packages/sdk/README.md` — la superficie `BuilderPluginApi` y los eventos.
+- `docs/PROJECT-STRUCTURE.md` §7.5-7.6 — las fronteras y la distribución en dos
+  paquetes.
 - `docs/FASE7-DEFINITION.md` — el módulo de la fase y sus requisitos.
 - `odd/tasks/fase7-plugin-ecosystem.md` — specs, decisiones y log de la fase.

@@ -15,9 +15,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import { createPluginManager, validatePluginManifest } from "@nodera/plugin-manager";
 import {
   createBuilder,
+  createPluginManager,
+  validatePluginManifest,
   type Builder,
   type PluginActivatedEvent,
   type PluginUnregisteredEvent,

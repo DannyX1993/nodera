@@ -1,6 +1,7 @@
 {
   "name": "@nodera/ui-react",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "React presentation layer: providers, hooks and replaceable renderers for the Nodera graph editing framework",
   "main": "./dist/index.js",

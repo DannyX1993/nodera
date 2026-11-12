@@ -21,19 +21,19 @@ It does not do the following:
   opaque `unknown` values and are keyed by stable ids (`bindRenderer`);
 - execute graphs, nodes or tools — Nodera models and edits graphs and never
   interprets them;
-- own plugin manifests, dependency resolution or an activation lifecycle — those
-  live in `@nodera/plugin-api` and `@nodera/plugin-manager` (Phase 7); this
-  package ships the plugin *authoring* surface (`BuilderPluginApi`) and
-  synchronous installation.
+- own plugin manifests, dependency resolution or an activation lifecycle —
+  those now live in this package too: Phase 7's `@nodera/plugin-api` and
+  `@nodera/plugin-manager` were folded into the SDK in the two-package
+  distribution, so it ships the plugin *authoring* surface (`BuilderPluginApi`),
+  the manifest contracts and `createPluginManager`.
 
-A host that wants React and the React Flow canvas adds `@nodera/react-flow`, the
-React binding and the first engine adapter — the same package that owns the
-React Flow canvas adapter underneath.
+A host that wants React and the React Flow canvas adds `@nodera/react`, the
+React binding and the first engine adapter — the package that owns the React
+Flow canvas adapter underneath.
 
 ## Install
 
-The workspace package is consumed from source. `main` and `types` both point at
-`./src/index.ts`, so there is no build step and no `exports` map yet:
+The published package is bundled to `dist/` with a single entry point:
 
 ```json
 {
@@ -85,7 +85,7 @@ export function createDemoBuilder(): Builder {
 ```
 
 (`examples/phase6-demo/src/builder.ts`. `createReactFlowAdapter()` comes from
-`@nodera/react-flow`; the `adapter` field accepts any `BuilderAdapterInput`, see
+`@nodera/react`; the `adapter` field accepts any `BuilderAdapterInput`, see
 [Engine adapter port](#engine-adapter-port).)
 
 Every configuration field is optional. `BuilderConfiguration` groups them by
@@ -455,7 +455,7 @@ const gaps = capabilityGaps(adapter, requirementsFrom({ nodes, edges }));
 
 **A new graph engine is a new binding package, never an SDK change.** The SDK
 declares the port and validates against it; mounting a canvas is framework code
-and belongs to a binding package like `@nodera/react-flow`, which ships the React
+and belongs to a binding package like `@nodera/react`, which ships the React
 Flow adapter, the canvas layer, `createReactFlowAdapter()` and `<NoderaEditor>`.
 
 ## APIs
@@ -1379,15 +1379,13 @@ builder.graph.nodeCount(); // still a number: reads never fail
 
 ## Deliberately absent
 
-- `exports` maps, bundling, release automation, npm publishing, accessibility and
-  i18n audits, performance work — Phase 8. Packages stay source-level
-  (`main`/`types` → `./src/index.ts`, `tsc --noEmit`);
 - Vue and Angular bindings. The adapter port is designed for them; none is
   implemented.
 
 Phase 7 (plugin manifests, dependency resolution, activation lifecycle,
-conflict detection and example plugins) is delivered in `@nodera/plugin-api`,
-`@nodera/plugin-manager` and `plugins/*`; see `docs/PLUGINS.md`.
+conflict detection and example plugins) is delivered inside this package — the
+former `@nodera/plugin-api` and `@nodera/plugin-manager` were folded in — and in
+`plugins/*`; see `docs/PLUGINS.md`.
 
 The Phase 6 decisions and their rationale are recorded in
 `odd/tasks/fase6-sdk.md` (`## Decisions` D1–D21). The integration guide for a

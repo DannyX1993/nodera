@@ -1,6 +1,6 @@
 /**
  * Behaviour of the Phase 7 demo composition, checked through the public
- * surface only: `@nodera/sdk`, `@nodera/plugin-manager` and the example plugins.
+ * surface only: `@nodera/sdk`, `@nodera/react` and the example plugins.
  *
  * The demo is a React application, so what these tests pin is the part that can
  * be asserted without a DOM: which plugins the editor installs, that their
@@ -16,7 +16,7 @@ import {
   SHORTCUTS_PANEL_ID,
   VALIDATE_TOOL_ID,
 } from "@nodera/developer-tools";
-import { createRendererSet } from "@nodera/react-flow";
+import { createRendererSet } from "@nodera/react";
 import { describe, expect, it } from "vitest";
 
 import {

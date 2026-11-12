@@ -2,7 +2,7 @@
  * Composition root of the Phase 7 demo.
  *
  * Everything here goes through the public surface — `@nodera/sdk`,
- * `@nodera/plugin-manager` and the five example plugins — which is the whole
+ * `@nodera/react` and the five example plugins — which is the whole
  * point of the demo: a host application composes the ecosystem it trusts, in
  * the order the plugin lifecycle defines, and the editor then renders whatever
  * those plugins contributed.
@@ -29,7 +29,7 @@
  *
  * The opposite — a plugin calling `api.renderers.bind("nodes", id, plainData)`
  * — is what makes a builder unmountable: `api.renderers.bind` is the
- * *host/framework-aware* channel, and `@nodera/react-flow`'s `createRendererSet`
+ * *host/framework-aware* channel, and `@nodera/react`'s `createRendererSet`
  * throws `InvalidRendererBindingError` for a binding it cannot paint (a
  * component function or a `memo`/`forwardRef` object). A host also cannot
  * override such an id, because `bindRenderer` rejects a live id with
@@ -41,9 +41,11 @@ import {
   assertOk,
   assertValid,
   createBuilder,
+  createPluginManager,
   type Builder,
   type BuilderDocumentConfiguration,
   type LayoutDefinition,
+  type PluginManager,
 } from "@nodera/sdk";
 import {
   AI_NODES_PLUGIN_ID,
@@ -70,8 +72,7 @@ import {
   KITCHEN_SINK_PLUGIN_ID,
   kitchenSinkPlugin,
 } from "@nodera/example-plugin";
-import { createPluginManager, type PluginManager } from "@nodera/plugin-manager";
-import { createReactFlowAdapter } from "@nodera/react-flow";
+import { createReactFlowAdapter } from "@nodera/react";
 
 import {
   ClassifyNode,

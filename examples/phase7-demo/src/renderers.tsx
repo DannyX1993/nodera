@@ -29,7 +29,7 @@
 
 import { useState, type CSSProperties, type ReactNode } from "react";
 
-import type { NoderaNodeRendererProps, PanelRendererProps } from "@nodera/react-flow";
+import type { NoderaNodeRendererProps, PanelRendererProps } from "@nodera/react";
 import type { Builder } from "@nodera/sdk";
 
 /** Group the developer-tools plugin declares for its actions. */

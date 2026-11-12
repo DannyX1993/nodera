@@ -8,8 +8,8 @@ import type {
   PluginIssues,
   PluginManifest,
   PluginPermissions,
-} from "@nodera/plugin-api";
-import { isPluginId, pluginIssue } from "@nodera/plugin-api";
+} from "../plugin-api/index.js";
+import { isPluginId, pluginIssue } from "../plugin-api/index.js";
 import { err, ok, type Result } from "@nodera/contracts";
 import { isValidVersion, parseVersionRange } from "./semver.js";
 

@@ -5,7 +5,7 @@
  * `createBuilder` call, authored definitions, a plugin, a theme, a layout, a
  * renderer replacement and a seeded graph. No internal Nodera package is
  * imported — the only Nodera imports of the whole demo are `@nodera/sdk` and
- * `@nodera/react-flow` — which is the result Phase 6 has to prove.
+ * `@nodera/react` — which is the result Phase 6 has to prove.
  */
 
 import {
@@ -17,7 +17,7 @@ import {
   type EdgeDefinitionInput,
   type LayoutDefinition,
 } from "@nodera/sdk";
-import { createReactFlowAdapter } from "@nodera/react-flow";
+import { createReactFlowAdapter } from "@nodera/react";
 
 import {
   AUDIT_NODE,

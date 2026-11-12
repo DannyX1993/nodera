@@ -4,7 +4,7 @@ An example Nodera plugin made of node definitions only: it contributes two node
 types and binds **no** renderer. Presentation stays with the host — a node type
 *is* its renderer id, so the definition already says which renderer the UI must
 resolve, and the host attaches the component itself. It imports `@nodera/sdk`
-and `@nodera/plugin-api` only; no React, no React Flow.
+only; no React, no React Flow.
 
 - **Plugin id:** `example.ai-nodes`
 - **Version:** `1.0.0`
@@ -21,8 +21,7 @@ Nothing else: the manifest declares exactly these two `node` contributions.
 ## Install
 
 ```ts
-import { createPluginManager } from "@nodera/plugin-manager";
-import { assertValid, createBuilder } from "@nodera/sdk";
+import { assertValid, createBuilder, createPluginManager } from "@nodera/sdk";
 import { aiNodesPlugin } from "@nodera/ai-nodes";
 
 const builder = assertValid(createBuilder());
@@ -44,7 +43,7 @@ if (installed.ok) {
   `bindRenderer` adds a new binding keyed by that id and only rejects an id that
   is already bound (`sdk.duplicate-id`).
 - **`api.renderers.bind` is the host/framework-aware channel.** Its value must be
-  something the presentation adapter can paint: in `@nodera/react-flow` a React
+  something the presentation adapter can paint: in `@nodera/react` a React
   component (function or `memo`/`forwardRef`). Binding plain data in `nodes`
   makes `createRendererSet` throw `InvalidRendererBindingError` for the whole
   builder, and the id cannot be rebound afterwards — the builder is simply not

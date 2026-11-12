@@ -12,7 +12,7 @@
  *   non-React host;
  * - the plugin binds no renderer at all. `api.renderers.bind` is the
  *   *host/framework-aware* channel — a value bound there must be something the
- *   presentation adapter can paint (for `@nodera/react-flow`, a React
+ *   presentation adapter can paint (for `@nodera/react`, a React
  *   component). A plain-data descriptor bound into `nodes` makes
  *   `createRendererSet` reject the whole builder with
  *   `InvalidRendererBindingError`, which is exactly why a framework-agnostic
@@ -21,10 +21,11 @@
  *   registers, so a host can plan, conflict-check and later withdraw them.
  */
 
-import type { PluginDefinition, PluginManifest } from "@nodera/plugin-api";
 import type {
   BuilderPluginApi,
   NodeDefinitionInput,
+  PluginDefinition,
+  PluginManifest,
   SdkIssues,
 } from "@nodera/sdk";
 

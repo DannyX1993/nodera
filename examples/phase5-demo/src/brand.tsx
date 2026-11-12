@@ -17,7 +17,7 @@ import {
   PortHandle,
   PortRendererRegistry,
   type NoderaPortRendererProps,
-} from "@nodera/react-flow";
+} from "@nodera/react";
 // React Flow lives in the host application here, never in a `@nodera/*` package:
 // a port *is* a canvas connection point, so a custom port renderer has to draw a
 // React Flow `Handle`. The adapter re-exports its own registries and prop
@@ -31,7 +31,7 @@ import {
   type MenuRendererProps,
   type PanelRendererProps,
   type PropertyRendererProps,
-} from "@nodera/ui-react";
+} from "@nodera/react";
 
 import { BADGE_PORT_RENDERER_ID, TABLE_SINK_DEFINITION } from "./definitions.js";
 

@@ -1,6 +1,7 @@
 {
   "name": "@nodera/document",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Portable Generic Graph Document (GGD) contract, normalization, versioning, migrations and graph mapping.",
   "main": "./dist/index.js",

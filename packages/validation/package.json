@@ -1,6 +1,7 @@
 {
   "name": "@nodera/validation",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Representation-independent graph validation: structural and domain levels, normalized issues, validator registry.",
   "main": "./dist/index.js",

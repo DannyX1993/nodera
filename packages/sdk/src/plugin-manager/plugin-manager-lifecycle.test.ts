@@ -5,12 +5,9 @@ import type {
   PluginContribution,
   PluginDefinition,
   PluginManifest,
-} from "@nodera/plugin-api";
-import type {
-  BuilderPluginApi,
-  PluginDeactivatedEvent,
-  PluginUnregisteredEvent,
-} from "@nodera/sdk";
+} from "../plugin-api/index.js";
+import type { BuilderPluginApi } from "../plugin/plugin.js";
+import type { PluginDeactivatedEvent, PluginUnregisteredEvent } from "../events/events-api.js";
 import { createPluginManager } from "./index.js";
 import { contribution, createTestBuilder, nodeInput, pluginManifest } from "./test/fixtures.js";
 

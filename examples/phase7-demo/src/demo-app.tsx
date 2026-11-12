@@ -19,9 +19,8 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-import type { PluginManager, PluginRecord } from "@nodera/plugin-manager";
-import type { Builder, SdkIssues } from "@nodera/sdk";
-import { NoderaEditor } from "@nodera/react-flow";
+import type { Builder, PluginManager, PluginRecord, SdkIssues } from "@nodera/sdk";
+import { NoderaEditor } from "@nodera/react";
 
 import { PLUGIN_IDS } from "./builder.js";
 

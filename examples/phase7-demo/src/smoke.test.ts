@@ -1,14 +1,13 @@
 /**
  * End-to-end smoke of the Phase 7 plugin ecosystem, using only the public
- * surface: `@nodera/sdk`, `@nodera/plugin-manager` and the five example plugins.
+ * surface: `@nodera/sdk` and the five example plugins.
  *
  * It proves the host flow — install → activate → deactivate → uninstall — and
  * that every contribution actually lands in (and is withdrawn from) the
  * builder's registries.
  */
 
-import { assertValid, createBuilder } from "@nodera/sdk";
-import { createPluginManager } from "@nodera/plugin-manager";
+import { assertValid, createBuilder, createPluginManager } from "@nodera/sdk";
 import { aiNodesPlugin } from "@nodera/ai-nodes";
 import { basicNodesPlugin } from "@nodera/basic-nodes";
 import { dataNodesPlugin } from "@nodera/data-nodes";

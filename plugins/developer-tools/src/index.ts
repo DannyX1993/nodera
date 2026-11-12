@@ -12,10 +12,11 @@
  * registers (D2, D13).
  */
 
-import type { PluginDefinition, PluginManifest } from "@nodera/plugin-api";
 import type {
   BuilderPluginApi,
   PanelDefinition,
+  PluginDefinition,
+  PluginManifest,
   SdkIssues,
   ToolDefinition,
 } from "@nodera/sdk";

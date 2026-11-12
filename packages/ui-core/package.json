@@ -1,6 +1,7 @@
 {
   "name": "@nodera/ui-core",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Framework-agnostic UI composition contracts and editor UI state for Nodera",
   "main": "./dist/index.js",

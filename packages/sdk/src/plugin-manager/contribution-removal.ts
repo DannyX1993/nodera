@@ -14,9 +14,16 @@
  */
 
 import { err, ok, type RegistryError, type Result } from "@nodera/contracts";
-import type { PluginContribution, PluginContributionKind, PluginIssue, PluginIssues, PluginManifest } from "@nodera/plugin-api";
-import { pluginIssue } from "@nodera/plugin-api";
-import type { Builder, SdkIssues } from "@nodera/sdk";
+import type {
+  PluginContribution,
+  PluginContributionKind,
+  PluginIssue,
+  PluginIssues,
+  PluginManifest,
+} from "../plugin-api/index.js";
+import { pluginIssue } from "../plugin-api/index.js";
+import type { Builder } from "../builder/builder.js";
+import type { SdkIssues } from "../errors.js";
 
 /** Why one removal failed, in the vocabulary the manager reports. */
 interface RemovalFailure {

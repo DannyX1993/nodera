@@ -6,7 +6,7 @@ surface.
 
 Everything it contributes is declarative data — no component and no function is
 stored in a definition — so the same plugin serves any presentation adapter. It
-imports `@nodera/sdk` and `@nodera/plugin-api` only.
+imports `@nodera/sdk` only.
 
 - **Plugin id:** `example.basic-nodes`
 - **Version:** `1.0.0`
@@ -26,8 +26,7 @@ kinds and versions its `activate` hook registers, and `basicNodesPlugin` is the
 ## Install
 
 ```ts
-import { createPluginManager } from "@nodera/plugin-manager";
-import { assertValid, createBuilder } from "@nodera/sdk";
+import { assertValid, createBuilder, createPluginManager } from "@nodera/sdk";
 import { basicNodesPlugin } from "@nodera/basic-nodes";
 
 const builder = assertValid(createBuilder());

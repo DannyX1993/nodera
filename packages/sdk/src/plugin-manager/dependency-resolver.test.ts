@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PluginDependency, PluginIssue, PluginManifest } from "@nodera/plugin-api";
+import type { PluginDependency, PluginIssue, PluginManifest } from "../plugin-api/index.js";
 import { resolveDependencyOrder } from "./dependency-resolver.js";
 
 function manifest(

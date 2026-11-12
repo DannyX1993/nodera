@@ -14,8 +14,8 @@ import type {
   PluginIssues,
   PluginManifest,
   PluginState,
-} from "@nodera/plugin-api";
-import type { BuilderPluginApi } from "@nodera/sdk";
+} from "../plugin-api/index.js";
+import type { BuilderPluginApi } from "../plugin/plugin.js";
 
 /** What a host can observe about one installed plugin (D11). */
 export interface PluginRecord {

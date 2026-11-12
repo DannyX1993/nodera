@@ -1,6 +1,7 @@
 {
   "name": "@nodera/serialization-json",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "JSON serialization for the Generic Graph Document (GGD).",
   "main": "./dist/index.js",

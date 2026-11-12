@@ -2,8 +2,8 @@
 
 An example Nodera plugin with one contribution of every remaining kind: a theme,
 a layout, a layout strategy and an exporter. Together with the other four example
-plugins it completes the contribution surface. It imports `@nodera/sdk` and
-`@nodera/plugin-api` only.
+plugins it completes the contribution surface. It imports `@nodera/sdk`
+only.
 
 - **Plugin id:** `example.kitchen-sink` (the directory is `plugins/example-plugin`)
 - **Version:** `1.0.0`
@@ -20,8 +20,7 @@ plugins it completes the contribution surface. It imports `@nodera/sdk` and
 ## Install
 
 ```ts
-import { createPluginManager } from "@nodera/plugin-manager";
-import { assertValid, createBuilder } from "@nodera/sdk";
+import { assertValid, createBuilder, createPluginManager } from "@nodera/sdk";
 import { kitchenSinkPlugin, BLUEPRINT_THEME_ID, NDJSON_FORMAT } from "@nodera/example-plugin";
 
 const builder = assertValid(createBuilder());

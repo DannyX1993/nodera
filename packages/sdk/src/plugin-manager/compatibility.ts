@@ -8,8 +8,8 @@
  * it must not be forced to invent one.
  */
 
-import type { PluginIssue, PluginIssues, PluginManifest } from "@nodera/plugin-api";
-import { pluginIssue } from "@nodera/plugin-api";
+import type { PluginIssue, PluginIssues, PluginManifest } from "../plugin-api/index.js";
+import { pluginIssue } from "../plugin-api/index.js";
 import { satisfiesRange } from "./semver.js";
 
 /** Host facts a compatibility declaration is checked against. */

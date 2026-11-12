@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@nodera/application": "workspace:*",
-    "@nodera/react-flow": "workspace:*",
+    "@nodera/react": "workspace:*",
     "@nodera/domain": "workspace:*",
     "@nodera/graph-model": "workspace:*",
     "@nodera/layout-engine": "workspace:*",
@@ -19,7 +19,6 @@
     "@nodera/property-system": "workspace:*",
     "@nodera/theme-engine": "workspace:*",
     "@nodera/ui-core": "workspace:*",
-    "@nodera/ui-react": "workspace:*",
     "@xyflow/react": "^12.12.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

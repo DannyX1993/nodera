@@ -16,7 +16,7 @@ import type { PanelRegistry, ToolRegistry, UiStateStore } from "@nodera/ui-core"
 import {
   NoderaUiProvider,
   type ComponentRenderers,
-} from "@nodera/ui-react";
+} from "@nodera/react";
 
 import { Workspace } from "./app.js";
 

@@ -1,6 +1,7 @@
 {
   "name": "@nodera/react-flow",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "React Flow integration for Nodera: the canvas adapter that translates the portable graph model to React Flow, plus the SDK binding that composes a builder into a renderable editor.",
   "main": "./dist/index.js",

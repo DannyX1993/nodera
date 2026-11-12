@@ -1,6 +1,7 @@
 {
   "name": "@nodera/contracts",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Shared contracts for the Nodera domain core: identifiers, validation diagnostics, and registry ports.",
   "main": "./dist/index.js",

@@ -12,7 +12,7 @@
 import { useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 
 import { addNode, type EditorEngine } from "@nodera/application";
-import { GraphCanvas } from "@nodera/react-flow";
+import { GraphCanvas } from "@nodera/react";
 import {
   CANVAS_ONLY_LAYOUT_ID,
   createMemoryLayoutPreferenceStore,
@@ -37,7 +37,7 @@ import {
   useUiState,
   useUiStateActions,
   type CanvasCommandHandlers,
-} from "@nodera/ui-react";
+} from "@nodera/react";
 
 import {
   BrandMenu,

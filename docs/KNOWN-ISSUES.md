@@ -151,12 +151,12 @@ producing explicit `document.*` diagnostics rather than a silent rewrite.
 
 ---
 
-## KI-4 — 54 pre-existing lint warnings
+## KI-4 — 52 pre-existing lint warnings
 
 **Status:** open, accepted.
 
-`pnpm lint` exits 0 with 54 warnings: 36 `@typescript-eslint/no-unused-vars` and
-18 `@typescript-eslint/no-explicit-any`, all pre-existing. They are kept as
+`pnpm lint` exits 0 with 52 warnings: 36 `@typescript-eslint/no-unused-vars` and
+16 `@typescript-eslint/no-explicit-any`, all pre-existing. They are kept as
 warnings (not errors) in `eslint.config.mjs` so lint is real and CI is green
 without a large unrelated cleanup. New errors do fail the build; new warnings
 of these two rules do not.
@@ -263,3 +263,81 @@ virtualization. There is no evidence of palettes large enough to need it yet.
 
 **Consequence:** a host with hundreds of palette/search entries may see slower
 list rendering; this becomes real work only when a measured case appears.
+
+---
+
+## KI-12 — The distribution is two packages; 23 internal packages are `private`
+
+**Status:** open, by design (S1 of `odd/tasks/two-package-distribution.md`).
+
+Nodera publishes exactly two npm packages:
+
+| Package | Contents | Peer dependencies |
+| --- | --- | --- |
+| `@nodera/sdk` | The framework-free core, bundled into one `dist/`: contracts, domain, graph model, application, document, serialization (JSON/YAML), validation, node/edge registries, property system, history, graph-layout, ui-core, theme-engine, layout-engine, the plugin contracts (`src/plugin-api/`) and the plugin manager (`src/plugin-manager/`). | none |
+| `@nodera/react` | The React binding, bundled into one `dist/`: everything from `@nodera/sdk` plus the React Flow canvas adapter and the React presentation layer. | `react`, `react-dom`, `@xyflow/react` |
+
+Everything else under `packages/*` is `private: true` and is never published:
+
+- the 19 core packages named above, which are bundled into `@nodera/sdk`;
+- `packages/react-flow` and `packages/ui-react`, which are bundled into
+  `@nodera/react`;
+- `packages/plugin-api` and `packages/plugin-manager`, which stay in the
+  workspace as shells whose `src/index.ts` exports nothing — the code moved into
+  `packages/sdk/src/plugin-api/` and `packages/sdk/src/plugin-manager/`, so an
+  import of the old specifier fails loudly instead of resolving a stale copy;
+- the placeholders already documented in KI-7.
+
+**Why two packages and not one.** A single package with a `./react` subpath was
+tried and reverted: the binding depends on the SDK, the SDK would have had to
+re-export the binding, and the result was a real `sdk ↔ react-flow/ui-react`
+cycle plus duplicated type identities. Two packages keep one direction
+(`@nodera/react → @nodera/sdk`), so a different framework is a different binding
+package over the same core (S1/S2/S3, AGENTS.md §4.1).
+
+**How the public surface looks.**
+
+```ts
+// Framework-free host: builder, documents, definitions, plugins.
+import { assertValid, createBuilder, createPluginManager } from "@nodera/sdk";
+
+// React host: one package next to React and React Flow.
+import { createBuilder, NoderaEditor } from "@nodera/react";
+```
+
+Both packages expose exactly one entry (`exports` = `{ ".": … }`), no subpaths.
+`npm pack --dry-run` in `packages/sdk` and `packages/react` lists only
+`dist/index.js`, `dist/index.d.ts` and their source maps: every `@nodera/*`
+module is inlined, so the tarballs are self-contained.
+
+**Consequences worth knowing.**
+
+- **Internal packages keep their own build in the workspace.** Each one still
+  compiles to `packages/*/dist` and is consumed from there, because they are the
+  inputs of both bundles and their suites run against their own output. A host
+  outside the monorepo must not import them: they are not published.
+- **Declarations are bundled twice on purpose, and the workspace redirects
+  them.** A self-contained `dist/index.d.ts` is a *copy* of the core
+  declarations, so a program that sees both the copy and the original would get
+  two unrelated classes (TypeScript compares private fields nominally). To keep
+  one identity inside the repo, both packages also emit an unbundled declaration
+  tree to `dist/types/` (`tsc --emitDeclarationOnly`) and `tsconfig.base.json`
+  maps `@nodera/sdk` / `@nodera/react` there with `paths`. That tree is excluded
+  from the tarballs (`files: ["dist", "!dist/types"]`). A consumer outside the
+  workspace only ever installs the published packages, so it sees one copy per
+  package and no redirect is needed.
+- **`@nodera/react-flow` and `@nodera/ui-react` no longer exist as import
+  paths.** A host that imported them imports `@nodera/react`; the React Flow
+  package keeps its role as the canvas adapter, but it is an internal half of the
+  binding now (`docs/PROJECT-STRUCTURE.md` §7.3, §7.6).
+- **The plugin ecosystem has one import path.** `@nodera/plugin-api` and
+  `@nodera/plugin-manager` are gone from the public surface: a plugin imports
+  `@nodera/sdk` (docs/PLUGINS.md).
+- **Publishing is still readiness-only.** No registry release happens: the two
+  tarballs are built and inspected with `npm pack --dry-run`, and
+  `@changesets/cli` only lists the two non-private packages.
+
+**Consequence:** a change to a core package, `react-flow`, `ui-react` or the
+plugin contracts reaches a consumer only through a new release of `@nodera/sdk`
+and/or `@nodera/react`; they cannot be installed individually. That is the
+intended trade-off of the two-package model.

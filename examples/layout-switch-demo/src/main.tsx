@@ -14,7 +14,7 @@ import "@xyflow/react/dist/style.css";
 
 import { createRoot } from "react-dom/client";
 
-import { NoderaBuilderProvider } from "@nodera/react-flow";
+import { NoderaBuilderProvider } from "@nodera/react";
 
 import { LayoutSwitchDemo } from "./app.js";
 import { createDemoBuilder } from "./builder.js";

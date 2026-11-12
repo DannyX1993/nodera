@@ -2,15 +2,15 @@
   "name": "@nodera/sdk",
   "version": "1.0.0",
   "type": "module",
-  "description": "Public SDK for the Nodera graph editing framework: builder factory, authoring APIs, registries, document/event/plugin contracts and the engine-agnostic presentation adapter port. No framework dependency.",
+  "description": "Public SDK for the Nodera graph editing framework: builder factory, authoring APIs, registries, document/event/plugin contracts, the plugin lifecycle manager and the engine-agnostic presentation adapter port. No framework dependency.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsup && tsc -p tsconfig.build.json --emitDeclarationOnly --declaration --outDir dist/types",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": {
+  "devDependencies": {
     "@nodera/application": "workspace:*",
     "@nodera/contracts": "workspace:*",
     "@nodera/document": "workspace:*",
@@ -25,9 +25,8 @@
     "@nodera/serialization-yaml": "workspace:*",
     "@nodera/theme-engine": "workspace:*",
     "@nodera/ui-core": "workspace:*",
-    "@nodera/validation": "workspace:*"
-  },
-  "devDependencies": {
+    "@nodera/validation": "workspace:*",
+    "tsup": "^8.5.0",
     "typescript": "^5.7.2",
     "vitest": "^3.0.5"
   },
@@ -39,12 +38,12 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
+      "import": "./dist/index.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/types"
   ],
   "engines": {
     "node": ">=20"

@@ -1,6 +1,7 @@
 {
   "name": "@nodera/domain",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Domain facade that composes the Nodera core: graph model, definitions, registries and validation.",
   "main": "./dist/index.js",

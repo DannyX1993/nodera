@@ -2,7 +2,7 @@
 
 An example Nodera plugin for the declarative-data side of the surface: two
 property definitions, one graph validator and one importer for a new document
-format. It imports `@nodera/sdk` and `@nodera/plugin-api` only.
+format. It imports `@nodera/sdk` only.
 
 - **Plugin id:** `example.data-nodes`
 - **Version:** `1.0.0`
@@ -23,8 +23,7 @@ keeps its own property renderers.
 ## Install
 
 ```ts
-import { createPluginManager } from "@nodera/plugin-manager";
-import { assertValid, createBuilder } from "@nodera/sdk";
+import { assertValid, createBuilder, createPluginManager } from "@nodera/sdk";
 import { dataNodesPlugin, JSON_LINES_FORMAT } from "@nodera/data-nodes";
 
 const builder = assertValid(createBuilder());

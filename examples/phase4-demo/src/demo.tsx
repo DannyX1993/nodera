@@ -7,7 +7,7 @@ import {
   EdgeRendererRegistry,
   GraphCanvas,
   type NoderaNodeRendererProps,
-} from "@nodera/react-flow";
+} from "@nodera/react";
 
 export interface DemoAppProps {
   readonly editor: EditorEngine;

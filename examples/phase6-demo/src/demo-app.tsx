@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { Builder, SdkIssues } from "@nodera/sdk";
-import { NoderaEditor } from "@nodera/react-flow";
+import { NoderaEditor } from "@nodera/react";
 
 /** Props accepted by {@link DemoApp}. */
 export interface DemoAppProps {

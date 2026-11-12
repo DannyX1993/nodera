@@ -54,14 +54,14 @@
 import { useState, type ReactNode } from "react";
 
 import type { Builder, EdgeStyleInput, SdkIssues, ViewportConfiguration } from "@nodera/sdk";
-import { NoderaEditor } from "@nodera/react-flow";
 import {
   CreateNodeButton,
+  NoderaEditor,
   NodeCreationDialog,
   useDialogActions,
   useEditorSnapshot,
   useUiState,
-} from "@nodera/ui-react";
+} from "@nodera/react";
 
 import {
   DEMO_EDGE_LABEL,

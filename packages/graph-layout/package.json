@@ -1,6 +1,7 @@
 {
   "name": "@nodera/graph-layout",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Framework-agnostic graph placement strategies: the free no-op and the in-house layered arrangement",
   "main": "./dist/index.js",

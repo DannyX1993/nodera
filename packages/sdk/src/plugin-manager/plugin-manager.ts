@@ -26,16 +26,12 @@ import type {
   PluginIssue,
   PluginIssues,
   PluginManifest,
-} from "@nodera/plugin-api";
-import { pluginIssue } from "@nodera/plugin-api";
-import {
-  installPlugin,
-  SDK_VERSION,
-  type Builder,
-  type BuilderPlugin,
-  type BuilderPluginApi,
-  type SdkIssue,
-} from "@nodera/sdk";
+} from "../plugin-api/index.js";
+import { pluginIssue } from "../plugin-api/index.js";
+import type { Builder } from "../builder/builder.js";
+import type { SdkIssue } from "../errors.js";
+import { installPlugin, type BuilderPlugin, type BuilderPluginApi } from "../plugin/plugin.js";
+import { SDK_VERSION } from "../version.js";
 import { checkCompatibility } from "./compatibility.js";
 import { removeContributions } from "./contribution-removal.js";
 import { detectPluginConflicts } from "./conflict-detector.js";

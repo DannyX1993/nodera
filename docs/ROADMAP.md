@@ -179,15 +179,13 @@ Implementar:
   publicar (S4): `LICENSE` MIT, `README.md` raíz, `CONTRIBUTING.md`, `CHANGELOG.md`
   y READMEs por paquete; build real a `dist/` con `main`/`types`/`exports`/`files`
   y metadatos de publicación (`version: 1.0.0`, `license`, `repository`,
-  `publishConfig.access: public`) en los 21 paquetes con código. `@nodera/sdk`
-  expone `SDK_VERSION` y el plugin manager resuelve `compatibility.sdkVersion` por
-  defecto contra él. Accesibilidad (atajos configurables, `aria-live`,
-  `:focus-visible`), internacionalización (catálogo de strings + `Locale` +
-  `translate` + proveedor React) y rendimiento (`React.memo` en renderers/paneles,
-  selección aislada de la derivación, `onlyRenderVisibleElements`) quedan
-  cubiertos. Testing: ESLint real (`pnpm lint`), cobertura opt-in y documentación
-  de `packages/testing`. Release automation: GitHub Actions CI y changesets
-  (`version`/`release`). Limitaciones conocidas documentadas en
-  `docs/KNOWN-ISSUES.md` (KI-2..KI-8): sin validación de versión
-  definición-instancia, sin migraciones embarcadas, sin E2E/visual (Vitest-only),
-  `apps/*` y tres `examples/*` son placeholders.
+  `publishConfig.access: public`). La distribución pública final se consolidó a
+  **dos paquetes** (ver más abajo, "Distribución en dos paquetes"): `@nodera/sdk`
+  (core framework-free) y `@nodera/react` (binding React). `@nodera/sdk` expone
+  `SDK_VERSION` y resuelve `compatibility.sdkVersion` por defecto. Accesibilidad
+  (atajos configurables, `aria-live`, `:focus-visible`), internacionalización
+  (catálogo + `Locale` + `translate` + proveedor React) y rendimiento
+  (`React.memo`, selección aislada, `onlyRenderVisibleElements`) quedan cubiertos.
+  Testing: ESLint real (`pnpm lint`), cobertura opt-in. Release automation:
+  GitHub Actions CI y changesets (`version`/`release`). Limitaciones documentadas
+  en `docs/KNOWN-ISSUES.md` (KI-2..KI-12).

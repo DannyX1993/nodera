@@ -1,6 +1,7 @@
 {
   "name": "@nodera/application",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Application core: use cases, commands, events, history, selection and clipboard for graph editing. Framework-agnostic.",
   "main": "./dist/index.js",

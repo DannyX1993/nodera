@@ -1,6 +1,7 @@
 {
   "name": "@nodera/graph-model",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Graph domain entities: Graph, Node, Edge, Port, Connection and structural integrity rules.",
   "main": "./dist/index.js",

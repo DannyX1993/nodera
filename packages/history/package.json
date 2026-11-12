@@ -1,6 +1,7 @@
 {
   "name": "@nodera/history",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Framework-agnostic reversible command engine: undo/redo stack, transactions, grouping, listeners. Knows nothing about graphs.",
   "main": "./dist/index.js",

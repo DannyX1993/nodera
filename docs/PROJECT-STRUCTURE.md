@@ -106,9 +106,10 @@ Application
 Domain
 
 Infrastructure    ---> Application / Domain contracts
-Plugins           ---> Public SDK contracts
-Host Application  ---> Public SDK
+Plugins           ---> Public SDK contracts (@nodera/sdk)
+Host Application  ---> Public SDK (@nodera/sdk) or the React binding (@nodera/react)
 Public SDK        ---> Domain / Application / Document contracts
+React binding (@nodera/react) ---> Public SDK + canvas adapter + ui-react
 React Flow integration (binding layer) ---> Public SDK
 React Flow integration (canvas layer)  ---> Application / Domain / Graph model
 ```
@@ -128,7 +129,8 @@ La UI Composition se implementa en cuatro paquetes de UI más el adaptador de
 canvas, con límites explícitos:
 
 ```text
-@nodera/ui-react  (componentes React, providers, bindings)
+@nodera/ui-react  (componentes React, providers, bindings; interno: se publica
+                    dentro de @nodera/react, §7.6)
         |
         +--> @nodera/ui-core         contratos: paneles, tools/comandos, estado de UI
         +--> @nodera/theme-engine     design tokens, temas, variables CSS
@@ -139,11 +141,13 @@ canvas, con límites explícitos:
 @nodera/theme-engine  --> @nodera/contracts
 @nodera/ui-core       --> @nodera/contracts
 
-@nodera/react-flow   (capa de canvas: único paquete que importa @xyflow/react;
-        ^             el mismo paquete aloja el binding del SDK, ver §7.3)
+@nodera/react-flow   (capa de canvas: importa @xyflow/react; el mismo paquete
+        ^             aloja el binding del SDK, ver §7.3. Interno: se publica
+        |             dentro de @nodera/react, §7.6)
         |  hermano, NO dependencia de ui-react
         |
-  aplicación host  --- compone ui-react (paneles, providers) y la capa de canvas
+  aplicación host  --- instala @nodera/react, que empaqueta ui-react
+                       (paneles, providers) y la capa de canvas
 ```
 
 `@nodera/ui-react` y la capa de canvas de `@nodera/react-flow` son adaptadores
@@ -160,7 +164,8 @@ Reglas de frontera, verificadas de forma ejecutable con `pnpm check:architecture
   `@xyflow`, y no importa ni declara `@nodera/react-flow`: el canvas queda en el
   adaptador. El minimapa de composición es un SVG propio, no el `MiniMap` de
   React Flow.
-- Ningún paquete fuera de `packages/react-flow` importa `@xyflow/react`.
+- Ningún paquete fuera de `packages/react-flow` y de `packages/react` importa
+  `@xyflow/react`.
 
 El script imprime una línea de estado por regla y termina con código distinto de
 cero listando los archivos que las incumplen.
@@ -190,14 +195,22 @@ mecanismo de ADR, por lo que no se creó uno.
 
 ## 7.3. Capa SDK implementada (Fase 6)
 
-El SDK se implementa en dos paquetes, y esa separación es la idea central de la
-fase: `@nodera/sdk` es agnóstico de framework y de motor, y `@nodera/react-flow`
-selecciona ambos. El segundo aloja a su vez dos capas, porque el binding está
-escrito contra los tipos del adaptador de canvas y solo tiene sentido con él
-(D25):
+El SDK se implementa en dos artefactos, y esa separación es la idea central de la
+fase: `@nodera/sdk` es agnóstico de framework y de motor, y el binding React
+selecciona ambos. Desde la consolidación de la distribución (§7.6) ese binding se
+publica como `@nodera/react`, que empaqueta `packages/react-flow` y
+`packages/ui-react`; `packages/react-flow` sigue alojando a su vez dos capas,
+porque el binding está escrito contra los tipos del adaptador de canvas y solo
+tiene sentido con él (D25):
 
 ```text
-@nodera/react-flow   (integración de React Flow; un motor distinto es otro paquete)
+@nodera/react        (binding React publicado: empaqueta react-flow + ui-react)
+        |
+        +--> @nodera/sdk
+        +--> packages/react-flow      (integrado, no publicado)
+        +--> packages/ui-react        (integrado, no publicado)
+
+packages/react-flow  (integración de React Flow; un motor distinto es otro paquete)
         |
         |  dos capas dentro del paquete:
         |    binding  adapter/, providers/, editor/, vocabulary.ts,
@@ -222,7 +235,8 @@ La dirección de dependencias es `react-flow → sdk` en la capa de binding y
 depender de este paquete, ni de React ni de `@xyflow/react`. Un host que solo
 consume `@nodera/sdk` no necesita React Flow (AGENTS.md §4.1 y §8). El paquete
 `ui-react` sigue siendo el único paquete React agnóstico de motor: nunca importa
-`@nodera/react-flow`.
+`@nodera/react-flow`. El paquete publicado `packages/react` depende de los tres
+en una sola dirección (`react → sdk`), y su regla de frontera está en §7.6.
 
 Reglas de frontera, verificadas de forma ejecutable con `pnpm check:architecture`
 (`scripts/check-architecture.mjs`, sin dependencias añadidas). El script imprime
@@ -236,7 +250,7 @@ reglas de esta sección son:
 - `ui-react-owns-no-adapter` — `ui-react` no importa ni declara
   `@nodera/react-flow`.
 - `react-flow-adapter-only` — ningún paquete fuera de
-  `packages/react-flow` importa `@xyflow/react`.
+  `packages/react-flow` y de `packages/react` importa `@xyflow/react`.
 - `sdk-framework-free` — `packages/sdk` no importa React, React DOM,
   `@nodera/ui-react`, `@nodera/react-flow` ni `@xyflow`, y su manifiesto no los
   declara en ninguna sección de dependencias.
@@ -247,8 +261,8 @@ reglas de esta sección son:
   capa de canvas sí puede usar `application` y los paquetes del modelo, porque su
   trabajo es traducir entre ambos.
 
-El mismo script verifica las tres reglas de frontera del ecosistema de plugins
-(§7.5).
+El mismo script verifica la regla de frontera del ecosistema de plugins (§7.5) y
+la del binding publicado (§7.6).
 
 Reglas de comportamiento:
 
@@ -326,8 +340,8 @@ Reglas de frontera:
   devuelve posiciones o un diagnóstico estructurado. Su `package.json` declara
   únicamente `@nodera/contracts` y `@nodera/graph-model`, y esas son las dos
   únicas importaciones de sus fuentes. `pnpm check:architecture` todavía no
-  verifica esta frontera: sus nueve reglas cubren la capa de presentación, el SDK
-  y el ecosistema de plugins (§7.2, §7.3, §7.5).
+  verifica esta frontera: sus ocho reglas cubren la capa de presentación, el SDK,
+  el binding React y el ecosistema de plugins (§7.2, §7.3, §7.5, §7.6).
 - Escribir posiciones no es responsabilidad de este paquete: el SDK aplica la
   respuesta a través del caso de uso `arrangeGraph` de `@nodera/application`, que
   valida todo antes de escribir y lo hace como una única unidad reversible.
@@ -354,45 +368,103 @@ del SDK y el ejemplo, en `docs/GRAPH-LAYOUT.md`; el ejemplo ejecutable en
 El sistema de plugins es responsabilidad de la capa de infraestructura
 (`docs/GLOBAL-ARCHITECTURE.md` §Infrastructure Layer) y su dirección de
 dependencias es la de §7.1: los plugins consumen contratos públicos, nunca el
-core. Se implementa en dos paquetes más la superficie que el SDK ya publicaba:
+core. Desde la consolidación de la distribución (KI-12) el ecosistema entero se
+publica dentro de `@nodera/sdk`: los contratos viven en
+`packages/sdk/src/plugin-api/` y la infraestructura en
+`packages/sdk/src/plugin-manager/`. Los paquetes `packages/plugin-api` y
+`packages/plugin-manager` siguen existiendo como cascarones `private` cuyo
+`src/index.ts` no exporta nada, para no alterar el grafo del workspace ni el de
+turbo.
 
 ```text
 plugins/*                    (terceros: solo la superficie pública)
         |
-        +--> @nodera/sdk                BuilderPluginApi, builder, eventos
-        +--> @nodera/plugin-api         manifest, contribuciones, lifecycle, errores
+        +--> @nodera/sdk        BuilderPluginApi, builder, eventos, manifest,
+                                contribuciones, lifecycle, createPluginManager
 
-@nodera/plugin-manager       (infraestructura del host)
+host
         |
-        +--> @nodera/plugin-api
-        +--> @nodera/sdk
-        +--> @nodera/contracts
+        +--> @nodera/sdk        (misma superficie; no hay un segundo paquete)
 
-@nodera/plugin-api --> @nodera/contracts
-@nodera/sdk         -X-> @nodera/plugin-api, @nodera/plugin-manager   (sin ciclo)
+@nodera/sdk  contiene
+        src/plugin-api/         contrato puro: manifest, lifecycle, errores, ids
+        src/plugin-manager/     infraestructura: validación, resolución,
+                                conflictos, ciclo de vida y retirada
+                          |
+                          +--> usa la superficie pública del propio SDK
+                               (installPlugin, unregister, eventos)
 ```
+
+El antiguo ciclo `sdk ↔ plugin-manager` desaparece por construcción: el manager
+compone la superficie pública del SDK y ahora vive dentro de él, sin importar
+ningún paquete externo. El contrato sigue siendo puro: `src/plugin-api` no
+importa React, React DOM, React Flow ni `@nodera/ui-*`, y esa propiedad queda
+cubierta por `sdk-framework-free` (si alguien arrastrase una presentación al SDK,
+la regla falla).
 
 Reglas de frontera, verificadas con `pnpm check:architecture`:
 
-- `plugin-api-is-pure-contracts` — `packages/plugin-api` no menciona React, React
-  DOM, `@xyflow`, `@nodera/ui-*` ni `@nodera/react-flow`, ni en sus fuentes ni en
-  su `package.json`, y sus dependencias de ejecución son solo
-  `@nodera/contracts`. Es un contrato puro: no puede arrastrar una presentación a
-  cada consumidor.
-- `plugin-manager-is-infrastructure-only` — `packages/plugin-manager` importa solo
-  `@nodera/plugin-api`, `@nodera/sdk`, `@nodera/contracts` y módulos nativos de
-  Node; nunca `domain`, `application`, `document`, `ui-core`, `ui-react`,
-  `react-flow`, los registros, `validation`, `theme-engine`, `layout-engine`,
-  `graph-layout` ni `serialization-*`. El manager compone el SDK; reimplementar
-  por debajo lo que el SDK ya posee rompería la superficie única de composición.
 - `example-plugins-use-the-public-surface` — cada `plugins/*` importa solo
-  `@nodera/sdk` y `@nodera/plugin-api` en su código de producción (sus tests
-  pueden importar además `@nodera/plugin-manager` y `vitest`) y nunca un paquete
-  interno del core. Un plugin es un tercero: se escribe contra la superficie
-  publicada y nada más.
+  `@nodera/sdk` en su código de producción (sus tests pueden importar además
+  `vitest`) y nunca un paquete interno del core. Un plugin es un tercero: se
+  escribe contra la superficie publicada y nada más.
+- Las antiguas `plugin-api-is-pure-contracts` y
+  `plugin-manager-is-infrastructure-only` se retiraron junto con los paquetes
+  públicos que vigilaban: el código que cubrían ya no es un paquete, y un
+  contrato dentro del SDK no puede fijar por sí mismo la dirección de un paquete
+  que no existe. `pnpm check:architecture` mantiene ocho reglas (§7.2, §7.3,
+  §7.6).
 
 La guía completa — manifest, contribuciones, ciclo de vida, resolución de
 dependencias, conflictos, seguridad, distribución y limitaciones conocidas —
-está en `docs/PLUGINS.md`; el detalle de cada paquete en
-`packages/plugin-api/README.md` y `packages/plugin-manager/README.md`; los cinco
-ejemplos en `plugins/*`.
+está en `docs/PLUGINS.md`; el código, en `packages/sdk/src/plugin-api/` y
+`packages/sdk/src/plugin-manager/`; los cinco ejemplos en `plugins/*`.
+
+## 7.6. Distribución en dos paquetes
+
+Nodera publica exactamente dos paquetes (decisión S1 del
+`odd/tasks/two-package-distribution.md`): el core agnóstico y el binding de un
+framework. Cambiar de framework es añadir otro paquete de binding, nunca tocar el
+core.
+
+```text
+@nodera/sdk   (público, sin dependencias de framework)
+        |  bundle: contracts, domain, graph-model, application, document,
+        |          serialization-*, validation, node/edge-registry,
+        |          property-system, history, graph-layout, ui-core,
+        |          theme-engine, layout-engine, plugin-api, plugin-manager
+        v
+@nodera/react (público, peer: react, react-dom, @xyflow/react)
+           bundle: @nodera/sdk + packages/react-flow + packages/ui-react
+```
+
+Propiedades del modelo:
+
+- **Una dirección.** `@nodera/react` depende de `@nodera/sdk`; el SDK no depende
+  del binding. El ciclo que impedía empaquetarlo todo en un paquete desaparece
+  porque el binding ya no forma parte del core.
+- **Un solo punto de entrada por paquete.** `exports` es `"."` en ambos: no hay
+  subrutas, ni `./react`, ni imports profundos. Un host React instala
+  `@nodera/react` y React; un host sin UI instala `@nodera/sdk`.
+- **Autocontenidos.** `tsup` con `noExternal: [/^@nodera\//]` inlinea todos los
+  paquetes del workspace en un único `dist/index.js`, y `dts: { resolve }`
+  inlinea sus declaraciones: el `dist/index.d.ts` publicado no contiene ningún
+  especificador `@nodera/*`. React, React DOM y `@xyflow/react` quedan
+  `external` (peer del binding).
+- **Los internos son `private`.** Los 23 paquetes restantes de `packages/*` no se
+  publican; conservan `build`/`test`/`typecheck` porque son entradas del bundle,
+  y `@nodera/plugin-api`/`@nodera/plugin-manager` quedan como cascarones sin
+  exports (§7.5).
+- **Identidad de tipos en el workspace.** Un `dist/index.d.ts` autocontenido es
+  una copia de las declaraciones del core, así que dentro del monorepo convive
+  con las declaraciones originales de cada paquete. Para que un programa que ve
+  las dos (el binding, los ejemplos que usan `@nodera/sdk` y `@nodera/react`)
+  mantenga una única identidad, `tsconfig.base.json` mapea `@nodera/sdk` y
+  `@nodera/react` con `paths` al árbol de declaraciones sin empaquetar
+  (`dist/types/index.d.ts`), que ambos paquetes emiten como segundo paso del
+  build con `tsc --emitDeclarationOnly`. Ese árbol no se publica
+  (`files: ["dist", "!dist/types"]`).
+- **La regla del binding.** `react-binding-composes-the-sdk` verifica que
+  `packages/react` importa solo `@nodera/sdk`, `@nodera/react-flow`,
+  `@nodera/ui-react`, `react`, `react-dom` y `@xyflow/react` (`vitest` en tests):
+  el binding compone el SDK, nunca un paquete del core por debajo de él.

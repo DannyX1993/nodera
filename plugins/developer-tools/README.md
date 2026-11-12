@@ -1,7 +1,7 @@
 # @nodera/developer-tools
 
 An example Nodera plugin for interface actions: two tools, two panels and one
-dialog, all declarative. It imports `@nodera/sdk` and `@nodera/plugin-api` only,
+dialog, all declarative. It imports `@nodera/sdk` only,
 and contributes no component — the host keeps control of how the actions look.
 
 - **Plugin id:** `example.developer-tools`
@@ -20,8 +20,7 @@ and contributes no component — the host keeps control of how the actions look.
 ## Install
 
 ```ts
-import { createPluginManager } from "@nodera/plugin-manager";
-import { assertValid, createBuilder } from "@nodera/sdk";
+import { assertValid, createBuilder, createPluginManager } from "@nodera/sdk";
 import { developerToolsPlugin, SHORTCUTS_DIALOG_ID } from "@nodera/developer-tools";
 
 const builder = assertValid(createBuilder());

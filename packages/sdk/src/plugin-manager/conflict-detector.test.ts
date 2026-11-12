@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PluginContribution, PluginIssue, PluginManifest } from "@nodera/plugin-api";
+import type { PluginContribution, PluginIssue, PluginManifest } from "../plugin-api/index.js";
 import { detectPluginConflicts } from "./conflict-detector.js";
 
 function manifest(

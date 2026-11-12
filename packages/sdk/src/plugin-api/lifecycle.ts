@@ -32,7 +32,7 @@ export interface PluginContext<TApi = unknown> {
  * A manifest-declared plugin, generic over the contribution surface it targets.
  *
  * The concrete `TApi` is the host SDK's contribution surface (its
- * `PluginApi`); `@nodera/plugin-api` stays independent of any SDK by leaving it
+ * `PluginApi`); the plugin contract stays independent of any SDK by leaving it
  * generic, so the same contract serves a future non-SDK host.
  */
 export interface PluginDefinition<TApi = unknown> {

@@ -12,11 +12,12 @@
  * withdraw the contributions again on uninstall.
  */
 
-import type { PluginDefinition, PluginManifest } from "@nodera/plugin-api";
 import type {
   BuilderPluginApi,
   EdgeDefinitionInput,
   NodeDefinitionInput,
+  PluginDefinition,
+  PluginManifest,
   SdkIssues,
 } from "@nodera/sdk";
 

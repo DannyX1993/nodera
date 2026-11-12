@@ -1,5 +1,5 @@
-import type { PluginIssue, PluginIssues, PluginManifest } from "@nodera/plugin-api";
-import { pluginIssue } from "@nodera/plugin-api";
+import type { PluginIssue, PluginIssues, PluginManifest } from "../plugin-api/index.js";
+import { pluginIssue } from "../plugin-api/index.js";
 import { err, ok, type Result } from "@nodera/contracts";
 import { parseVersionRange, satisfiesRange } from "./semver.js";
 

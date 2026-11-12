@@ -1,6 +1,7 @@
 {
   "name": "@nodera/plugin-api",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "description": "Plugin manifest, lifecycle and validation contracts for the Nodera plugin ecosystem. Framework- and engine-agnostic.",
   "main": "./dist/index.js",
