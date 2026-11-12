@@ -4,6 +4,7 @@ import type { NodeDefinition } from "@nodera/node-registry";
 import { NODE_DEFINITION_MIME_TYPE } from "@nodera/ui-core";
 
 import { useEditorCommands } from "../../bindings/editor-commands.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { useEditorEngine } from "../../providers/ui-provider.js";
 import {
   BUTTON_STYLE,
@@ -27,7 +28,7 @@ export interface NodePaletteProps {
    * or confirmation supplies its own handler (S2: the host decides).
    */
   readonly onAddNode?: (definitionId: string) => void;
-  /** Copy shown when no definition matches. Defaults to `No node definitions`. */
+  /** Copy shown when no definition matches. Defaults to the catalog's `palette.empty`. */
   readonly emptyMessage?: string;
   /**
    * Definitions to offer. Defaults to the live editor registry, which is what a
@@ -160,6 +161,7 @@ function visibleGroups(
 export function NodePalette(props: NodePaletteProps): ReactNode {
   const editor = useEditorEngine();
   const executeCommand = useEditorCommands(editor);
+  const t = useTranslate();
   const [filter, setFilter] = useState("");
 
   const definitions = props.definitions;
@@ -190,8 +192,8 @@ export function NodePalette(props: NodePaletteProps): ReactNode {
       {offersDefinitions ? (
         <input
           type="search"
-          aria-label="Search nodes"
-          placeholder="Search nodes"
+          aria-label={t("palette.search")}
+          placeholder={t("palette.search")}
           value={filter}
           onChange={(event) => {
             setFilter(event.target.value);
@@ -214,7 +216,7 @@ export function NodePalette(props: NodePaletteProps): ReactNode {
                 <button
                   type="button"
                   data-nodera-palette-item={definition.id}
-                  aria-label={`Add ${definition.name}`}
+                  aria-label={t("palette.addNode", { name: definition.name })}
                   draggable
                   onDragStart={(event) => {
                     writeDefinitionPayload(event, definition.id);
@@ -241,7 +243,7 @@ export function NodePalette(props: NodePaletteProps): ReactNode {
       ))}
       {groups.length === 0 ? (
         <p data-nodera-palette-empty="" style={EMPTY_STYLE}>
-          {props.emptyMessage ?? "No node definitions"}
+          {props.emptyMessage ?? t("palette.empty")}
         </p>
       ) : null}
     </div>

@@ -24,12 +24,20 @@
  */
 
 import type { AdapterCapabilities, BuilderAdapter } from "@nodera/sdk";
+import { DEFAULT_LOCALE, translate } from "@nodera/ui-core";
 
 /** Stable id of the React Flow engine adapter. */
 export const REACT_FLOW_ADAPTER_ID = "nodera.react-flow";
 
-/** Human-readable name of the React Flow engine adapter. */
-export const REACT_FLOW_ADAPTER_LABEL = "React Flow";
+/**
+ * Human-readable name of the React Flow engine adapter.
+ *
+ * The engine name is catalog data (`adapter.reactFlow`, S8 "Textos
+ * traducibles") rather than a literal in this file, so a host that presents a
+ * different engine renames it in its own locale catalog instead of forking the
+ * adapter declaration.
+ */
+export const REACT_FLOW_ADAPTER_LABEL = translate(DEFAULT_LOCALE, "adapter.reactFlow");
 
 /** What a host may narrow when it selects the React Flow adapter. */
 export interface ReactFlowAdapterOptions {

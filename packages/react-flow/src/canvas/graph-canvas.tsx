@@ -52,7 +52,7 @@ import type {
   PortsPolicy,
 } from "@nodera/ui-core";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
-import { useEdgeInsertActions, useNoderaUi, useShortcuts } from "@nodera/ui-react";
+import { useEdgeInsertActions, useNoderaUi, useShortcuts, useTranslate } from "@nodera/ui-react";
 import { NoderaWaypointEditingProvider, NoderaPortAxisProvider } from "./editor-context.js";
 import {
   moveNode,
@@ -308,8 +308,14 @@ export const NODE_TRANSITION_STYLE = `
 /*  Edge insert affordance (S6)                                        */
 /* ------------------------------------------------------------------ */
 
-/** Accessible name of the framework's "+" button. */
-export const EDGE_INSERT_LABEL = "Insert node";
+/**
+ * Accessible name of the framework's "+" button role.
+ *
+ * The affordances read their accessible name from the active locale catalog
+ * (`canvas.insertNode`, S8 "Textos traducibles"); this key documents the
+ * message a host overrides when it renames the affordance.
+ */
+export const EDGE_INSERT_LABEL_KEY = "canvas.insertNode";
 
 /**
  * Style of the affordance button.
@@ -352,12 +358,13 @@ export interface DefaultEdgeInsertButtonProps {
  */
 export function DefaultEdgeInsertButton(props: DefaultEdgeInsertButtonProps): ReactNode {
   const insert = useEdgeInsertActions();
+  const t = useTranslate();
 
   return (
     <button
       type="button"
       data-nodera-edge-insert=""
-      aria-label={EDGE_INSERT_LABEL}
+      aria-label={t(EDGE_INSERT_LABEL_KEY)}
       aria-haspopup="dialog"
       style={EDGE_INSERT_BUTTON_STYLE}
       onClick={(event) => {
@@ -1022,13 +1029,14 @@ export function canvasPlaceholders(
  */
 function PhantomInsertButton(props: { readonly anchorId: string | undefined }): ReactNode {
   const { store } = useNoderaUi();
+  const t = useTranslate();
 
   return (
     <button
       type="button"
       data-nodera-phantom-insert=""
       data-nodera-phantom-insert-for={props.anchorId ?? ""}
-      aria-label={EDGE_INSERT_LABEL}
+      aria-label={t(EDGE_INSERT_LABEL_KEY)}
       aria-haspopup="dialog"
       style={EDGE_INSERT_BUTTON_STYLE}
       onClick={(event) => {

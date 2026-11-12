@@ -4,6 +4,7 @@ import type { ElementMatch } from "./search.js";
 
 import { useEditorCommands } from "../../bindings/editor-commands.js";
 import { useUiStateActions } from "../../bindings/ui-state-actions.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { useEditorEngine, useUiState } from "../../providers/ui-provider.js";
 import {
   BUTTON_STYLE,
@@ -16,7 +17,7 @@ import { DEFAULT_SEARCH_LIMIT, searchGraph } from "./search.js";
 /** Props accepted by {@link SearchPanel}. */
 export interface SearchPanelProps {
   readonly className?: string;
-  /** Placeholder of the search input. Defaults to `Search graph`. */
+  /** Placeholder of the search input. Defaults to the catalog's `search.placeholder`. */
   readonly placeholder?: string;
 }
 
@@ -94,6 +95,7 @@ export function SearchPanel(props: SearchPanelProps): ReactNode {
   const executeCommand = useEditorCommands(editor);
   const state = useUiState();
   const actions = useUiStateActions();
+  const t = useTranslate();
 
   const query = state.searchQuery;
   const hasQuery = query.trim().length > 0;
@@ -119,8 +121,8 @@ export function SearchPanel(props: SearchPanelProps): ReactNode {
       <div style={ROW_STYLE}>
         <input
           type="search"
-          aria-label="Search graph"
-          placeholder={props.placeholder ?? "Search graph"}
+          aria-label={t("search.placeholder")}
+          placeholder={props.placeholder ?? t("search.placeholder")}
           value={query}
           onChange={(event) => {
             actions.setSearchQuery(event.target.value);
@@ -131,7 +133,7 @@ export function SearchPanel(props: SearchPanelProps): ReactNode {
           <button
             type="button"
             data-nodera-search-clear=""
-            aria-label="Clear search"
+            aria-label={t("search.clear")}
             onClick={() => {
               actions.setSearchQuery("");
             }}
@@ -143,17 +145,17 @@ export function SearchPanel(props: SearchPanelProps): ReactNode {
       </div>
       {hasQuery ? null : (
         <p data-nodera-search-hint="" style={STATUS_STYLE}>
-          Type to search nodes and edges
+          {t("search.hint")}
         </p>
       )}
       {hasQuery && entries.length === 0 ? (
         <p data-nodera-search-empty="" style={STATUS_STYLE}>
-          No matching elements
+          {t("search.empty")}
         </p>
       ) : null}
       {hasQuery && result.truncated ? (
         <p data-nodera-search-truncated="" style={STATUS_STYLE}>
-          Showing the first {DEFAULT_SEARCH_LIMIT} matches
+          {t("search.truncated", { limit: DEFAULT_SEARCH_LIMIT })}
         </p>
       ) : null}
       {entries.length === 0 ? null : (

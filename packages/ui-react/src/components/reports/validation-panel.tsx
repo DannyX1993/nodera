@@ -8,6 +8,7 @@ import {
 
 import { useEditorCommands } from "../../bindings/editor-commands.js";
 import { useValidation } from "../../bindings/validation.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { useEditorEngine } from "../../providers/ui-provider.js";
 import {
   BORDER,
@@ -28,7 +29,7 @@ export interface ValidationPanelProps {
   readonly autoValidate?: boolean;
   /** Host handler for an element activation. Defaults to the selection commands. */
   readonly onSelectElement?: (elementId: string) => void;
-  /** Message shown when the report has no issues. */
+  /** Message shown when the report has no issues. Defaults to the catalog's `validation.empty`. */
   readonly emptyMessage?: string;
 }
 
@@ -129,10 +130,10 @@ const ELEMENT_STYLE: CSSProperties = {
   fontFamily: "var(--ndr-typography-font-family-mono, ui-monospace)",
 };
 
-const SEVERITY_LABELS: Readonly<Record<ValidationSeverity, string>> = Object.freeze({
-  error: "Errors",
-  warning: "Warnings",
-  info: "Information",
+const SEVERITY_KEYS: Readonly<Record<ValidationSeverity, string>> = Object.freeze({
+  error: "validation.severity.error",
+  warning: "validation.severity.warning",
+  info: "validation.severity.info",
 });
 
 /**
@@ -147,6 +148,7 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
   const editor = useEditorEngine();
   const { report, issues, revalidate } = useValidation(editor);
   const executeCommand = useEditorCommands(editor);
+  const t = useTranslate();
   const autoValidate = props.autoValidate === true;
 
   useEffect(() => {
@@ -195,7 +197,7 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
           <span
             key={severity}
             data-nodera-validation-count={severity}
-            aria-label={`${grouped[severity].length} ${severity} issues`}
+            aria-label={t("validation.count", { count: grouped[severity].length, severity })}
             style={{ ...COUNT_STYLE, ...COUNT_TONES[severity] }}
           >
             {grouped[severity].length}
@@ -205,20 +207,20 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
         <button
           type="button"
           data-nodera-validation-action="validate"
-          aria-label="Validate graph"
+          aria-label={t("validation.validate")}
           onClick={revalidate}
           style={BUTTON_STYLE}
         >
-          Validate
+          {t("validation.action")}
         </button>
       </header>
       {report === undefined ? (
         <p data-nodera-validation-status="" style={STATUS_STYLE}>
-          Not validated yet
+          {t("validation.pending")}
         </p>
       ) : issues.length === 0 ? (
         <p data-nodera-validation-empty="" style={STATUS_STYLE}>
-          {props.emptyMessage ?? "No validation issues"}
+          {props.emptyMessage ?? t("validation.empty")}
         </p>
       ) : (
         VALIDATION_SEVERITIES.filter((severity) => grouped[severity].length > 0).map((severity) => (
@@ -226,9 +228,9 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
             key={severity}
             data-nodera-validation-group={severity}
             style={GROUP_STYLE}
-            aria-label={SEVERITY_LABELS[severity]}
+            aria-label={t(SEVERITY_KEYS[severity])}
           >
-            <h3 style={GROUP_TITLE_STYLE}>{SEVERITY_LABELS[severity]}</h3>
+            <h3 style={GROUP_TITLE_STYLE}>{t(SEVERITY_KEYS[severity])}</h3>
             <ul style={LIST_STYLE}>
               {grouped[severity].map((issue, index) => (
                 <IssueRow
@@ -256,6 +258,7 @@ interface IssueRowProps {
  * issues that reference nothing selectable.
  */
 function IssueRow(props: IssueRowProps): ReactNode {
+  const t = useTranslate();
   const elementId = props.issue.elementId;
   return (
     <li
@@ -274,7 +277,7 @@ function IssueRow(props: IssueRowProps): ReactNode {
         <button
           type="button"
           data-nodera-validation-element={elementId}
-          aria-label={`Select ${elementId}`}
+          aria-label={t("validation.selectElement", { elementId })}
           onClick={() => {
             props.onSelectElement(elementId);
           }}

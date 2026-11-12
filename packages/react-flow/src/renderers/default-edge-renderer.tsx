@@ -11,6 +11,7 @@ import type { FC, CSSProperties, PointerEvent as ReactPointerEvent, MouseEvent a
 import { useCallback, useRef, useState } from "react";
 
 import type { EdgeGeometry } from "@nodera/edge-registry";
+import { useTranslate } from "@nodera/ui-react";
 
 import { edgeStyleHintsFromData } from "./edge-options.js";
 import { useNoderaEditor, useNoderaWaypointEditing } from "../canvas/editor-context.js";
@@ -371,6 +372,7 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
 }) => {
   // --- Context: read editor, waypoints and gesture gate ---
   const editor = useNoderaEditor();
+  const t = useTranslate();
   const waypointEditingEnabled = useNoderaWaypointEditing();
 
   // Read waypoints from edge data; the mapper puts them here from the domain.
@@ -659,7 +661,7 @@ export const DefaultEdgeRenderer: FC<EdgeProps> = ({
                 data-nodera-waypoint-index={index}
                 data-nodera-waypoint-id={`${id}-wp-${index}`}
                 role="button"
-                aria-label={`Waypoint ${index + 1}: drag to move, double-click to remove, arrow keys to nudge, Delete to remove`}
+                aria-label={t("canvas.waypoint", { index: index + 1 })}
                 tabIndex={0}
                 style={{
                   width: "16px",

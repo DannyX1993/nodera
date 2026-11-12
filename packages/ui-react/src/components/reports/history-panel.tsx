@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import { useHistory } from "../../bindings/history.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { useEditorEngine } from "../../providers/ui-provider.js";
 import {
   BORDER,
@@ -96,6 +97,7 @@ const EMPTY_STYLE: CSSProperties = {
 export function HistoryPanel(props: HistoryPanelProps): ReactNode {
   const editor = useEditorEngine();
   const history = useHistory(editor);
+  const t = useTranslate();
   const maxSteps = props.maxEntries ?? 20;
 
   const labels = history.labels;
@@ -139,32 +141,36 @@ export function HistoryPanel(props: HistoryPanelProps): ReactNode {
         <button
           type="button"
           data-nodera-history-action="undo"
-          aria-label="Undo"
+          aria-label={t("history.undo")}
           disabled={!history.canUndo}
           onClick={history.undo}
           style={BUTTON_STYLE}
         >
-          Undo
+          {t("history.undo")}
         </button>
         <button
           type="button"
           data-nodera-history-action="redo"
-          aria-label="Redo"
+          aria-label={t("history.redo")}
           disabled={!history.canRedo}
           onClick={history.redo}
           style={BUTTON_STYLE}
         >
-          Redo
+          {t("history.redo")}
         </button>
       </div>
       {labels.length === 0 ? (
         <p data-nodera-history-empty="" style={EMPTY_STYLE}>
-          Empty history
+          {t("history.empty")}
         </p>
       ) : null}
       {undoEntries.length === 0 ? null : (
-        <section data-nodera-history-undo-section="" style={SECTION_STYLE} aria-label="Undoable">
-          <h3 style={SECTION_TITLE_STYLE}>Undoable</h3>
+        <section
+          data-nodera-history-undo-section=""
+          style={SECTION_STYLE}
+          aria-label={t("history.undoable")}
+        >
+          <h3 style={SECTION_TITLE_STYLE}>{t("history.undoable")}</h3>
           <ul style={LIST_STYLE}>
             {undoEntries.map((label, index) => {
               const current = index === undoSize - 1;
@@ -190,8 +196,12 @@ export function HistoryPanel(props: HistoryPanelProps): ReactNode {
         </section>
       )}
       {redoEntries.length === 0 ? null : (
-        <section data-nodera-history-redo-section="" style={SECTION_STYLE} aria-label="Redoable">
-          <h3 style={SECTION_TITLE_STYLE}>Redoable</h3>
+        <section
+          data-nodera-history-redo-section=""
+          style={SECTION_STYLE}
+          aria-label={t("history.redoable")}
+        >
+          <h3 style={SECTION_TITLE_STYLE}>{t("history.redoable")}</h3>
           <ul style={LIST_STYLE}>
             {redoEntries.map((label, offset) => {
               const index = undoSize + offset;

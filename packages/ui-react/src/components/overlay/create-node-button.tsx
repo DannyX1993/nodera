@@ -3,13 +3,14 @@ import type { CSSProperties, ReactNode } from "react";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
 
 import { useDialogActions } from "../../bindings/dialog-actions.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { BUTTON_STYLE } from "../shell/styles.js";
 
 /** Props accepted by {@link CreateNodeButton}. */
 export interface CreateNodeButtonProps {
   /**
-   * Accessible name of the button. Defaults to `Add node`; the visible glyph
-   * stays "+" unless the host supplies its own content.
+   * Accessible name of the button. Defaults to the catalog's `actions.addNode`;
+   * the visible glyph stays "+" unless the host supplies its own content.
    */
   readonly label?: string;
   /** Content the host renders inside the button. Defaults to the "+" glyph. */
@@ -37,13 +38,14 @@ const CREATE_NODE_BUTTON_STYLE: CSSProperties = BUTTON_STYLE;
  */
 export function CreateNodeButton(props: CreateNodeButtonProps): ReactNode {
   const dialogs = useDialogActions();
+  const t = useTranslate();
 
   return (
     <button
       type="button"
       data-nodera-create-node=""
       aria-haspopup="dialog"
-      aria-label={props.label ?? "Add node"}
+      aria-label={props.label ?? t("actions.addNode")}
       {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
       {...(props.className === undefined ? {} : { className: props.className })}
       onClick={() => {

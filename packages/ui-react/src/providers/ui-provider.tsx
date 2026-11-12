@@ -11,8 +11,10 @@ import type { EditorEngine } from "@nodera/application";
 import { LayoutRegistry } from "@nodera/layout-engine";
 import { ThemeRegistry, type ThemeDefinition } from "@nodera/theme-engine";
 import {
+  DEFAULT_LOCALE,
   DEFAULT_SHORTCUTS,
   UiStateStore,
+  type Locale,
   type PanelRegistry,
   type ShortcutMap,
   type ToolRegistry,
@@ -21,6 +23,7 @@ import {
 
 import { createDefaultPanelRegistry } from "@nodera/ui-core";
 import { createDefaultComponentRenderers } from "../defaults/default-renderers.js";
+import { LocaleProvider } from "./locale-provider.js";
 import { createDefaultToolRegistry } from "@nodera/ui-core";
 import type { ComponentRenderers } from "../registries/component-registry.js";
 import { themeStyle } from "../theme-style.js";
@@ -66,6 +69,17 @@ export interface NoderaUiProviderProps {
    * so it can be persisted and translated by the host.
    */
   readonly shortcuts?: ShortcutMap;
+  /**
+   * Catalog the surfaces render (S8 "Internacionalización"):
+   * `@nodera/ui-core`'s `Locale` contract, with a default `en` catalog the host
+   * may replace or extend.
+   *
+   * Defaults to {@link DEFAULT_LOCALE}. A partial catalog is allowed: a
+   * message the host does not translate falls back to the `en` string, so a
+   * host can adopt i18n one surface at a time. A `placeholder`, `label` or
+   * `emptyMessage` prop of a surface still wins over the catalog.
+   */
+  readonly locale?: Locale;
   readonly children: ReactNode;
 }
 
@@ -109,6 +123,7 @@ export function NoderaUiProvider(props: NoderaUiProviderProps): ReactNode {
   const store = props.store;
   const editor = props.editor;
   const shortcuts = props.shortcuts ?? DEFAULT_SHORTCUTS;
+  const locale = props.locale ?? DEFAULT_LOCALE;
 
   const value = useMemo<NoderaUiContextValue>(
     () => ({
@@ -135,7 +150,9 @@ export function NoderaUiProvider(props: NoderaUiProviderProps): ReactNode {
 
   return (
     <NoderaUiContext.Provider value={value}>
-      <UiThemeRoot>{props.children}</UiThemeRoot>
+      <LocaleProvider locale={locale}>
+        <UiThemeRoot>{props.children}</UiThemeRoot>
+      </LocaleProvider>
     </NoderaUiContext.Provider>
   );
 }

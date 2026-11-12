@@ -4,6 +4,7 @@ import { updateGraphMetadata } from "@nodera/application";
 import type { GraphMetadata } from "@nodera/graph-model";
 
 import { useEditorSnapshot } from "../../bindings/editor-snapshot.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { useEditorEngine } from "../../providers/ui-provider.js";
 import {
   CONTROL_STYLE,
@@ -87,6 +88,7 @@ export function MetadataPanel(props: MetadataPanelProps): ReactNode {
   const descriptionId = useId();
   const tagsId = useId();
   const readOnly = props.readOnly === true;
+  const t = useTranslate();
 
   const [state, setState] = useState<{ readonly draft: MetadataDraft; readonly key: string }>(
     () => ({ draft: toDraft(metadata), key: externalKey }),
@@ -111,18 +113,18 @@ export function MetadataPanel(props: MetadataPanelProps): ReactNode {
       {...(props.className === undefined ? {} : { className: props.className })}
       style={PANEL_STYLE}
     >
-      <h3 style={HEADING_STYLE}>Graph metadata</h3>
+      <h3 style={HEADING_STYLE}>{t("metadata.title")}</h3>
       <p data-nodera-metadata="graph-id" style={MUTED_STYLE}>
         {snapshot.graph.id}
       </p>
       <div style={FIELD_STYLE}>
         <label htmlFor={nameId} style={LABEL_STYLE}>
-          Graph name
+          {t("metadata.name")}
         </label>
         <input
           id={nameId}
           type="text"
-          aria-label="Graph name"
+          aria-label={t("metadata.name")}
           value={state.draft.name}
           disabled={readOnly}
           onChange={(event) => {
@@ -133,11 +135,11 @@ export function MetadataPanel(props: MetadataPanelProps): ReactNode {
       </div>
       <div style={FIELD_STYLE}>
         <label htmlFor={descriptionId} style={LABEL_STYLE}>
-          Graph description
+          {t("metadata.description")}
         </label>
         <textarea
           id={descriptionId}
-          aria-label="Graph description"
+          aria-label={t("metadata.description")}
           value={state.draft.description}
           disabled={readOnly}
           onChange={(event) => {
@@ -148,12 +150,12 @@ export function MetadataPanel(props: MetadataPanelProps): ReactNode {
       </div>
       <div style={FIELD_STYLE}>
         <label htmlFor={tagsId} style={LABEL_STYLE}>
-          Tags
+          {t("metadata.tags")}
         </label>
         <input
           id={tagsId}
           type="text"
-          aria-label="Tags"
+          aria-label={t("metadata.tags")}
           value={state.draft.tags}
           disabled={readOnly}
           onChange={(event) => {

@@ -15,6 +15,7 @@ import {
 
 import { useEditorSnapshot } from "../../bindings/editor-snapshot.js";
 import { useGraphQueries } from "../../bindings/graph-queries.js";
+import { useTranslate } from "../../providers/locale-provider.js";
 import { useEditorEngine, useComponentRenderers } from "../../providers/ui-provider.js";
 import { groupPropertiesForDisplay, type PropertySection } from "./property-layout.js";
 import { defaultPropertyRenderer } from "./property-renderers/defaults.js";
@@ -42,11 +43,9 @@ export interface PropertiesPanelProps {
    * case.
    */
   readonly onChange?: (nodeId: string, propertyId: string, value: unknown) => void;
-  /** Copy shown when there is nothing to edit. */
+  /** Copy shown when there is nothing to edit. Defaults to the catalog's `properties.empty`. */
   readonly emptyMessage?: string;
 }
-
-const DEFAULT_EMPTY_MESSAGE = "Select a node to edit its properties";
 
 interface PanelRootProps {
   readonly className?: string;
@@ -121,6 +120,7 @@ function PropertyRow(
 function NodePropertiesView(
   props: EditorProps & { readonly nodeId: string; readonly className: string | undefined },
 ): ReactNode {
+  const t = useTranslate();
   const queries = useGraphQueries(props.editor);
   const node = queries.node(props.nodeId);
   if (node === undefined) {
@@ -134,7 +134,7 @@ function NodePropertiesView(
     return (
       <div {...panelRoot(props.className, "node")}>
         <p data-nodera-properties-unknown-definition="" style={MUTED_STYLE}>
-          {`Unknown node definition "${node.definitionId}"`}
+          {t("properties.unknownDefinition", { definitionId: node.definitionId })}
         </p>
         <pre data-nodera-properties-raw="" style={RAW_STYLE}>
           {JSON.stringify(values, null, 2)}
@@ -155,7 +155,7 @@ function NodePropertiesView(
       </h3>
       {sections.length === 0 ? (
         <p data-nodera-properties-empty="" style={MUTED_STYLE}>
-          This node definition declares no properties
+          {t("properties.noProperties")}
         </p>
       ) : null}
       {sections.map((section) => (
@@ -197,6 +197,7 @@ function EdgePropertiesView(
   },
 ): ReactNode {
   const controlId = useId();
+  const t = useTranslate();
   const queries = useGraphQueries(props.editor);
   const edge = queries.edge(props.edgeId);
   if (edge === undefined) {
@@ -214,12 +215,12 @@ function EdgePropertiesView(
       </h3>
       <div style={FIELD_STYLE}>
         <label htmlFor={controlId} style={LABEL_STYLE}>
-          Edge label
+          {t("properties.edgeLabel")}
         </label>
         <input
           id={controlId}
           type="text"
-          aria-label="Edge label"
+          aria-label={t("properties.edgeLabel")}
           value={edge.label ?? ""}
           disabled={props.readOnly}
           onChange={(event) => {
@@ -243,6 +244,7 @@ function EdgePropertiesView(
  */
 export function PropertiesPanel(props: PropertiesPanelProps): ReactNode {
   const editor = useEditorEngine();
+  const t = useTranslate();
   const snapshot = useEditorSnapshot(editor);
   const queries = useGraphQueries(editor);
   const readOnly = props.readOnly === true;
@@ -280,7 +282,7 @@ export function PropertiesPanel(props: PropertiesPanelProps): ReactNode {
   return (
     <div {...panelRoot(props.className, "none")}>
       <p data-nodera-properties-empty="" style={MUTED_STYLE}>
-        {props.emptyMessage ?? DEFAULT_EMPTY_MESSAGE}
+        {props.emptyMessage ?? t("properties.empty")}
       </p>
     </div>
   );
