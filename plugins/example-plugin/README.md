@@ -25,7 +25,7 @@ import { assertValid, createBuilder } from "@nodera/sdk";
 import { kitchenSinkPlugin, BLUEPRINT_THEME_ID, NDJSON_FORMAT } from "@nodera/example-plugin";
 
 const builder = assertValid(createBuilder());
-const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
 
 const installed = manager.install([kitchenSinkPlugin]);
 if (installed.ok) {

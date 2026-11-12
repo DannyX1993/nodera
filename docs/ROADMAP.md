@@ -175,3 +175,19 @@ Implementar:
   declarados por manifest importando solo `@nodera/sdk`, `@nodera/plugin-api` y
   `@nodera/plugin-manager`, y un plugin se escribe importando solo las dos
   primeras, sin acceder a ningún módulo interno.
+- **Fase 8. Production Readiness** — implementada. El repo queda publicable sin
+  publicar (S4): `LICENSE` MIT, `README.md` raíz, `CONTRIBUTING.md`, `CHANGELOG.md`
+  y READMEs por paquete; build real a `dist/` con `main`/`types`/`exports`/`files`
+  y metadatos de publicación (`version: 1.0.0`, `license`, `repository`,
+  `publishConfig.access: public`) en los 21 paquetes con código. `@nodera/sdk`
+  expone `SDK_VERSION` y el plugin manager resuelve `compatibility.sdkVersion` por
+  defecto contra él. Accesibilidad (atajos configurables, `aria-live`,
+  `:focus-visible`), internacionalización (catálogo de strings + `Locale` +
+  `translate` + proveedor React) y rendimiento (`React.memo` en renderers/paneles,
+  selección aislada de la derivación, `onlyRenderVisibleElements`) quedan
+  cubiertos. Testing: ESLint real (`pnpm lint`), cobertura opt-in y documentación
+  de `packages/testing`. Release automation: GitHub Actions CI y changesets
+  (`version`/`release`). Limitaciones conocidas documentadas en
+  `docs/KNOWN-ISSUES.md` (KI-2..KI-8): sin validación de versión
+  definición-instancia, sin migraciones embarcadas, sin E2E/visual (Vitest-only),
+  `apps/*` y tres `examples/*` son placeholders.

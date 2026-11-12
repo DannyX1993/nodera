@@ -219,3 +219,47 @@ visual diffing.
 **Consequence:** interaction regressions that only appear in a real browser, and
 visual/pixel changes, are covered by manual testing and review. Adding a browser
 or visual harness needs a new explicit decision; it is not an oversight.
+
+---
+
+## KI-9 — Regional formatters (Intl) and full RTL layout not implemented
+
+**Status:** open, by design (D9 deferred).
+
+The locale contract (`@nodera/ui-core` `translate`/`Locale`) covers translated
+strings and host override, but there is no `Intl`-based number/date formatting
+surface and no complete RTL layout engine. No current UI component renders a
+date or a regionally-formatted number (only counts and labels), so a formatter
+would have no consumer yet. RTL remains composition-only: a host wraps the shell
+with `dir="rtl"` and token-driven styles use logical `start`/`end` where present.
+
+**Consequence:** hosts that need localized number/date formatting or a first-class
+RTL theme must supply their own layer; the framework does not block it but does
+not ship it.
+
+---
+
+## KI-10 — No code formatter (Prettier) wired in
+
+**Status:** open, by design (D11 deferred).
+
+`pnpm lint` runs ESLint only. No Prettier (or equivalent) is installed or wired,
+so there is no automated code-formatting gate. Adding a formatter would require
+reformatting the whole tree; it was deferred rather than landing a noisy
+whitespace diff.
+
+**Consequence:** formatting is enforced by review and by the existing style, not
+by a tool. A formatting tool can be added later as its own change.
+
+---
+
+## KI-11 — No palette/navigator virtualization
+
+**Status:** open, by design (D10 deferred).
+
+`onlyRenderVisibleElements` virtualizes the canvas nodes/edges, but the node
+palette and navigator/search lists render their full item set without
+virtualization. There is no evidence of palettes large enough to need it yet.
+
+**Consequence:** a host with hundreds of palette/search entries may see slower
+list rendering; this becomes real work only when a measured case appears.

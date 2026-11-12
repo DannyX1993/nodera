@@ -26,7 +26,7 @@ import { assertValid, createBuilder } from "@nodera/sdk";
 import { aiNodesPlugin } from "@nodera/ai-nodes";
 
 const builder = assertValid(createBuilder());
-const manager = createPluginManager(builder, { sdkVersion: "0.0.0" });
+const manager = createPluginManager(builder, { sdkVersion: "1.0.0" });
 
 const installed = manager.install([aiNodesPlugin]);
 if (installed.ok) {
