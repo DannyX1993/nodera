@@ -1,4 +1,4 @@
-import type { FC } from "react";
+import { memo, type FC } from "react";
 
 import type { NoderaNodeRendererProps } from "./node-renderer-props.js";
 
@@ -53,52 +53,58 @@ const SELECTED_NODE_OUTLINE =
  * It intentionally renders NO port handles: the node-type wrapper
  * (`createNodeType`) owns port rendering for every renderer, so custom
  * renderers get ports for free and ports are never duplicated.
+ *
+ * Wrapped in `React.memo` (S7/D10). Both props are reference-stable by
+ * construction: `data` is the mapper's node data object (rebuilt only when the
+ * document derivation runs) and `selected` is a boolean. A canvas re-render that
+ * changes neither — a drag position of another node, a pan, a selection
+ * elsewhere — therefore skips this subtree instead of re-rendering every node of
+ * the graph.
  */
-export const DefaultNodeRenderer: FC<NoderaNodeRendererProps> = ({
-  data,
-  selected,
-}) => {
-  const { label, visual, definitionId } = data;
+export const DefaultNodeRenderer: FC<NoderaNodeRendererProps> = memo(
+  function DefaultNodeRenderer({ data, selected }: NoderaNodeRendererProps) {
+    const { label, visual, definitionId } = data;
 
-  const style: React.CSSProperties = { ...BASE_NODE_STYLE };
+    const style: React.CSSProperties = { ...BASE_NODE_STYLE };
 
-  if (selected) {
-    style.backgroundColor = SELECTED_NODE_BACKGROUND;
-    style.outline = SELECTED_NODE_OUTLINE;
-  }
+    if (selected) {
+      style.backgroundColor = SELECTED_NODE_BACKGROUND;
+      style.outline = SELECTED_NODE_OUTLINE;
+    }
 
-  // Definition visual hints win over the theme tokens.
-  const backgroundColor =
-    visual?.backgroundColor ??
-    (typeof visual?.color === "string" ? visual.color : undefined);
-  if (backgroundColor !== undefined) {
-    style.backgroundColor = backgroundColor;
-  }
+    // Definition visual hints win over the theme tokens.
+    const backgroundColor =
+      visual?.backgroundColor ??
+      (typeof visual?.color === "string" ? visual.color : undefined);
+    if (backgroundColor !== undefined) {
+      style.backgroundColor = backgroundColor;
+    }
 
-  if (visual?.borderColor) {
-    style.borderColor = visual.borderColor;
-  }
+    if (visual?.borderColor) {
+      style.borderColor = visual.borderColor;
+    }
 
-  return (
-    <div
-      data-nodera-node
-      data-nodera-node-definition-id={definitionId}
-      style={style}
-      className={`nodera-node ${selected ? "nodera-node-selected" : ""}`}
-      aria-label={label}
-    >
-      {/* Accessible selected indicator: outline + pseudo-label. */}
-      {selected && (
-        <span className="nodera-node-selected-indicator" aria-hidden="true" />
-      )}
+    return (
+      <div
+        data-nodera-node
+        data-nodera-node-definition-id={definitionId}
+        style={style}
+        className={`nodera-node ${selected ? "nodera-node-selected" : ""}`}
+        aria-label={label}
+      >
+        {/* Accessible selected indicator: outline + pseudo-label. */}
+        {selected && (
+          <span className="nodera-node-selected-indicator" aria-hidden="true" />
+        )}
 
-      {visual?.icon && (
-        <span className="nodera-node-icon" aria-label={visual.icon}>
-          {visual.icon}
-        </span>
-      )}
+        {visual?.icon && (
+          <span className="nodera-node-icon" aria-label={visual.icon}>
+            {visual.icon}
+          </span>
+        )}
 
-      <span className="nodera-node-label">{label}</span>
-    </div>
-  );
-};
+        <span className="nodera-node-label">{label}</span>
+      </div>
+    );
+  },
+);

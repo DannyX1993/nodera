@@ -66,6 +66,27 @@ const SHELL_HELPERS = ["computeShellSizes", "panelIdForRegion"] as const;
 
 const RENDERER_IDS = ["DEFAULT_MENU_RENDERER_ID"] as const;
 
+/**
+ * Components the package exports as a `React.memo` result (S7/D10).
+ *
+ * `memo()` returns an exotic component object, not a function, so "this export
+ * is a component" cannot be `typeof entry === "function"` for these four names.
+ * Only the type check widens here: the closed export list above still has to
+ * contain every one of them, and every other name is still required to be a
+ * function.
+ */
+const MEMOIZED_COMPONENTS = [
+  "NodePalette",
+  "SearchPanel",
+  "ValidationPanel",
+  "HistoryPanel",
+] as const;
+
+/** A function component or a `React.memo` result: both are element types. */
+function isValidElementType(value: unknown): boolean {
+  return typeof value === "function" || (typeof value === "object" && value !== null);
+}
+
 function exportedEntries(): Readonly<Record<string, unknown>> {
   return uiReact as unknown as Readonly<Record<string, unknown>>;
 }
@@ -81,7 +102,11 @@ describe("@nodera/ui-react public surface", () => {
     expectExported(COMPONENTS);
 
     const entries = exportedEntries();
-    expect(COMPONENTS.filter((name) => typeof entries[name] !== "function")).toEqual([]);
+    const isComponent = (name: string): boolean =>
+      (MEMOIZED_COMPONENTS as readonly string[]).includes(name)
+        ? isValidElementType(entries[name])
+        : typeof entries[name] === "function";
+    expect(COMPONENTS.filter((name) => !isComponent(name))).toEqual([]);
   });
 
   it("exports the providers and hooks a host composes with", () => {

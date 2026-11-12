@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
+import { memo, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
 
 import type { NodeDefinition } from "@nodera/node-registry";
 import { NODE_DEFINITION_MIME_TYPE } from "@nodera/ui-core";
@@ -157,8 +157,15 @@ function visibleGroups(
  * category and lets the host either place nodes itself (`onAddNode`) or accept
  * the framework default (`add-node`). It imposes no width, position or layout:
  * the host puts it wherever it wants (S2).
+ *
+ * Memoized (S7/D10). Its own props are primitives; the one unstable prop in the
+ * framework composition is the dialog's `onAddNode` arrow
+ * (`node-creation-dialog.tsx`), which re-creates the callback on a dialog
+ * re-render. The memo is kept because it still bails out for the compositions
+ * that pass no callback at all (the default `<NodePalette />`) or a stable one,
+ * and because the dialog's parent is outside this surface to restructure.
  */
-export function NodePalette(props: NodePaletteProps): ReactNode {
+function NodePaletteImpl(props: NodePaletteProps): ReactNode {
   const editor = useEditorEngine();
   const executeCommand = useEditorCommands(editor);
   const t = useTranslate();
@@ -249,3 +256,6 @@ export function NodePalette(props: NodePaletteProps): ReactNode {
     </div>
   );
 }
+
+/** The memoized node-definition palette. */
+export const NodePalette = memo(NodePaletteImpl);

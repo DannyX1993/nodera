@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties, type ReactNode } from "react";
+import { memo, useEffect, type CSSProperties, type ReactNode } from "react";
 
 import {
   VALIDATION_SEVERITIES,
@@ -143,8 +143,11 @@ const SEVERITY_KEYS: Readonly<Record<ValidationSeverity, string>> = Object.freez
  * pipeline through the `validation.completed` event, never from rules
  * re-implemented here. Selecting an issue's element goes through the documented
  * selection commands, so the canvas and the panel agree on the selection.
+ *
+ * Memoized (S7/D10) on its own props: the panel re-renders from the validation
+ * subscription it owns, never because an unrelated host layout re-rendered.
  */
-export function ValidationPanel(props: ValidationPanelProps): ReactNode {
+function ValidationPanelImpl(props: ValidationPanelProps): ReactNode {
   const editor = useEditorEngine();
   const { report, issues, revalidate } = useValidation(editor);
   const executeCommand = useEditorCommands(editor);
@@ -246,6 +249,9 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
     </div>
   );
 }
+
+/** The memoized validation report panel. */
+export const ValidationPanel = memo(ValidationPanelImpl);
 
 interface IssueRowProps {
   readonly issue: ValidationIssue;

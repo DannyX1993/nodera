@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { memo, type CSSProperties, type ReactNode } from "react";
 
 import type { ElementMatch } from "./search.js";
 
@@ -89,8 +89,11 @@ const STATUS_STYLE: CSSProperties = {
  * document, S5), so a navigator and a search panel narrow together and the host
  * can drive both from its own command palette. Activating a result runs the
  * documented selection command, so nothing here bypasses the application layer.
+ *
+ * Memoized (S7/D10) on its own props: the panel re-renders from the shared UI
+ * store it subscribes to, never because an unrelated host layout re-rendered.
  */
-export function SearchPanel(props: SearchPanelProps): ReactNode {
+function SearchPanelImpl(props: SearchPanelProps): ReactNode {
   const editor = useEditorEngine();
   const executeCommand = useEditorCommands(editor);
   const state = useUiState();
@@ -181,3 +184,6 @@ export function SearchPanel(props: SearchPanelProps): ReactNode {
     </div>
   );
 }
+
+/** The memoized graph search panel. */
+export const SearchPanel = memo(SearchPanelImpl);

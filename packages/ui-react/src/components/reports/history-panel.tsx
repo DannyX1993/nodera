@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { memo, type CSSProperties, type ReactNode } from "react";
 
 import { useHistory } from "../../bindings/history.js";
 import { useTranslate } from "../../providers/locale-provider.js";
@@ -93,8 +93,11 @@ const EMPTY_STYLE: CSSProperties = {
  * application binding, so the panel never holds a second copy of the stack. A
  * label is a *target*, not a stored command: activating one asks the documented
  * undo/redo use cases to move the cursor until that unit is the current one.
+ *
+ * Memoized (S7/D10) on its own props: the panel re-renders from the history
+ * subscription it owns, never because an unrelated host layout re-rendered.
  */
-export function HistoryPanel(props: HistoryPanelProps): ReactNode {
+function HistoryPanelImpl(props: HistoryPanelProps): ReactNode {
   const editor = useEditorEngine();
   const history = useHistory(editor);
   const t = useTranslate();
@@ -227,3 +230,6 @@ export function HistoryPanel(props: HistoryPanelProps): ReactNode {
     </div>
   );
 }
+
+/** The memoized editing-history panel. */
+export const HistoryPanel = memo(HistoryPanelImpl);
