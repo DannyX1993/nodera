@@ -2,5 +2,22 @@
   "name": "@nodera/basic-nodes",
   "version": "0.0.0",
   "private": true,
-  "description": "plugins/basic-nodes"
+  "type": "module",
+  "description": "Example Nodera plugin: two node definitions and one edge definition contributed through the public plugin API.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nodera/plugin-api": "workspace:*",
+    "@nodera/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@nodera/plugin-manager": "workspace:*",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
 }

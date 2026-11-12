@@ -4,10 +4,12 @@
  * Events are composed above the application `EventBus`, which stays unchanged
  * (D10). Every application event is delegated verbatim — the same names, the
  * same payloads, the same delivery order — so a host never needs to know where
- * an event was produced. On top of them the SDK owns exactly two events,
- * `plugin.registered` and `plugin.error`, because they describe *builder
- * composition* rather than graph editing: they carry the richer SDK payloads
- * (plugin version and contribution ids) and are emitted only by the SDK.
+ * an event was produced. On top of them the SDK owns five plugin events,
+ * `plugin.registered`, `plugin.error` and the Phase 7 lifecycle
+ * (`plugin.activated`, `plugin.deactivated`, `plugin.unregistered`), because
+ * they describe *builder composition* rather than graph editing: they carry the
+ * richer SDK payloads (plugin version and contribution ids) and are emitted
+ * only by the SDK.
  *
  * Subscriptions are tracked so `dispose()` can release every listener the API
  * created while the unsubscribe functions already handed to the host stay safe
@@ -20,7 +22,13 @@ import { EventBus, type EditorEventName, type EditorEventPayloads } from "@noder
 import type { SdkIssueCode } from "../errors.js";
 
 /** Event names the SDK produces itself, in addition to the application events. */
-export const SDK_EVENT_NAMES = ["plugin.registered", "plugin.error"] as const;
+export const SDK_EVENT_NAMES = [
+  "plugin.registered",
+  "plugin.error",
+  "plugin.activated",
+  "plugin.deactivated",
+  "plugin.unregistered",
+] as const;
 
 /** Name of an SDK-owned event. */
 export type SdkEventName = (typeof SDK_EVENT_NAMES)[number];
@@ -42,11 +50,34 @@ export interface PluginErrorEvent {
   readonly code: SdkIssueCode;
 }
 
+/** Payload of `plugin.activated`: one plugin that is now active. */
+export interface PluginActivatedEvent {
+  readonly pluginId: string;
+  /** Contribution ids the plugin registered, in registration order. */
+  readonly contributionIds: readonly string[];
+}
+
+/** Payload of `plugin.deactivated`: one plugin that stopped being active. */
+export interface PluginDeactivatedEvent {
+  readonly pluginId: string;
+}
+
+/** Payload of `plugin.unregistered`: one plugin whose contributions were removed. */
+export interface PluginUnregisteredEvent {
+  readonly pluginId: string;
+}
+
 /** Typed payloads of the SDK-owned events. */
 export interface SdkEventPayloads {
   readonly "plugin.registered": PluginRegisteredEvent;
   readonly "plugin.error": PluginErrorEvent;
+  readonly "plugin.activated": PluginActivatedEvent;
+  readonly "plugin.deactivated": PluginDeactivatedEvent;
+  readonly "plugin.unregistered": PluginUnregisteredEvent;
 }
+
+/** Every payload an SDK-owned event carries. */
+export type SdkEventPayload = SdkEventPayloads[SdkEventName];
 
 /** Every event name the builder can deliver. */
 export type BuilderEventName = EditorEventName | SdkEventName;
@@ -80,7 +111,7 @@ export interface BuilderEventApi {
   /** Removes the handler registered for that name, if any. */
   off<E extends BuilderEventName>(name: E, handler: BuilderEventHandler<E>): void;
   /** Delivers one SDK-owned event. Application events are never emitted here. */
-  emitSdk(name: SdkEventName, payload: PluginRegisteredEvent | PluginErrorEvent): void;
+  emitSdk(name: SdkEventName, payload: SdkEventPayload): void;
   /** Removes every listener this API registered, including the SDK-owned ones. */
   dispose(): void;
 }
@@ -104,11 +135,32 @@ function isSdkEventName(name: EditorEventName): name is SdkEventName {
   return (SDK_EVENT_NAMES as readonly string[]).includes(name);
 }
 
-/** Whether a payload is the richer registration payload the SDK emits. */
-function isRegisteredEvent(
-  payload: PluginRegisteredEvent | PluginErrorEvent,
-): payload is PluginRegisteredEvent {
-  return "contributionIds" in payload;
+/**
+ * Payload guards, one per SDK-owned name.
+ *
+ * The name decides the shape, so the two payloads that carry contribution ids
+ * are told apart by the plugin version only a registration announces, and the
+ * id-only lifecycle payloads are told apart from the failure payload by the
+ * fields only `plugin.error` declares. A payload that does not belong is
+ * dropped, so a listener never receives a value whose type the SDK could not
+ * state.
+ */
+function isRegistrationPayload(payload: SdkEventPayload): payload is PluginRegisteredEvent {
+  return "version" in payload && "contributionIds" in payload;
+}
+
+function isErrorPayload(payload: SdkEventPayload): payload is PluginErrorEvent {
+  return "message" in payload && "code" in payload;
+}
+
+function isActivationPayload(payload: SdkEventPayload): payload is PluginActivatedEvent {
+  return "contributionIds" in payload && !("version" in payload);
+}
+
+function isIdOnlyPayload(
+  payload: SdkEventPayload,
+): payload is PluginDeactivatedEvent | PluginUnregisteredEvent {
+  return !("contributionIds" in payload) && !("message" in payload);
 }
 
 /** Concrete event API. Hosts only ever see the {@link BuilderEventApi} contract. */
@@ -138,13 +190,35 @@ class SdkEventApi implements BuilderEventApi {
     }
   }
 
-  emitSdk(name: SdkEventName, payload: PluginRegisteredEvent | PluginErrorEvent): void {
-    if (name === "plugin.registered" && isRegisteredEvent(payload)) {
-      this.sdkEvents.emit({ name, payload });
-      return;
-    }
-    if (name === "plugin.error" && !isRegisteredEvent(payload)) {
-      this.sdkEvents.emit({ name, payload });
+  emitSdk(name: SdkEventName, payload: SdkEventPayload): void {
+    // One case per name: the guard narrows the payload, which is what lets the
+    // private bus hold the richer SDK payload under the application event name.
+    switch (name) {
+      case "plugin.registered":
+        if (isRegistrationPayload(payload)) {
+          this.sdkEvents.emit({ name, payload });
+        }
+        return;
+      case "plugin.error":
+        if (isErrorPayload(payload)) {
+          this.sdkEvents.emit({ name, payload });
+        }
+        return;
+      case "plugin.activated":
+        if (isActivationPayload(payload)) {
+          this.sdkEvents.emit({ name, payload });
+        }
+        return;
+      case "plugin.deactivated":
+        if (isIdOnlyPayload(payload)) {
+          this.sdkEvents.emit({ name, payload });
+        }
+        return;
+      case "plugin.unregistered":
+        if (isIdOnlyPayload(payload)) {
+          this.sdkEvents.emit({ name, payload });
+        }
+        return;
     }
   }
 

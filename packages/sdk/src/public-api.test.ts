@@ -158,7 +158,13 @@ describe("public SDK surface", () => {
   it("exposes a closed diagnostic vocabulary a host can render", () => {
     expect(SDK_ISSUE_CODES).toContain("sdk.invalid-id");
     expect(SDK_ISSUE_CODES).toContain("sdk.plugin-conflict");
-    expect(SDK_EVENT_NAMES).toEqual(["plugin.registered", "plugin.error"]);
+    expect(SDK_EVENT_NAMES).toEqual([
+      "plugin.registered",
+      "plugin.error",
+      "plugin.activated",
+      "plugin.deactivated",
+      "plugin.unregistered",
+    ]);
     expect(RENDERER_KINDS).toContain("nodes");
     expect(EMPTY_RENDERER_BINDINGS.nodes.size).toBe(0);
   });

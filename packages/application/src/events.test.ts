@@ -7,9 +7,9 @@ import {
 } from "./events.js";
 
 describe("editor event contract", () => {
-  it("declares the sixteen documented event names plus the appended selection.changed", () => {
-    // Append-only addition (Phase 5, D5): panels must react to edge selection
-    // and deselection, which the original sixteen names never described.
+  it("declares the sixteen documented event names plus selection.changed and the plugin lifecycle", () => {
+    // Append-only additions: `selection.changed` (Phase 5, D5), and the plugin
+    // lifecycle of Phase 7 (D5) beside `plugin.registered`/`plugin.error`.
     expect([...EDITOR_EVENT_NAMES].sort()).toEqual(
       [
         "graph.created",
@@ -28,6 +28,9 @@ describe("editor event contract", () => {
         "validation.completed",
         "plugin.registered",
         "plugin.error",
+        "plugin.activated",
+        "plugin.deactivated",
+        "plugin.unregistered",
         "selection.changed",
       ].sort(),
     );
@@ -51,6 +54,9 @@ describe("editor event contract", () => {
       { name: "validation.completed", payload: { report: { issues: [], structurallyValid: true, configurationValid: true, isValid: true } } },
       { name: "plugin.registered", payload: { pluginId: "vendor.plugin" } },
       { name: "plugin.error", payload: { pluginId: "vendor.plugin", message: "boom" } },
+      { name: "plugin.activated", payload: { pluginId: "vendor.plugin" } },
+      { name: "plugin.deactivated", payload: { pluginId: "vendor.plugin" } },
+      { name: "plugin.unregistered", payload: { pluginId: "vendor.plugin" } },
     ];
 
     for (const event of events) {

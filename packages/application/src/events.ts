@@ -27,6 +27,9 @@ export const EDITOR_EVENT_NAMES: ReadonlySet<EditorEventName> = new Set([
   "validation.completed",
   "plugin.registered",
   "plugin.error",
+  "plugin.activated",
+  "plugin.deactivated",
+  "plugin.unregistered",
   "selection.changed",
 ] as EditorEventName[]);
 
@@ -48,6 +51,9 @@ export type EditorEventName =
   | "validation.completed"
   | "plugin.registered"
   | "plugin.error"
+  | "plugin.activated"
+  | "plugin.deactivated"
+  | "plugin.unregistered"
   | "selection.changed";
 
 /** Typed payloads for every editor event name. */
@@ -68,6 +74,12 @@ export interface EditorEventPayloads {
   "validation.completed": { readonly report: ValidationReport };
   "plugin.registered": { readonly pluginId: string };
   "plugin.error": { readonly pluginId: string; readonly message: string };
+  // The plugin lifecycle (Phase 7, D5). Ids only: activation is announced with
+  // the same payload as registration here, and the richer SDK payload — the
+  // contributions the activation registered — belongs to the SDK event api.
+  "plugin.activated": { readonly pluginId: string };
+  "plugin.deactivated": { readonly pluginId: string };
+  "plugin.unregistered": { readonly pluginId: string };
   "selection.changed": {
     readonly selectedNodes: readonly string[];
     readonly selectedEdges: readonly string[];

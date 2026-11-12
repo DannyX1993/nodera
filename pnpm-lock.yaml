@@ -232,6 +232,61 @@ importers:
         specifier: ^7.1.0
         version: 7.3.7(yaml@2.9.1)
 
+  examples/phase7-demo:
+    dependencies:
+      '@nodera/ai-nodes':
+        specifier: workspace:*
+        version: link:../../plugins/ai-nodes
+      '@nodera/basic-nodes':
+        specifier: workspace:*
+        version: link:../../plugins/basic-nodes
+      '@nodera/data-nodes':
+        specifier: workspace:*
+        version: link:../../plugins/data-nodes
+      '@nodera/developer-tools':
+        specifier: workspace:*
+        version: link:../../plugins/developer-tools
+      '@nodera/example-plugin':
+        specifier: workspace:*
+        version: link:../../plugins/example-plugin
+      '@nodera/plugin-manager':
+        specifier: workspace:*
+        version: link:../../packages/plugin-manager
+      '@nodera/react-flow':
+        specifier: workspace:*
+        version: link:../../packages/react-flow
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      '@xyflow/react':
+        specifier: ^12.12.1
+        version: 12.12.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      '@vitejs/plugin-react':
+        specifier: ^5.0.0
+        version: 5.2.0(vite@7.3.7(yaml@2.9.1))
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vite:
+        specifier: ^7.1.0
+        version: 7.3.7(yaml@2.9.1)
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
+
   packages/adapter-storage-http: {}
 
   packages/adapter-storage-local: {}
@@ -417,9 +472,37 @@ importers:
         specifier: ^3.0.5
         version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  packages/plugin-api: {}
+  packages/plugin-api:
+    dependencies:
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  packages/plugin-manager: {}
+  packages/plugin-manager:
+    dependencies:
+      '@nodera/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@nodera/plugin-api':
+        specifier: workspace:*
+        version: link:../plugin-api
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
   packages/property-system:
     dependencies:
@@ -693,15 +776,100 @@ importers:
         specifier: ^3.0.5
         version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  plugins/ai-nodes: {}
+  plugins/ai-nodes:
+    dependencies:
+      '@nodera/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+    devDependencies:
+      '@nodera/plugin-manager':
+        specifier: workspace:*
+        version: link:../../packages/plugin-manager
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  plugins/basic-nodes: {}
+  plugins/basic-nodes:
+    dependencies:
+      '@nodera/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+    devDependencies:
+      '@nodera/plugin-manager':
+        specifier: workspace:*
+        version: link:../../packages/plugin-manager
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  plugins/data-nodes: {}
+  plugins/data-nodes:
+    dependencies:
+      '@nodera/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+    devDependencies:
+      '@nodera/plugin-manager':
+        specifier: workspace:*
+        version: link:../../packages/plugin-manager
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  plugins/developer-tools: {}
+  plugins/developer-tools:
+    dependencies:
+      '@nodera/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+    devDependencies:
+      '@nodera/plugin-manager':
+        specifier: workspace:*
+        version: link:../../packages/plugin-manager
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
-  plugins/example-plugin: {}
+  plugins/example-plugin:
+    dependencies:
+      '@nodera/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@nodera/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+    devDependencies:
+      '@nodera/plugin-manager':
+        specifier: workspace:*
+        version: link:../../packages/plugin-manager
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(jsdom@26.1.0)(yaml@2.9.1)
 
 packages:
 

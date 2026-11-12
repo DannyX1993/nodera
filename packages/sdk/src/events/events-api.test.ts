@@ -5,8 +5,11 @@ import { createBuilder, type Builder } from "../builder/builder.js";
 import {
   SDK_EVENT_NAMES,
   createBuilderEvents,
+  type PluginActivatedEvent,
+  type PluginDeactivatedEvent,
   type PluginErrorEvent,
   type PluginRegisteredEvent,
+  type PluginUnregisteredEvent,
 } from "./events-api.js";
 
 const REQUEST = "demo.node";
@@ -243,8 +246,14 @@ describe("subscription handles", () => {
 });
 
 describe("SDK events", () => {
-  it("declares the two SDK-owned event names", () => {
-    expect(SDK_EVENT_NAMES).toEqual(["plugin.registered", "plugin.error"]);
+  it("declares the five SDK-owned event names", () => {
+    expect(SDK_EVENT_NAMES).toEqual([
+      "plugin.registered",
+      "plugin.error",
+      "plugin.activated",
+      "plugin.deactivated",
+      "plugin.unregistered",
+    ]);
   });
 
   it("delivers the rich SDK payloads through emitSdk only", () => {
@@ -283,5 +292,115 @@ describe("SDK events", () => {
     ]);
     expect(bus.subscriberCount("plugin.registered")).toBe(0);
     expect(bus.subscriberCount("plugin.error")).toBe(0);
+  });
+});
+
+describe("plugin lifecycle events", () => {
+  it("delivers plugin.activated with the contributions the activation registered", () => {
+    const bus = new EventBus();
+    const events = createBuilderEvents(bus);
+    const activated: PluginActivatedEvent[] = [];
+
+    events.on("plugin.activated", (payload) => {
+      activated.push(payload);
+    });
+
+    events.emitSdk("plugin.activated", {
+      pluginId: "acme.nodes",
+      contributionIds: ["demo.node", "acme.edge"],
+    });
+
+    expect(activated).toEqual([
+      { pluginId: "acme.nodes", contributionIds: ["demo.node", "acme.edge"] },
+    ]);
+    // The SDK-owned names stay on the private bus, never on the editor bus.
+    expect(bus.subscriberCount("plugin.activated")).toBe(0);
+  });
+
+  it("delivers plugin.deactivated and plugin.unregistered with the plugin id only", () => {
+    const bus = new EventBus();
+    const events = createBuilderEvents(bus);
+    const deactivated: PluginDeactivatedEvent[] = [];
+    const unregistered: PluginUnregisteredEvent[] = [];
+
+    events.on("plugin.deactivated", (payload) => {
+      deactivated.push(payload);
+    });
+    events.on("plugin.unregistered", (payload) => {
+      unregistered.push(payload);
+    });
+
+    events.emitSdk("plugin.deactivated", { pluginId: "acme.nodes" });
+    events.emitSdk("plugin.unregistered", { pluginId: "acme.nodes" });
+
+    expect(deactivated).toEqual([{ pluginId: "acme.nodes" }]);
+    expect(unregistered).toEqual([{ pluginId: "acme.nodes" }]);
+    expect(bus.subscriberCount("plugin.deactivated")).toBe(0);
+    expect(bus.subscriberCount("plugin.unregistered")).toBe(0);
+  });
+
+  it("delivers the lifecycle events through the builder subscription surface", () => {
+    const builder = create();
+    const seen: string[] = [];
+
+    builder.events.on("plugin.activated", (payload) => {
+      seen.push(`activated:${payload.pluginId}`);
+    });
+    builder.events.on("plugin.deactivated", (payload) => {
+      seen.push(`deactivated:${payload.pluginId}`);
+    });
+    builder.events.on("plugin.unregistered", (payload) => {
+      seen.push(`unregistered:${payload.pluginId}`);
+    });
+
+    builder.events.emitSdk("plugin.activated", { pluginId: "acme.nodes", contributionIds: [] });
+    builder.events.emitSdk("plugin.deactivated", { pluginId: "acme.nodes" });
+    builder.events.emitSdk("plugin.unregistered", { pluginId: "acme.nodes" });
+
+    expect(seen).toEqual([
+      "activated:acme.nodes",
+      "deactivated:acme.nodes",
+      "unregistered:acme.nodes",
+    ]);
+  });
+
+  it("ignores a payload that does not belong to the name it was emitted under", () => {
+    const bus = new EventBus();
+    const events = createBuilderEvents(bus);
+    const activated: PluginActivatedEvent[] = [];
+    const registered: PluginRegisteredEvent[] = [];
+    const deactivated: PluginDeactivatedEvent[] = [];
+
+    events.on("plugin.activated", (payload) => {
+      activated.push(payload);
+    });
+    events.on("plugin.registered", (payload) => {
+      registered.push(payload);
+    });
+    events.on("plugin.deactivated", (payload) => {
+      deactivated.push(payload);
+    });
+
+    // An activation without the contributions it registered.
+    events.emitSdk("plugin.activated", { pluginId: "acme.nodes" } as never);
+    // A registration payload under an activation name, and the reverse.
+    events.emitSdk("plugin.activated", {
+      pluginId: "acme.nodes",
+      version: "1.0.0",
+      contributionIds: [],
+    } as never);
+    events.emitSdk("plugin.registered", {
+      pluginId: "acme.nodes",
+      contributionIds: [],
+    } as never);
+    // A payload carrying contribution ids where the name declares none.
+    events.emitSdk("plugin.deactivated", {
+      pluginId: "acme.nodes",
+      contributionIds: [],
+    } as never);
+
+    expect(activated).toEqual([]);
+    expect(registered).toEqual([]);
+    expect(deactivated).toEqual([]);
   });
 });
