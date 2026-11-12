@@ -124,6 +124,14 @@ export function HistoryPanel(props: HistoryPanelProps): ReactNode {
   return (
     <div
       data-nodera-history-panel=""
+      /*
+       * Undo/redo availability changes without a focus change (S8 "ARIA"): the
+       * region announces them, so a keyboard user learns that a step became
+       * undoable or redoable instead of discovering it by trying. `atomic`
+       * reads the updated labels and the new cursor as one statement.
+       */
+      aria-live="polite"
+      aria-atomic="true"
       {...(props.className === undefined ? {} : { className: props.className })}
       style={PANEL_STYLE}
     >

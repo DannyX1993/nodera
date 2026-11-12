@@ -2,8 +2,14 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { DialogDefinition } from "@nodera/ui-core";
+import {
+  DEFAULT_SHORTCUTS,
+  UiStateStore,
+  type DialogDefinition,
+  type ShortcutMap,
+} from "@nodera/ui-core";
 
+import { NoderaUiProvider } from "../../providers/ui-provider.js";
 import { Dialog, DIALOG_BASE_CLASS, dialogSizeClass } from "./dialog.js";
 
 afterEach(cleanup);
@@ -229,6 +235,45 @@ describe("Dialog dismissal", () => {
     );
 
     fireEvent.click(document.querySelector("[data-nodera-dialog-backdrop]") as HTMLElement);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("Dialog shortcuts", () => {
+  /** A provider subtree that binds `close-overlay` to the host's own key. */
+  function renderWithCloseKey(shortcuts: ShortcutMap, onClose: () => void): ReturnType<typeof render> {
+    return render(
+      <NoderaUiProvider
+        store={new UiStateStore({ themeId: "nodera.light", layoutId: "nodera.editor" })}
+        shortcuts={shortcuts}
+      >
+        <Dialog definition={CREATE_NODE} open onClose={onClose}>
+          <button type="button">First</button>
+        </Dialog>
+      </NoderaUiProvider>,
+    );
+  }
+
+  const REMAPPED: ShortcutMap = {
+    ...DEFAULT_SHORTCUTS,
+    "close-overlay": { key: "q", label: "Close" },
+  };
+
+  it("closes on the configured close-overlay key", () => {
+    const onClose = vi.fn();
+    renderWithCloseKey(REMAPPED, onClose);
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "First" }), { key: "q" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops closing on Escape once the host remaps close-overlay", () => {
+    const onClose = vi.fn();
+    renderWithCloseKey(REMAPPED, onClose);
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "First" }), { key: "Escape" });
 
     expect(onClose).not.toHaveBeenCalled();
   });

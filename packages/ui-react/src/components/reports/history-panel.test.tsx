@@ -102,6 +102,19 @@ describe("HistoryPanel", () => {
     expect(currentEntry(container)).toBe("2");
   });
 
+  it("announces undo/redo availability changes politely", () => {
+    const { container } = renderWithUi(<HistoryPanel />, { editor: editorWithNodes(1) });
+
+    fireEvent.click(action(container, "undo"));
+
+    // The history region is a live region, so a keyboard user learns that undo
+    // and redo availability changed without having to look for it.
+    const panel = required(container, "[data-nodera-history-panel]");
+    expect(panel.getAttribute("aria-live")).toBe("polite");
+    expect(panel.getAttribute("aria-atomic")).toBe("true");
+    expect(action(container, "redo").disabled).toBe(false);
+  });
+
   it("bounds the walk at maxEntries steps", () => {
     const editor = editorWithNodes(3);
     const { container } = renderWithUi(<HistoryPanel maxEntries={1} />, { editor });

@@ -22,9 +22,11 @@ import { createNodeId } from "@nodera/contracts";
 import type { ViewportConfiguration } from "@nodera/sdk";
 import {
   CREATE_NODE_DIALOG,
+  DEFAULT_SHORTCUTS,
   DialogRegistry,
   NODERA_CREATE_NODE_DIALOG_ID,
   UiStateStore,
+  type ShortcutMap,
 } from "@nodera/ui-core";
 import { NoderaUiProvider } from "@nodera/ui-react";
 
@@ -2676,5 +2678,67 @@ describe("GraphCanvas camera framing", () => {
     });
 
     expect(container.querySelector("[data-testid='rf__node-n1']")).not.toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Configurable shortcuts (S8 "Atajos configurables")                  */
+/* ------------------------------------------------------------------ */
+
+describe("GraphCanvas configurable shortcuts", () => {
+  /** Host map that rebinds deletion to a key the canvas never bound before. */
+  const Q_DELETES: ShortcutMap = {
+    ...DEFAULT_SHORTCUTS,
+    "delete-selection": { key: "q", label: "Delete selected" },
+  };
+
+  function renderWithShortcuts(engine: EditorEngine, shortcuts: ShortcutMap) {
+    return render(
+      <NoderaUiProvider
+        store={new UiStateStore({ themeId: "nodera.light", layoutId: "nodera.editor" })}
+        shortcuts={shortcuts}
+      >
+        <ReactFlowProvider>
+          <GraphCanvas editor={engine} />
+        </ReactFlowProvider>
+      </NoderaUiProvider>,
+    );
+  }
+
+  function twoNodesEngine(): EditorEngine {
+    const engine = makeEngine();
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n1", position: { x: 0, y: 0 } });
+    addNode(engine, { definitionId: "test.app-node", nodeId: "n2", position: { x: 50, y: 0 } });
+    selectNode(engine, { nodeId: "n1" });
+    return engine;
+  }
+
+  it("deletes the selection with the configured delete-selection key", async () => {
+    const engine = twoNodesEngine();
+
+    const { container } = renderWithShortcuts(engine, Q_DELETES);
+    fireEvent.keyDown(container, { key: "q", code: "KeyQ" });
+
+    await waitFor(() => {
+      expect(engine.graph.nodeCount).toBe(1);
+      expect(engine.graph.getNode(createNodeId("n1"))).toBeUndefined();
+    });
+    cleanup();
+  });
+
+  it("stops deleting on Delete once the host remaps delete-selection", async () => {
+    const engine = twoNodesEngine();
+
+    const { container } = renderWithShortcuts(engine, Q_DELETES);
+    await act(async () => {
+      fireEvent.keyDown(container, { key: "Delete", code: "Delete" });
+      // React Flow deletes through an async `onBeforeDelete`; give that path the
+      // same chance it gets in the test above before asserting nothing happened.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(engine.graph.nodeCount).toBe(2);
+    expect(engine.graph.getNode(createNodeId("n1"))).toBeDefined();
+    cleanup();
   });
 });

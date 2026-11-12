@@ -11,8 +11,10 @@ import type { EditorEngine } from "@nodera/application";
 import { LayoutRegistry } from "@nodera/layout-engine";
 import { ThemeRegistry, type ThemeDefinition } from "@nodera/theme-engine";
 import {
+  DEFAULT_SHORTCUTS,
   UiStateStore,
   type PanelRegistry,
+  type ShortcutMap,
   type ToolRegistry,
   type UiState,
 } from "@nodera/ui-core";
@@ -55,6 +57,15 @@ export interface NoderaUiProviderProps {
    * registries ({@link createDefaultComponentRenderers}).
    */
   readonly renderers?: ComponentRenderers;
+  /**
+   * Keyboard shortcuts the surfaces bind (S8 "Atajos configurables").
+   *
+   * Defaults to {@link DEFAULT_SHORTCUTS}, the keys the framework shipped with.
+   * A host rebinds an action for its application (its own delete key, its own
+   * close key) without forking a component; the map is data, never a callback,
+   * so it can be persisted and translated by the host.
+   */
+  readonly shortcuts?: ShortcutMap;
   readonly children: ReactNode;
 }
 
@@ -63,6 +74,8 @@ export interface NoderaUiContextValue extends NoderaUiRegistries {
   readonly store: UiStateStore;
   /** Live editor the host supplied, if any. */
   readonly editor: EditorEngine | undefined;
+  /** Shortcuts every surface of this provider binds. */
+  readonly shortcuts: ShortcutMap;
 }
 
 const NoderaUiContext = createContext<NoderaUiContextValue | undefined>(undefined);
@@ -95,10 +108,29 @@ export function NoderaUiProvider(props: NoderaUiProviderProps): ReactNode {
   const renderers = props.renderers ?? defaults.renderers;
   const store = props.store;
   const editor = props.editor;
+  const shortcuts = props.shortcuts ?? DEFAULT_SHORTCUTS;
 
   const value = useMemo<NoderaUiContextValue>(
-    () => ({ store, editor, themeRegistry, layoutRegistry, panelRegistry, toolRegistry, renderers }),
-    [store, editor, themeRegistry, layoutRegistry, panelRegistry, toolRegistry, renderers],
+    () => ({
+      store,
+      editor,
+      shortcuts,
+      themeRegistry,
+      layoutRegistry,
+      panelRegistry,
+      toolRegistry,
+      renderers,
+    }),
+    [
+      store,
+      editor,
+      shortcuts,
+      themeRegistry,
+      layoutRegistry,
+      panelRegistry,
+      toolRegistry,
+      renderers,
+    ],
   );
 
   return (
@@ -197,4 +229,17 @@ export function useLayoutRegistry(): LayoutRegistry {
 /** Replaceable component renderers of the nearest provider. */
 export function useComponentRenderers(): ComponentRenderers {
   return useNoderaUi().renderers;
+}
+
+/**
+ * Keyboard shortcuts the surfaces of the nearest provider bind.
+ *
+ * Unlike the hooks above it falls back to {@link DEFAULT_SHORTCUTS} instead of
+ * throwing outside a provider: the defaults are exactly the keys the surfaces
+ * hard-coded before this contract existed, so a canvas or a dialog composed
+ * without a provider keeps deleting on `Delete` and closing on `Escape`
+ * instead of failing to render.
+ */
+export function useShortcuts(): ShortcutMap {
+  return useContext(NoderaUiContext)?.shortcuts ?? DEFAULT_SHORTCUTS;
 }

@@ -37,6 +37,7 @@ const PROVIDERS_AND_HOOKS = [
   "NoderaUiProvider",
   "ThemeProvider",
   "useNoderaUi",
+  "useShortcuts",
   "useEditorEngine",
   "useUiState",
   "useTheme",

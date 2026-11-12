@@ -52,7 +52,7 @@ import type {
   PortsPolicy,
 } from "@nodera/ui-core";
 import { NODERA_CREATE_NODE_DIALOG_ID } from "@nodera/ui-core";
-import { useEdgeInsertActions, useNoderaUi } from "@nodera/ui-react";
+import { useEdgeInsertActions, useNoderaUi, useShortcuts } from "@nodera/ui-react";
 import { NoderaWaypointEditingProvider, NoderaPortAxisProvider } from "./editor-context.js";
 import {
   moveNode,
@@ -1704,6 +1704,13 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
   onLinkValidate: externalOnLinkValidate,
   onDropNodeDefinition: externalOnDropNodeDefinition,
 }) => {
+  // The host's deletion key comes from the shortcut contract (S8 "Atajos
+  // configurables"); React Flow takes the key itself, so the canvas passes the
+  // configured one instead of a literal list of its own.
+  const deleteKey = useShortcuts()["delete-selection"].key;
+  const deleteKeyCode: string | string[] =
+    typeof deleteKey === "string" ? deleteKey : [...deleteKey];
+
   // Derive RF nodes/edges/selection from engine via event-driven hook.
   const { nodes, edges, refresh } = useEditorGraph(editor);
 
@@ -2136,7 +2143,7 @@ export const GraphCanvas: FC<GraphCanvasProps> = ({
           onInit={handleInit}
           nodeTypes={nodeTypes as unknown as NodeTypes}
           edgeTypes={edgeTypes}
-          deleteKeyCode={["Delete", "Backspace"]}
+          deleteKeyCode={deleteKeyCode}
           // Deletion keeps the canvas' hands off the edges that hang on the
           // removed nodes: their fate is the use case's decision, not React
           // Flow's. Under "detach" `removeNode` takes them with the node in one

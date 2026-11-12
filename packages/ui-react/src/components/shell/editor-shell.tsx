@@ -129,6 +129,23 @@ function sideStyle(size: number, edge: "left" | "right"): CSSProperties {
   };
 }
 
+/**
+ * Focus ring of every interactive control inside the shell (S8).
+ *
+ * The framework ships no stylesheet — a host owns its global CSS — so the ring
+ * is one additive rule scoped to the shell, injected by the component that owns
+ * the editor surface. It is token-driven with a literal fallback (AGENTS.md
+ * §15): a themed host picks the accent, an unthemed graph still paints a
+ * visible ring. `:focus-visible` keeps the ring off mouse clicks, so nothing
+ * changes for pointer users.
+ */
+const FOCUS_VISIBLE_STYLE = `
+[data-nodera-shell] :focus-visible {
+  outline: 2px solid var(--ndr-colors-accent, #2563eb);
+  outline-offset: 2px;
+}
+`;
+
 /** A region is rendered when a layout is not applied yet, or when it places a visible panel there. */
 function regionIsPlaced(layout: LayoutState | undefined, region: DockRegion): boolean {
   if (layout === undefined) {
@@ -216,6 +233,7 @@ export function EditorShell(props: EditorShellProps): ReactNode {
       {...(props.className === undefined ? {} : { className: props.className })}
       style={SHELL_STYLE}
     >
+      <style data-nodera-focus-visible="">{FOCUS_VISIBLE_STYLE}</style>
       {visible.header ? (
         <div data-nodera-region="header" style={barStyle(sizes.header, "bottom")}>
           {slots.header}

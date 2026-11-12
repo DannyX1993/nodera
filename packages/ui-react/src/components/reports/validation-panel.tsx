@@ -178,6 +178,15 @@ export function ValidationPanel(props: ValidationPanelProps): ReactNode {
   return (
     <div
       data-nodera-validation-panel=""
+      /*
+       * The report is announced, not only painted (S8 "ARIA"): validating is an
+       * action whose result a keyboard or screen-reader user must learn about
+       * without hunting for the panel. `polite` keeps the announcement behind
+       * the action that caused it, and `atomic` reads counts plus issues as one
+       * statement instead of a stream of fragments.
+       */
+      aria-live="polite"
+      aria-atomic="true"
       {...(props.className === undefined ? {} : { className: props.className })}
       style={PANEL_STYLE}
     >
