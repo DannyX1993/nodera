@@ -69,6 +69,29 @@ generic-graph-builder/
 
 No es obligatorio publicar cada directorio como paquete npm independiente. La estructura física puede agrupar módulos internos, mientras que la API pública mantiene límites claros.
 
+> **Estado actual del árbol.** La lista anterior es la estructura propuesta y
+> coincide con el repositorio salvo en estos puntos, que conviene no confundir
+> con código funcional:
+>
+> - `apps/playground`, `apps/documentation` y `apps/dev-tools` son
+>   placeholders: solo contienen un `package.json` privado con nombre y
+>   descripción, sin `src`, sin scripts y sin nada ejecutable.
+> - `examples/workflow-builder`, `examples/data-pipeline-builder` y
+>   `examples/agent-builder` son directorios **vacíos**.
+> - `packages/core`, `packages/testing`, `packages/adapter-storage-local` y
+>   `packages/adapter-storage-http` son stubs `private` sin código fuente, sin
+>   build y sin tests (ver `docs/KNOWN-ISSUES.md`, KI-7).
+> - `tooling/` todavía no existe, aunque `pnpm-workspace.yaml` lo contempla.
+>
+> Lo ejecutable hoy son `examples/phase1-demo` … `examples/phase7-demo`,
+> `examples/layout-switch-demo` y los cinco plugins de `plugins/*`.
+>
+> La Fase 8 añade tres piezas que no figuraban en la estructura original:
+> `eslint.config.mjs` en la raíz (lint real: `pnpm lint`), `.github/workflows/ci.yml`
+> (typecheck, build, test, lint y `check:architecture` en push y PR) y
+> `.changeset/` (configuración de `@changesets/cli` más los scripts
+> `version`/`release`).
+
 ## 7.1. Dependencias
 
 Las dependencias deben seguir esta dirección:

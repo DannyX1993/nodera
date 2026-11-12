@@ -138,3 +138,33 @@ Permite incorporar funcionalidades externas:
 - Nuevos validadores.
 - Nuevos importadores y exportadores.
 
+## Estado de implementación (Fases 5-8)
+
+El diagrama anterior es conceptual y sigue vigente: las fases añaden piezas
+concretas dentro de esos bloques, no bloques nuevos ni flechas nuevas. El
+detalle por fase está en `docs/ROADMAP.md` y `docs/PROJECT-STRUCTURE.md` §7.2-7.5.
+
+- **Fase 5 — UI Composition** (Presentation): `@nodera/ui-core` (contratos de
+  paneles, tools, atajos, i18n y estado de UI, sin React), `@nodera/ui-react`
+  (componentes y providers), `@nodera/theme-engine` (design tokens y su
+  proyección a variables CSS) y `@nodera/layout-engine` (layouts del shell,
+  geometría y preferencias). Ninguno es dominio.
+- **Fase 6 — SDK** (Ports / API pública): `@nodera/sdk` es la superficie de
+  composición framework-agnóstica (builder, APIs de documento, grafo, tema,
+  layout, plugin y eventos) y declara el puerto `BuilderAdapter`.
+  `@nodera/react-flow` es el adaptador de canvas —el único paquete que importa
+  `@xyflow/react`— y aloja también el binding del SDK. `@nodera/graph-layout`
+  aporta la colocación de nodos como estrategia propia: geometría pura, sin
+  React ni motor, consumida desde el SDK. Los **waypoints** de un edge son datos
+  del documento (`@nodera/document`, `Edge.waypoints`), se editan con
+  `updateEdgeWaypoints` en `@nodera/application` y la presentación solo los
+  dibuja: no son estado del canvas.
+- **Fase 7 — Plugin Ecosystem** (Extension): `@nodera/plugin-api` publica los
+  contratos puros (manifest, contribuciones, ciclo de vida, diagnósticos) y
+  `@nodera/plugin-manager` la infraestructura del host (descubrimiento,
+  resolución de dependencias, conflictos y lifecycle) sobre el SDK. Un plugin se
+  escribe solo contra la superficie pública.
+- **Fase 8 — Production Readiness** (alcance de la rama actual): endurecimiento
+  y distribución, no rediseño — pipeline de build/publicación por paquete,
+  `SDK_VERSION`, accesibilidad, i18n, performance, ESLint + tests, documentación
+  y CI/changesets. La dirección de dependencias del diagrama no cambia.
